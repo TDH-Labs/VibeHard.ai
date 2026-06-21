@@ -819,6 +819,21 @@ notifications) — **NOT the reviewers and NOT their pay.** Both are separate:
   Stripe / a contractor platform (Deel, etc.). At scale the expert network pays its
   own reviewers (you pay the network). GitHub gives the *record* of what was
   reviewed, never the *payment*.
+- **Compensation options (pick by *who* the reviewers are + *whether you need
+  automation*; MVP needs NONE of these — pay 1–3 reviewers directly + a year-end
+  1099):**
+  - **Gusto** — US-focused payroll/contractor app, auto-files 1099s, **no
+    integration**. Simplest for a few US reviewers; doubles as company payroll if
+    you hire. (Its *Embedded* API is for building payroll into a product, not
+    per-task payouts.)
+  - **Stripe Connect** — API-first; **programmatic** per-task payouts + 1099 filing
+    (closed review-PR → auto payout). For automation at scale.
+  - **Deel** — **international** reviewers; payments + EOR + auto 1099/compliance.
+  - **Upwork BYO Payroll** — bring-your-own talent, managed EOR + classification;
+    but Enterprise/custom-priced, marketplace-first.
+  - **Classification ≠ payments:** 1099 is fine for *occasional, per-task*
+    reviewers; a *regular/near-exclusive* reviewer raises contractor-vs-employee —
+    where Deel/Upwork EOR add value over Gusto/Stripe Connect. A scale-only concern.
 
 ### What the GitHub API/webhooks do for the "on-demand request"
 - **Create the request:** Drydock programmatically opens an Issue/PR (finding +
