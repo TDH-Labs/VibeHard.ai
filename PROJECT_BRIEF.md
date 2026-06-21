@@ -403,3 +403,49 @@ scales to the task: full PRD / architecture / verification for real or complex
 apps; **skip the ceremony for trivial ones** — the system decides the level from
 the request. Forcing a PRD on "build a to-do app" recreates the friction we
 criticize; a senior engineer doesn't write a PRD for a 10-line server.
+
+## 17. Candidate gates backlog (classified — add at the right time, not on impulse)
+Proposed gates beyond the shipped four (sast / secrets / rls / verify). Captured so
+they aren't lost — but **these are breadth, not the current leverage.** Per §15 the
+near-term order is: validate live generation → translation → **dep-vuln gate** →
+auto-fix. Everything below comes *after* that. All of these obey §16 **adaptive
+rigor** — run at higher rigor for real/maintained apps, skipped for throwaways.
+
+**Near-term security gate (NOT backlog — already in §15 NEXT):**
+- **dep-vuln** — `npm audit` / `trivy` in a pinned container → `Finding[]`. Real
+  security hole (supply chain). Same pattern as sast/secrets. Do this one soon.
+
+**Tier 1 — Maintainability (deterministic; ONE lint gate, not six).** Low-stakes
+(maintainability, not security/correctness) but real for the "maintained over weeks
+/ agency hands off to client" segment. Get them all from a single `gate/lint.ts`
+running ESLint (JS/TS) + Ruff (Python) with a config — do **not** build separate
+gates:
+- file size / function length (`max-lines`, `max-lines-per-function`)
+- cyclomatic complexity (`complexity` / Ruff)
+- naming consistency (lint naming rules)
+- documentation coverage (`jsdoc` / `pydocstyle`)
+- "no-comment" / comment anti-patterns (opinionated; lowest value)
+Track: §15 "widen the chain," one gate, later.
+
+**Tier 2 — Observability (deterministic-ish but PRESCRIPTIVE; post-hosting).** Only
+meaningful once we define a logging/observability contract and have hosting +
+prod-feedback to consume it. Premature before then:
+- structured-log gate (`app.jsonl` exists + schema-valid)
+- request / correlation IDs present in log lines
+- error boundaries / graceful error handling (partial exception — reliability-tier,
+  framework-specific)
+Track: part of the **prod-feedback / hosting** phase (§15 LATER).
+
+**Tier 3 — Architecture review (NON-deterministic / skill; advisory; later).** A
+senior-skill LLM agent assesses structural health (god files, separation of
+concerns, redundant abstractions). **Designed correctly:** it does **NOT block**
+(architecture quality is judgment, not a verifiable pass/fail — never put an LLM in
+the enforcement path, §11) and it **writes a note to `build-status.md`** for the
+next iteration (advisory, feeds-forward — same pattern as prod-feedback packets).
+**Elevation:** a *high-stakes* structural concern it flags is a natural trigger for
+**human escalation** (route to a real senior engineer — §16 moat), not just a note.
+So it's both an advisory gate and a feeder for the escalation layer.
+Track: later; advisory-only; ties into the human-escalation moat.
+
+**Skip (per §15):** refactor phase, methodology-select, buy-vs-build — power
+features, not MVP.
