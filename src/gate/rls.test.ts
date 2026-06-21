@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parseRls } from "./rls.ts";
+import { join } from "node:path";
+import { parseRls, readMigrations } from "./rls.ts";
 import { verdictOf } from "../types.ts";
 
 const VULN = `
@@ -56,6 +57,19 @@ describe("parseRls (pure)", () => {
 
   test("no migrations → no findings", () => {
     expect(parseRls([])).toEqual([]);
+  });
+});
+
+describe("readMigrations (I/O)", () => {
+  test("a project with no supabase/migrations dir yields [] (no DB → nothing to check)", async () => {
+    // import.meta.dir has no supabase/migrations — must not throw.
+    expect(await readMigrations(join(import.meta.dir, "no-such-project"))).toEqual([]);
+  });
+
+  test("reads the remediated fixture's migrations", async () => {
+    const sources = await readMigrations(join(import.meta.dir, "..", "..", "fixtures", "remediated"));
+    expect(sources.length).toBeGreaterThan(0);
+    expect(parseRls(sources)).toEqual([]); // remediated → clean
   });
 });
 

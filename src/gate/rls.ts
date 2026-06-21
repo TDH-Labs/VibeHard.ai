@@ -7,6 +7,7 @@
  * Pure (no container, no network): the parser is a function over SQL text and is
  * fully unit-tested; the only I/O is reading the migration files off disk.
  */
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import type { Finding, GateVerdict } from "../types.ts";
@@ -83,6 +84,10 @@ export function parseRls(sources: SqlSource[]): Finding[] {
 /** Read `<projectPath>/supabase/migrations/*.sql` into typed sources. The only I/O. */
 export async function readMigrations(projectPath: string): Promise<SqlSource[]> {
   const dir = join(projectPath, "supabase", "migrations");
+  // No migrations dir → no Supabase tables to expose → nothing for this gate to
+  // check (e.g. a generated app with no database). Glob.scan throws on a missing
+  // cwd, so guard explicitly rather than letting it crash the gate.
+  if (!existsSync(dir)) return [];
   const glob = new Glob("*.sql");
   const sources: SqlSource[] = [];
   for await (const rel of glob.scan({ cwd: dir })) {
