@@ -36,17 +36,25 @@ export async function runGate(projectPath: string, gates: Gate[] = GATES): Promi
 }
 
 /**
- * The deploy gate (the ratchet). Runs the chain and writes the sentinel ONLY if
- * every gate passes; on any block it removes a stale sentinel so a prior pass can
- * never authorize a now-failing build. Nothing deploys without this sentinel.
+ * The ratchet, in one place: write the sentinel iff `passed`, else remove a stale
+ * one so a prior pass can never authorize a now-failing build. Shared by the
+ * deploy gate and the escalation resume path so there is exactly one sentinel writer.
+ */
+export async function stampSentinel(projectPath: string, passed: boolean): Promise<string | null> {
+  const sentinel = join(projectPath, SENTINEL_REL);
+  if (passed) {
+    await Bun.write(sentinel, `${new Date().toISOString()}\n`);
+    return sentinel;
+  }
+  await rm(sentinel, { force: true });
+  return null;
+}
+
+/**
+ * The deploy gate. Runs the chain and stamps the sentinel ONLY if every gate
+ * passes. Nothing deploys without this sentinel.
  */
 export async function deployGate(projectPath: string, gates: Gate[] = GATES): Promise<DeployResult> {
   const result = await runGate(projectPath, gates);
-  const sentinel = join(projectPath, SENTINEL_REL);
-  if (result.passed) {
-    await Bun.write(sentinel, `${new Date().toISOString()}\n`);
-    return { ...result, sentinel };
-  }
-  await rm(sentinel, { force: true });
-  return { ...result, sentinel: null };
+  return { ...result, sentinel: await stampSentinel(projectPath, result.passed) };
 }

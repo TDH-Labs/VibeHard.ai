@@ -4,6 +4,7 @@
  * chain on a project directory (PROJECT_BRIEF.md §8, §12).
  */
 import { deployGate, runGate } from "./gate/index.ts";
+import { buildEscalationPacket } from "./escalation/index.ts";
 
 export const VERSION = "0.0.0";
 
@@ -37,12 +38,38 @@ export async function main(argv: string[]): Promise<number> {
     return result.passed ? 0 : 1;
   }
 
+  if (cmd === "escalate") {
+    if (!arg) {
+      console.error("usage: drydock escalate <dir>");
+      return 2;
+    }
+    const result = await runGate(arg);
+    if (result.passed) {
+      console.log("✅ no blocking findings — nothing to escalate");
+      return 0;
+    }
+    const packet = await buildEscalationPacket(result.verdicts, arg);
+    console.log(`\n📦 escalation packet — ${packet.blocking} slice(s), routes: ${packet.specialties.join(", ")}`);
+    for (const item of packet.items) {
+      console.log(`\n── [${item.specialty}] ${item.finding.tool}:${item.finding.ruleId} ──`);
+      console.log(`   ${item.finding.message}`);
+      if (item.slice) {
+        console.log(`   ${item.slice.file}:${item.slice.startLine}-${item.slice.endLine}`);
+        for (const line of item.slice.code.split("\n")) console.log(`   │ ${line}`);
+      } else {
+        console.log(`   (no slice — ${item.finding.file})`);
+      }
+    }
+    return 1;
+  }
+
   console.log(
     [
       "drydock — safe vibe coding.",
       "",
-      "  drydock gate <dir>     run the security gate chain (report only)",
-      "  drydock deploy <dir>   run the chain + write the deploy sentinel iff all pass",
+      "  drydock gate <dir>       run the security gate chain (report only)",
+      "  drydock deploy <dir>     run the chain + write the deploy sentinel iff all pass",
+      "  drydock escalate <dir>   localize blocking findings into a routed review packet",
       "",
       "Gates: verify · sast · secrets · rls (PROJECT_BRIEF.md §8, §12).",
     ].join("\n"),
