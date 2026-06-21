@@ -220,6 +220,20 @@ deterministic code and shrinks skills to *interpretation, generation, and
 knowledge*. The LLM works **inside** a step; the **sequence and gating between
 steps is TypeScript that cannot be talked past.**
 
+**Binding invariant — gates fail CLOSED.** A gate that *could not run* must never
+report PASS. "The scanner didn't run" must be distinguishable from "scanned,
+clean" — otherwise a setup failure silently turns enforcement into a no-op that
+reports green (the **false-PASS class**). Concretely: a scanner that errors,
+produces no valid output, or can't find its inputs returns a **CRITICAL
+`scan-failed` finding (which blocks)** — never an empty (passing) result. This
+class has bitten **three times**: the Pi `pipefail`/glob bug (no source detected →
+nothing ran → "green"), Drydock's relative-Docker-path bug (empty named volume →
+scanned nothing → PASS), and the `sast`/`secrets` fail-open caught + fixed
+2026-06-21 (`JSON.parse(out) … catch {}` → 0 findings → PASS on scanner error).
+**Treat any "0 findings" path as suspect until you've proven the check actually
+executed.** Separate the *pure interpretation* (`interpretSemgrep`/`interpretGitleaks`)
+from the I/O so the fail-closed logic is unit-tested without a container.
+
 ## 12. M1 spec (corrected from an external "harbor-core" spec review, 2026-06-20)
 An external spec was reviewed; adopt its bones, with these **binding corrections**:
 - **Name stays Drydock** (not "Harbor"/`harbor-core` — collides with the existing
@@ -497,11 +511,16 @@ Track: later; advisory-only; ties into the human-escalation moat.
   and routes the rest to a human.* It **"helps toward" compliance; it NEVER
   certifies.** Must not become a "HIPAA / SOC 2 compliant" claim.
 
-**NEEDS DEFINITION (not in Pi source — operator to clarify):**
-- **link auto-detection** — ⚠️ *not* found in the Pi skills; meaning unconfirmed.
-  Candidate readings: (a) broken/dead hyperlink + dead-route/dead-import detection in
-  generated output, or (b) detecting external integrations the app links to and
-  flagging missing keys/config (overlaps buy-vs-build). Classify + tier once defined.
+**Stack/lint auto-detection — a PRIMITIVE, not a gate (resolved).** Earlier listed
+as "link auto-detection" (a typo for *lint*). It's the detection that identifies a
+project's language so the right linter / test runner / README check runs. **NOT a
+separate gate** — fold it into the lint gate + verify. ⚠️ The *lesson* is what
+matters: Pi's bash used `ls *.py *.js 2>/dev/null | grep -q .` under `set -o
+pipefail`, which failed whenever *any* glob didn't match → "no source found" → NO
+lint/tests/README gate ran, yet it looked green (a **false-PASS**). Fixed in Pi
+with native glob expansion (`has_glob()`). For Drydock (TS, not bash) that specific
+bug is moot, but the principle is the **§11 fail-closed invariant**: detection that
+can't identify the stack must fail closed, not silently skip.
 
 **Priority reminder (unchanged):** all of the above are *captured backlog*, not
 *next*. Nothing is "skip for MVP" any longer, but the leverage is still

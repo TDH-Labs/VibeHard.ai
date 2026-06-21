@@ -59,13 +59,48 @@ export async function runSast(
     "--config", "/rules/sqli.yaml", "--config", "p/default",
     "--exclude", "node_modules", "/src",
   ]);
-  let json: unknown = {};
+  const findings = interpretSemgrep(
+    proc.stdout?.toString() ?? "",
+    proc.exitCode ?? -1,
+    proc.stderr?.toString() ?? "",
+    absPath,
+  );
+  return verdictOf("sast", findings, ranAt);
+}
+
+/**
+ * Pure: a semgrep run's raw output → Finding[], failing CLOSED. A run that did
+ * not produce valid semgrep JSON (a `results` array) did not actually scan — so
+ * we return a CRITICAL `scan-failed` finding (which blocks), never a silent
+ * pass. "Scanner didn't run" must never look like "scanned, clean" — the
+ * false-PASS class (PROJECT_BRIEF §11 fail-closed invariant).
+ */
+export function interpretSemgrep(
+  stdout: string,
+  exitCode: number,
+  stderr: string,
+  target: string,
+): Finding[] {
+  let json: unknown;
   try {
-    json = JSON.parse(proc.stdout?.toString() ?? "{}");
+    json = JSON.parse(stdout);
   } catch {
-    /* no/invalid JSON → no findings; integration test guards the happy path */
+    json = null;
   }
-  return verdictOf("sast", parseSemgrep(json), ranAt);
+  const ran =
+    json !== null && typeof json === "object" && Array.isArray((json as { results?: unknown }).results);
+  if (!ran) {
+    return [
+      {
+        tool: "semgrep",
+        ruleId: "scan-failed",
+        severity: "critical",
+        file: target,
+        message: `SAST scan did not run (exit ${exitCode}) — failing closed. ${stderr.trim().slice(0, 200)}`.trim(),
+      },
+    ];
+  }
+  return parseSemgrep(json);
 }
 
 export const sastGate = { name: "sast", run: (p: string) => runSast(p) };

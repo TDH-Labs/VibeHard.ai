@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseGitleaks } from "./secrets.ts";
+import { interpretGitleaks, parseGitleaks } from "./secrets.ts";
 import { verdictOf } from "../types.ts";
 
 describe("parseGitleaks (pure)", () => {
@@ -30,5 +30,26 @@ describe("secrets are always blocking", () => {
   test("any leaked secret forces a block", () => {
     const findings = parseGitleaks([{ RuleID: "stripe-access-token", File: "p", StartLine: 1 }]);
     expect(verdictOf("secrets", findings, "2026-06-20T00:00:00.000Z").status).toBe("block");
+  });
+});
+
+describe("interpretGitleaks — fail CLOSED on a scan that didn't run", () => {
+  test("exit 0 clean (empty or [] output) → no findings", () => {
+    expect(interpretGitleaks("[]", 0, "", "/proj")).toEqual([]);
+    expect(interpretGitleaks("", 0, "", "/proj")).toEqual([]);
+  });
+
+  test("exit 1 with leaks → findings", () => {
+    const out = JSON.stringify([{ RuleID: "stripe", File: "p", StartLine: 1 }]);
+    expect(interpretGitleaks(out, 1, "", "/proj")).toHaveLength(1);
+  });
+
+  test("exit >1 (scanner error) → CRITICAL scan-failed, which blocks", () => {
+    const f = interpretGitleaks("", 2, "boom", "/proj");
+    expect(f[0]).toMatchObject({ tool: "gitleaks", ruleId: "scan-failed", severity: "critical" });
+  });
+
+  test("non-array output → scan-failed", () => {
+    expect(interpretGitleaks("{}", 0, "", "/proj")[0]?.ruleId).toBe("scan-failed");
   });
 });

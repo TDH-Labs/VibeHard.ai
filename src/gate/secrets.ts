@@ -39,13 +39,56 @@ export async function runSecrets(
     GITLEAKS_IMAGE, "detect", "--source=/src", "--no-git",
     "--report-format", "json", "--report-path", "/dev/stdout",
   ]);
-  let json: unknown = [];
-  try {
-    json = JSON.parse(proc.stdout?.toString() || "[]");
-  } catch {
-    /* no/invalid JSON → no findings; integration test guards the happy path */
+  const findings = interpretGitleaks(
+    proc.stdout?.toString() ?? "",
+    proc.exitCode ?? -1,
+    proc.stderr?.toString() ?? "",
+    absPath,
+  );
+  return verdictOf("secrets", findings, ranAt);
+}
+
+/**
+ * Pure: a gitleaks run's output → Finding[], failing CLOSED. gitleaks exits
+ * 0 = clean, 1 = leaks found, >1 = error. An error (or non-array output) means
+ * the scan did not run — return a CRITICAL `scan-failed` finding (which blocks),
+ * never a silent pass. (PROJECT_BRIEF §11 fail-closed invariant.)
+ */
+export function interpretGitleaks(
+  stdout: string,
+  exitCode: number,
+  stderr: string,
+  target: string,
+): Finding[] {
+  if (exitCode > 1) {
+    return [
+      {
+        tool: "gitleaks",
+        ruleId: "scan-failed",
+        severity: "critical",
+        file: target,
+        message: `Secret scan did not run (exit ${exitCode}) — failing closed. ${stderr.trim().slice(0, 200)}`.trim(),
+      },
+    ];
   }
-  return verdictOf("secrets", parseGitleaks(json), ranAt);
+  let json: unknown;
+  try {
+    json = JSON.parse(stdout || "[]");
+  } catch {
+    json = null;
+  }
+  if (!Array.isArray(json)) {
+    return [
+      {
+        tool: "gitleaks",
+        ruleId: "scan-failed",
+        severity: "critical",
+        file: target,
+        message: `Secret scan produced no valid report (exit ${exitCode}) — failing closed.`,
+      },
+    ];
+  }
+  return parseGitleaks(json);
 }
 
 export const secretsGate = { name: "secrets", run: (p: string) => runSecrets(p) };

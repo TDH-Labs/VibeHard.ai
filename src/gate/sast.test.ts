@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mapSeverity, parseSemgrep } from "./sast.ts";
+import { interpretSemgrep, mapSeverity, parseSemgrep } from "./sast.ts";
 import { verdictOf } from "../types.ts";
 
 describe("mapSeverity", () => {
@@ -58,5 +58,29 @@ describe("verdictOf (deterministic disposition)", () => {
     const low = parseSemgrep({ results: [{ check_id: "b", path: "p", start: { line: 1 }, extra: { severity: "INFO" } }] });
     expect(verdictOf("sast", low, ts).status).toBe("pass");
     expect(verdictOf("sast", low, ts).blocking).toBe(0);
+  });
+});
+
+describe("interpretSemgrep — fail CLOSED on a scan that didn't run", () => {
+  test("valid semgrep JSON → parsed findings", () => {
+    const out = JSON.stringify({
+      results: [{ check_id: "a", path: "p", start: { line: 1 }, extra: { severity: "ERROR" } }],
+      errors: [],
+    });
+    const f = interpretSemgrep(out, 0, "", "/proj");
+    expect(f).toHaveLength(1);
+    expect(f[0]?.severity).toBe("high");
+  });
+
+  test("clean scan (empty results) → no findings (a true pass)", () => {
+    expect(interpretSemgrep(JSON.stringify({ results: [], errors: [] }), 0, "", "/proj")).toEqual([]);
+  });
+
+  test("scanner failed (no/invalid/empty-object JSON) → CRITICAL scan-failed, which blocks", () => {
+    for (const bad of ["", "not json", "{}", JSON.stringify({ nope: 1 })]) {
+      const f = interpretSemgrep(bad, 2, "boom", "/proj");
+      expect(f).toHaveLength(1);
+      expect(f[0]).toMatchObject({ tool: "semgrep", ruleId: "scan-failed", severity: "critical" });
+    }
   });
 });
