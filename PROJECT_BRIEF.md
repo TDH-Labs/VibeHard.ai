@@ -336,3 +336,70 @@ deploy all on our side, engine-agnostic above the seam. **Do NOT vendor/fork
 bolt.diy yet** — reading it was the right amount. Next task = reconcile
 `src/engine/bolt/normalizer.ts` against `message-parser.ts`, fix gaps 1 & 2, keep
 tests green; then the bolt adapter is genuinely audit-ready.
+
+## 15. Roadmap (status + sequence)
+Honest status. M1–M4 are committed; everything after is planned. The front door,
+generation engine, and gates are grafted/built; the **moat** work (human
+escalation + segment) comes later and is deliberately the hard part.
+
+- **M1 — Gate chain ✓** (committed). sast / secrets / rls / verify + deploy sentinel.
+- **M2 — Engine seam + bolt adapter ✓** (`45e8467`). `BoltDriver` seam, normalizer, gated deploy.
+- **M3 — Escalation hand-off ✓.** Gate-flag → review packet → route → resume (the *mechanism*; the human marketplace is later — §16).
+- **M4 — Live BoltDriver ✓** (`356e226`). Vercel `ai` SDK + derived bolt prompt; generation is live behind the seam.
+- **NOW — Validate live generation** (chosen next). Wire a provider you have (opencode-go via `@ai-sdk/openai-compatible`, model `deepseek-v4-pro`), run a real generation, and treat the output as a findings list: clean protocol? Supabase/RLS code? gates pass first-try? does `verify` handle SPA vs node entry? Fix what real output reveals **before** building more.
+- **NEXT (near-term, cheap, high-leverage):**
+  - **Translation** — `Finding` → plain English. Curated `ruleId → explanation` dictionary (a content asset we own) + LLM fallback. Turns the gates into a *product* for non-technical users. **Highest near-term value.**
+  - **Dependency-vuln gate** — `npm audit` / `trivy` in a pinned container (same pattern as sast/secrets). Closes a real security hole.
+  - **Auto-fix loop** — LLM proposes a fix → re-gate disposes; bounded retries → escalate. Makes "blocked" *helpful*.
+- **THEN — Adaptive intake → PRD → architecture front-half.** The "scoped + architected" complement to the gates' "secure + verified" (the gap Base44 leaves — §16). Output = a schema-validated spec/PRD (durable, ours) that feeds the engine. **Must be adaptive** (full rigor for real/complex apps; skip the ceremony for trivial ones — the system decides from the request). A *softer, copyable* edge — reinforcing, not the core moat.
+- **THEN — Front door + hosting.** The non-technical browser UX (fork bolt.diy's UI consuming our `EngineEvent` stream, or our own thin React app), and **server-side execution** to run generated apps + the gates in the deploy path (replaces WebContainers; dodges its license).
+- **LATER — The moat: escalation-as-product + segment go-to-market.** Build the on-demand-engineer marketplace (ops, not just code — vetting / scheduling / liability) and sell into the chosen segment (§16). **This is the defensible part; the gates are table-stakes.**
+- **LATER — Prod-feedback** (post-deploy anomaly loop — needs hosting first) and **SaaS** (accounts, billing, multi-tenancy).
+- **Skip for MVP:** refactor phase, methodology-select, buy-vs-build (power features, not MVP).
+
+## 16. Product & positioning (strategic direction — firmed up 2026-06-21)
+Current direction; some of it settled only in conversation, so revisit deliberately
+— **except the compliance rule, which is binding.**
+
+**Target segment — NOT "everyone."** We do not win the broad "AI app builder for
+all" market (Base44 → acquired by Wix; Lovable $6.6B own it — head-on, we lose).
+We target the slice where our difference is a *need, not friction*: **non-technical
+people / businesses that handle sensitive data, where a leak = liability, and who
+can't self-audit.** For them the gates are *the reason to choose us*; for a hobbyist
+they're overhead. Beachhead candidates: accountants / bookkeeping, legal, real
+estate, agencies building for clients — and the operator's own industries (a
+dogfood + credibility advantage). **NOT hard-regulated / HIPAA as the *first*
+beachhead** — the platform compliance lift is too heavy too early (see below).
+
+**The moat (honest).** The gates are **table-stakes / credibility, NOT the moat** —
+a gate list is copyable (a Wix-backed Base44 could add it). The defensible moat is
+(1) the **human-escalation network** (an ops/marketplace, hard to copy) and (2) the
+**segment positioning** (incumbents are structurally disincentivized to add
+deploy-*blocking* gates — friction fights their speed metric; we own "we block,
+they warn"). Build the human layer; don't mistake the gates for the product.
+
+**Compliance scope — BINDING RULE, do not violate.** Drydock is a **security layer,
+NOT a compliance certification.** We do **not** have SOC 2 or HIPAA "built in," and
+a scanner *cannot* certify compliance — those are organizational / legal /
+infrastructural regimes (policies, audits, BAAs, compliant hosting, breach
+procedures). The `rls` gate is *one technical control*, not compliance. **Never
+claim "HIPAA / SOC 2 compliant."** A future "compliance-aware" gate may *check the
+technical controls a framework requires, flag gaps, and route the rest to a human*
+— that **"helps you toward," never "makes you compliant."** Overclaiming compliance
+is the one mistake a trust brand can't survive — and it's the exact overclaim we
+position *against*.
+
+**Differentiation vs Base44 / Lovable / Bolt.** They optimize *speed*: "fast prompt
+→ app," with at most lightweight planning — **no real PRD, no architecture phase,
+no enforced gates** — and a documented breach record (Lovable CVE-2025-48757;
+Base44's own auth-bypass exposure). Our front-door + generation is **deliberately
+grafted** (commodity — don't try to out-build them there). Our story:
+**"scoped, architected, secure, verified" + a human safety net** vs their "fast,
+runs, maybe wrong + maybe leaks." Differentiation stack = gates (table-stakes) +
+PRD/architecture (softer, reinforcing) + human escalation (moat) + segment.
+
+**Adaptive rigor** (applies to gates AND the PRD/architecture front-half). Rigor
+scales to the task: full PRD / architecture / verification for real or complex
+apps; **skip the ceremony for trivial ones** — the system decides the level from
+the request. Forcing a PRD on "build a to-do app" recreates the friction we
+criticize; a senior engineer doesn't write a PRD for a 10-line server.
