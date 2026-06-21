@@ -6,6 +6,7 @@
 import { join, resolve } from "node:path";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
+import { DERIVED_DIRS, hasAuthoredSource } from "./scan-scope.ts";
 
 const SEMGREP_IMAGE = "semgrep/semgrep:1.96.0";
 
@@ -51,13 +52,25 @@ export async function runSast(
   // Docker bind mounts require an absolute source — a relative path is silently
   // treated as a named (empty) volume, which would scan nothing and FALSE-PASS.
   const absPath = resolve(projectPath);
+  // §11 fail-closed: if there's no authored source (only derived/build output, or
+  // empty), excluding the derived set leaves semgrep nothing to scan → false PASS.
+  if (!hasAuthoredSource(absPath)) {
+    return verdictOf(
+      "sast",
+      [{ tool: "semgrep", ruleId: "scan-failed", severity: "critical", file: absPath, message: "SAST saw no authored source to scan (only derived/build output) — failing closed (§11)." }],
+      ranAt,
+    );
+  }
+  // Gates scan AUTHORED SOURCE, never derived output (else minified framework code
+  // in .next/dist/… floods us with false positives).
+  const excludes = DERIVED_DIRS.flatMap((d) => ["--exclude", d]);
   const proc = Bun.spawnSync([
     "docker", "run", "--rm",
     "-v", `${absPath}:/src:ro`,
     "-v", `${rulesDir}:/rules:ro`,
     SEMGREP_IMAGE, "semgrep", "scan", "--quiet", "--json",
     "--config", "/rules/sqli.yaml", "--config", "p/default",
-    "--exclude", "node_modules", "/src",
+    ...excludes, "/src",
   ]);
   const findings = interpretSemgrep(
     proc.stdout?.toString() ?? "",

@@ -3,9 +3,10 @@
  * same shape as the SAST gate. Ported from ~/dev/gate-proof/gates/secrets.sh.
  * Any leaked secret is blocking regardless of severity (see types.isBlocking).
  */
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
+import { hasAuthoredSource } from "./scan-scope.ts";
 
 const GITLEAKS_IMAGE = "zricethezav/gitleaks:v8.18.4";
 
@@ -33,10 +34,22 @@ export async function runSecrets(
   // Absolute source required — a relative bind mount becomes an empty named
   // volume (scans nothing → false PASS). Resolve before handing it to Docker.
   const absPath = resolve(projectPath);
+  // §11 fail-closed: no authored source (only derived/build output, or empty) →
+  // with the path allowlist active, gitleaks would scan nothing → false PASS.
+  if (!hasAuthoredSource(absPath)) {
+    return verdictOf(
+      "secrets",
+      [{ tool: "gitleaks", ruleId: "scan-failed", severity: "critical", file: absPath, message: "Secret scan saw no authored source to scan (only derived/build output) — failing closed (§11)." }],
+      ranAt,
+    );
+  }
+  const rulesDir = join(import.meta.dir, "rules");
   const proc = Bun.spawnSync([
     "docker", "run", "--rm",
     "-v", `${absPath}:/src:ro`,
+    "-v", `${rulesDir}:/rules:ro`,
     GITLEAKS_IMAGE, "detect", "--source=/src", "--no-git",
+    "--config=/rules/gitleaks.toml", // keep default rules; allowlist derived dirs (§11)
     "--report-format", "json", "--report-path", "/dev/stdout",
   ]);
   const findings = interpretGitleaks(

@@ -1,0 +1,13 @@
+# Drydock secrets-gate config. Keep gitleaks' full default ruleset, but never
+# treat derived/build output as authored source (gates scan source, not artifacts
+# — PROJECT_BRIEF.md §11). The path allowlist drops findings under build dirs;
+# the runSecrets `hasAuthoredSource` guard is what fails closed if the allowlist
+# (or an all-derived project) would otherwise leave nothing real to scan.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore derived/build directories (not authored source)"
+paths = [
+  '''(^|/)(node_modules|\.next|dist|build|out|coverage|\.turbo|\.git)/''',
+]

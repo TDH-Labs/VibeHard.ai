@@ -14,9 +14,10 @@ import { depvulnGate } from "./depvuln.ts";
 import { rlsGate } from "./rls.ts";
 import { verifyGate } from "./verify.ts";
 
-/** The default security gate chain. verify first, then the security cluster
- *  (sast/secrets/depvuln), then rls. */
-export const GATES: Gate[] = [verifyGate, sastGate, secretsGate, depvulnGate, rlsGate];
+/** The default gate chain. Source scanners (sast/secrets/depvuln/rls) run FIRST,
+ *  on authored source; verify runs LAST because it builds the app (creating
+ *  .next/dist/…) — keeping derived output out of the source scans (§11, §19). */
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, verifyGate];
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";
