@@ -18,5 +18,9 @@
   "devDependencies": {
     "@types/bun": "^1.1.14",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.85",
+    "ai": "^6.0.208"
   }
 }
