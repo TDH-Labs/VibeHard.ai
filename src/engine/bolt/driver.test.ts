@@ -92,6 +92,28 @@ describe("defaultModelFactory", () => {
       if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
     }
   });
+
+  test("routes the opencode provider when OPENCODE_API_KEY is set (no network)", () => {
+    const saved = process.env.OPENCODE_API_KEY;
+    process.env.OPENCODE_API_KEY = "test-key";
+    try {
+      // createOpenAICompatible builds the model lazily — construction makes no request.
+      expect(defaultModelFactory({ provider: "opencode", model: "deepseek-v4-pro" })).toBeTruthy();
+    } finally {
+      if (saved === undefined) delete process.env.OPENCODE_API_KEY;
+      else process.env.OPENCODE_API_KEY = saved;
+    }
+  });
+
+  test("requires OPENCODE_API_KEY for the opencode provider", () => {
+    const saved = process.env.OPENCODE_API_KEY;
+    delete process.env.OPENCODE_API_KEY;
+    try {
+      expect(() => defaultModelFactory({ provider: "opencode", model: "deepseek-v4-pro" })).toThrow(/OPENCODE_API_KEY is not set/);
+    } finally {
+      if (saved !== undefined) process.env.OPENCODE_API_KEY = saved;
+    }
+  });
 });
 
 describe("BoltEngine + liveBoltDriver (mocked LLM)", () => {

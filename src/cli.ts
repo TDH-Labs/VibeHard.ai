@@ -49,8 +49,13 @@ export async function main(argv: string[]): Promise<number> {
     }
     // Generate live, then auto-gate the freshly generated code (PROJECT_BRIEF.md §8 "Option A").
     const target = resolve(dir);
+    // Provider/model selection: explicit override wins; else opencode when its key is
+    // present, otherwise anthropic. Logged so the choice is never silent.
+    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    console.log(`generating with ${provider}/${model} → ${target}`);
     const engine = new BoltEngine(liveBoltDriver());
-    const session = await engine.startSession(target, { provider: "anthropic", model: "claude-opus-4-8" });
+    const session = await engine.startSession(target, { provider, model });
     let failed = false;
     try {
       for await (const ev of session.prompt(promptText)) {

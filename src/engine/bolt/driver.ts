@@ -11,6 +11,7 @@
  */
 import { streamText, type LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { EngineConfig } from "../../types.ts";
 import type { BoltDriver } from "./engine.ts";
 import { DRYDOCK_SYSTEM_PROMPT } from "./prompt.ts";
@@ -30,6 +31,19 @@ export const defaultModelFactory: ModelFactory = (config) => {
         throw new Error("ANTHROPIC_API_KEY is not set — required for live generation");
       }
       return createAnthropic({ apiKey })(config.model);
+    }
+    case "opencode": {
+      // opencode-go: an OpenAI-compatible gateway. Provider routing + base URL stay
+      // OURS (config/env); secret from env, never carried in EngineConfig (§13).
+      const apiKey = process.env.OPENCODE_API_KEY;
+      if (!apiKey) {
+        throw new Error("OPENCODE_API_KEY is not set — required for live generation via opencode");
+      }
+      return createOpenAICompatible({
+        name: "opencode",
+        baseURL: process.env.OPENCODE_BASE_URL ?? "https://opencode.ai/zen/go/v1",
+        apiKey,
+      })(config.model);
     }
     default:
       // Adding a provider is a one-case change here — the seam above never moves (§13).
