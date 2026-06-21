@@ -3,6 +3,7 @@
  * same shape as the SAST gate. Ported from ~/dev/gate-proof/gates/secrets.sh.
  * Any leaked secret is blocking regardless of severity (see types.isBlocking).
  */
+import { resolve } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
 
@@ -29,9 +30,12 @@ export async function runSecrets(
   projectPath: string,
   ranAt: string = new Date().toISOString(),
 ): Promise<GateVerdict> {
+  // Absolute source required — a relative bind mount becomes an empty named
+  // volume (scans nothing → false PASS). Resolve before handing it to Docker.
+  const absPath = resolve(projectPath);
   const proc = Bun.spawnSync([
     "docker", "run", "--rm",
-    "-v", `${projectPath}:/src:ro`,
+    "-v", `${absPath}:/src:ro`,
     GITLEAKS_IMAGE, "detect", "--source=/src", "--no-git",
     "--report-format", "json", "--report-path", "/dev/stdout",
   ]);

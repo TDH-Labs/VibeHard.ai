@@ -3,7 +3,7 @@
  * The parse step is a pure function (unit-tested); the container run is the
  * only I/O (integration-tested). Ported from ~/dev/gate-proof/gates/sast.sh.
  */
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
 
@@ -48,9 +48,12 @@ export async function runSast(
   ranAt: string = new Date().toISOString(),
 ): Promise<GateVerdict> {
   const rulesDir = join(import.meta.dir, "rules");
+  // Docker bind mounts require an absolute source — a relative path is silently
+  // treated as a named (empty) volume, which would scan nothing and FALSE-PASS.
+  const absPath = resolve(projectPath);
   const proc = Bun.spawnSync([
     "docker", "run", "--rm",
-    "-v", `${projectPath}:/src:ro`,
+    "-v", `${absPath}:/src:ro`,
     "-v", `${rulesDir}:/rules:ro`,
     SEMGREP_IMAGE, "semgrep", "scan", "--quiet", "--json",
     "--config", "/rules/sqli.yaml", "--config", "p/default",
