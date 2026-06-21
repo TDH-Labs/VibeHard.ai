@@ -367,7 +367,8 @@ escalation + segment) comes later and is deliberately the hard part.
   - **Auto-fix loop** — LLM proposes a fix → re-gate disposes; bounded retries → escalate. Makes "blocked" *helpful*.
 - **THEN — Adaptive intake → PRD → architecture front-half.** The "scoped + architected" complement to the gates' "secure + verified" (the gap Base44 leaves — §16). Output = a schema-validated spec/PRD (durable, ours) that feeds the engine. **Must be adaptive** (full rigor for real/complex apps; skip the ceremony for trivial ones — the system decides from the request). A *softer, copyable* edge — reinforcing, not the core moat.
 - **THEN — Front door + hosting.** The non-technical browser UX (fork bolt.diy's UI consuming our `EngineEvent` stream, or our own thin React app), and **server-side execution** to run generated apps + the gates in the deploy path (replaces WebContainers; dodges its license).
-- **LATER — The moat: escalation-as-product + segment go-to-market.** Build the on-demand-engineer marketplace (ops, not just code — vetting / scheduling / liability) and sell into the chosen segment (§16). **This is the defensible part; the gates are table-stakes.**
+- **THEN — Escalation *workflow* (MVP — the human safety net, as glue not a built app).** **In MVP scope** because the operator is *non-technical and cannot be the reviewer* — so 1–3 vetted SWE reviewers are needed from launch for the product to deliver its "+ human" promise. Build it as **glue** (full design §24): finding + generated code → a private **GitHub** repo (Issue/PR) + a **Slack** alert (**first-come-first-serve** claim); reviewer fixes via **PR**; the gate **re-runs as CI** on the PR (re-gate); verdict = approve / false-positive label; **human proposes, gate disposes**; audit = the PR history. Builds **zero** reviewer UI. Validates without hosting (re-gate-passes = "would deploy"); the literal deploy waits on hosting. Dependency: this is a *people* task too (recruit + NDA 1–3 reviewers — §16 profile, vet on real findings).
+- **LATER — Escalation *at scale* + segment go-to-market (the moat).** The marketplace ops the glue defers: recruiting/vetting a real reviewer pool, **specialty routing** (Harbor "rooms"), a built reviewer console, **scoped-slice access** (reviewer sees only the flagged slice, not the whole customer codebase), billing / SLA, liability. **This is the defensible part; the gates are table-stakes.**
 - **LATER — Prod-feedback** (post-deploy anomaly loop — needs hosting first) and **SaaS** (accounts, billing, multi-tenancy).
 - **Captured & specced, sequenced later (NOT skipped):** the front-half skills
   (buy-vs-build, refactor-phase, rigor/parallelism-select), the production-readiness
@@ -736,3 +737,61 @@ Output is a schema-validated spec/PRD (durable, ours); adaptive rigor (§16).
   false-PASS — detection that can't identify the stack must **fail closed**, not
   silently skip. TS-native makes the specific bash bug moot, but the invariant
   governs the stack-detection primitive behind §19's lint gate.
+
+## 24. Escalation workflow — MVP design (glue, not a built platform)
+**Why this is MVP, not later:** the operator is **non-technical and cannot review
+code**, so the "+ human safety net" in §1 requires **real SWE reviewers from
+launch**. The *marketplace ops at scale* stays post-MVP (§15 LATER); the **review
+workflow** is MVP because without it the differentiating promise isn't delivered.
+Build **zero** reviewer UI — glue tools engineers already use.
+
+### The flow
+```
+gate blocks (or auto-fix exhausts / hits a judgment call)
+  → finding + the generated code land in a private GitHub repo (Issue + branch/PR)
+  → Slack alert to the reviewer channel — FIRST-COME-FIRST-SERVE claim (react / button)
+  → reviewer (in GitHub, where code review lives):
+       confirms or marks false-positive, and if confirmed submits the fix AS A PR
+  → our gate RE-RUNS as CI (GitHub Action) on that PR  ← re-gate
+  → passes → deploy proceeds  (deploy itself needs hosting — §15)
+```
+
+### Why GitHub + Slack (and not a built console)
+- **GitHub already *is* the reviewer platform:** Issue = the ticket, self-assign =
+  the claim, the repo = full code context, **PR/diff = the structured fix**,
+  approve/label = the verdict, **Actions = our gate as CI = the re-gate**. We build
+  none of it.
+- **Slack** = the fast alert + the **first-come-first-serve** claim (engineers won't
+  watch GitHub in real time).
+- **Pattern preserved:** the human **proposes** (the PR); the deterministic gate
+  **disposes** (re-gate). The human's fix is *never* trusted directly — it flows
+  back through the gate, exactly like auto-fix. The `false_positive` verdict is a
+  **waiver** and MUST be auditable (logged) — the PR history is that audit.
+
+### First-come-first-serve — fine for MVP, with the known caveat
+FCFS (Slack react / GitHub self-assign) optimizes for *speed*, not *fit*. For a
+small **vetted pool (1–3 people)** that's correct and simple. **Specialty routing**
+(security → AppSec; RLS → Supabase; architecture → senior full-stack — the Harbor
+"rooms" idea) and quality controls are **§15 LATER (at scale)**, not now.
+
+### The reviewer profile + vetting (the *people* half — §16)
+1–3 reviewers, **NDA'd + identity-verified** (they see customer code). Profile:
+security-literate (not a generalist), deep in the generated stack
+(TS/React/Next/Supabase/Postgres), judgment over speed-coding, accurate
+*block-or-clear* discipline, clear written rationale, reliable/available.
+**Vet by testing on REAL findings** (hand them the dogfood outputs — the `.next/`
+false positives, a real RLS gap, the `next` CVE — and see if they distinguish
+true/false positives and propose the right minimal fix). Résumés tell you nothing;
+a 15-minute practical audit tells you everything.
+
+### MVP boundary (build now vs defer)
+- **Build (MVP glue):** GitHub repo/Issue/PR convention, gate-as-GitHub-Action
+  (re-gate on PR), Slack alert + FCFS claim, the verdict→waiver audit, packet =
+  the `Finding` we already produce.
+- **Defer (§15 LATER, the moat/ops):** a built reviewer console, specialty routing,
+  scoped-slice access (reviewer sees only the flagged slice, not the whole codebase
+  — the gate already localizes it), billing/SLA, recruiting a large pool, liability
+  structure.
+- **Dependencies:** validate the core loop first (the n=3 diversity runs); the
+  literal deploy step needs hosting (§15); and recruiting the 1–3 reviewers is a
+  people task, parallel to the wiring.
