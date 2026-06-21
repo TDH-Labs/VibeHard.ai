@@ -360,23 +360,49 @@ escalation + segment) comes later and is deliberately the hard part.
 - **M2 — Engine seam + bolt adapter ✓** (`45e8467`). `BoltDriver` seam, normalizer, gated deploy.
 - **M3 — Escalation hand-off ✓.** Gate-flag → review packet → route → resume (the *mechanism*; the human marketplace is later — §16).
 - **M4 — Live BoltDriver ✓** (`356e226`). Vercel `ai` SDK + derived bolt prompt; generation is live behind the seam.
-- **NOW — Validate live generation** (chosen next). Wire a provider you have (opencode-go via `@ai-sdk/openai-compatible`, model `deepseek-v4-pro`), run a real generation, and treat the output as a findings list: clean protocol? Supabase/RLS code? gates pass first-try? does `verify` handle SPA vs node entry? Fix what real output reveals **before** building more.
-- **NEXT (near-term, cheap, high-leverage):**
-  - **Translation** — `Finding` → plain English. Curated `ruleId → explanation` dictionary (a content asset we own) + LLM fallback. Turns the gates into a *product* for non-technical users. **Highest near-term value.**
-  - **Dependency-vuln gate** — `npm audit` / `trivy` in a pinned container (same pattern as sast/secrets). Closes a real security hole.
-  - **Auto-fix loop** — LLM proposes a fix → re-gate disposes; bounded retries → escalate. Makes "blocked" *helpful*.
-- **THEN — Adaptive intake → PRD → architecture front-half.** The "scoped + architected" complement to the gates' "secure + verified" (the gap Base44 leaves — §16). Output = a schema-validated spec/PRD (durable, ours) that feeds the engine. **Must be adaptive** (full rigor for real/complex apps; skip the ceremony for trivial ones — the system decides from the request). A *softer, copyable* edge — reinforcing, not the core moat.
-- **THEN — Front door + hosting.** The non-technical browser UX (fork bolt.diy's UI consuming our `EngineEvent` stream, or our own thin React app), and **server-side execution** to run generated apps + the gates in the deploy path (replaces WebContainers; dodges its license).
-- **LATER — The moat: escalation-as-product + segment go-to-market.** Build the on-demand-engineer marketplace (ops, not just code — vetting / scheduling / liability) and sell into the chosen segment (§16). **This is the defensible part; the gates are table-stakes.**
-- **LATER — Prod-feedback** (post-deploy anomaly loop — needs hosting first) and **SaaS** (accounts, billing, multi-tenancy).
-- **Captured & specced, sequenced later (NOT skipped):** the front-half skills
-  (buy-vs-build, refactor-phase, rigor/parallelism-select), the production-readiness
-  gates, the prod-feedback loop, and compliance-beyond-RLS now have production specs
-  in **§18–§23** (grounded in the bash+skills prototype). They are built at the
-  rigor the task calls for (§16), after the NEXT tier — captured ≠ now.
-- **Out of scope (decided):** opencode-swarm's 18-agent config and Harbor's
-  progressive-disclosure chain — see §23 (the transferable ideas are kept; the
-  machinery is not).
+- **Validated live generation ✓** (opencode-go / `deepseek-v4-pro`): clean → PASS, vulnerable → BLOCK + localized escalation packet; `verify` handles SPA-build vs node-launch. **Translation ✓** (`1d8b606`). **Dep-vuln gate ✓** (`f5696c6`).
+
+**MVP scope — EXPANDED 2026-06-21 (the full single-app pipeline, not just the
+security gates).** The MVP is the whole promise: *scoped → architected → generated
+→ verified → secure → production-ready → (post-deploy) self-monitoring* — at
+**adaptive rigor** (§16: trivial apps skip the ceremony). Build order (each
+committed + tested before the next); detailed specs are §18–§23:
+
+1. **Auto-fix loop** — LLM proposes a fix → **re-gate disposes** (the gate
+   confirms, never the model); bounded by the §18 retry budget (5) → escalate.
+   *(in flight — last of the original NEXT tier.)*
+2. **Verify gate — full contract (§18 + §19).** The shipped multi-run + SPA-build
+   PLUS the parts that were specced-not-built: the **sentinel + all-N-must-pass +
+   retry-budget** mechanics; **clean-env verify** (install-from-scratch in a temp
+   dir — catches "works on my machine"); **container hygiene** (non-root `USER`,
+   pinned `@sha256`, `.dockerignore`); **graceful shutdown** (`SIGTERM`, no dropped
+   in-flight requests); the **one lint gate** (7 families + the `has_glob`
+   fail-closed lesson, §11); **dependency pinning**; **README**.
+3. **Front-half — intake → PRD → architecture (§22).** Adaptive. Includes
+   **buy-vs-build** (advisory registry + 4-step rubric) and **rigor/parallelism-
+   select** (the Drydock reframe of `methodology-select`: prototype-vs-production
+   rigor + parallel-vs-sequential codegen from the plan's dependency graph).
+   Output = a schema-validated PRD that feeds the engine.
+4. **refactor-phase (§22).** Production rigor, post-verify, bounded 2 passes,
+   behavior-preserving, **revert-on-break**.
+5. **compliance-beyond-RLS (§21).** The 7 controls when the spec flags sensitive
+   data — **§16-bound: helps-toward, never certifies.**
+6. **prod-feedback (§20) — deterministic core in the MVP.** The JSONL schema, the
+   4 anomaly detectors, the error-budget math, and the feedback packet are built +
+   tested against sample logs now; the **live loop activates once hosting exists**
+   (it needs a deployed app emitting logs — the one honest dependency).
+
+**Enabling infra + the moat (after / alongside the MVP pipeline):**
+- **Front door + hosting.** Browser UX (bolt.diy UI over our `EngineEvent` stream)
+  + **server-side execution** to run apps + gates in the deploy path (replaces
+  WebContainers; dodges its license). Hosting is what flips prod-feedback's live
+  loop on.
+- **The moat — escalation-as-product + segment GTM (§16).** The on-demand-engineer
+  marketplace (vetting / scheduling / liability) + segment go-to-market. The
+  defensible part; the gates are table-stakes.
+- **SaaS** — accounts, billing, multi-tenancy.
+- **Out of scope (decided):** opencode-swarm's 18-agent config + Harbor's
+  progressive-disclosure chain — §23 (transferable ideas kept; machinery not).
 
 ## 16. Product & positioning (strategic direction — firmed up 2026-06-21)
 Current direction; some of it settled only in conversation, so revisit deliberately
@@ -529,14 +555,16 @@ with native glob expansion (`has_glob()`). For Drydock (TS, not bash) that speci
 bug is moot, but the principle is the **§11 fail-closed invariant**: detection that
 can't identify the stack must fail closed, not silently skip.
 
-**Priority reminder (unchanged):** all of the above are *captured backlog*, not
-*next*. Nothing is "skip for MVP" any longer, but the leverage is still
-validate-generation → translation → dep-vuln → auto-fix (§15). Captured ≠ now.
-**§18–§23 below are the production specs** for the pieces that were previously
+**Priority reminder (updated 2026-06-21):** the MVP now spans the **full pipeline**
+— see §15's expanded MVP build order (auto-fix → full verify → front-half →
+refactor → compliance → prod-feedback core). What is *genuinely still later* from
+this backlog: Tier-2 observability beyond prod-feedback (needs hosting), Tier-3
+architecture-review (advisory; ties to the moat), and the deeper breadth.
+**§18–§23 are the production specs** for the MVP pieces that were previously
 one-liners — grounded in the bash+skills prototype (`reference/prototype/`,
-`~/dev/gate-proof/`, the operator's rooms). They define the *shape* to build to;
-sequencing is still §15. Where the prototype's v0 code diverged from its own spec,
-**these sections take the intended design, not the v0 shortcut** (noted inline).
+`~/dev/gate-proof/`, the operator's rooms). Where the prototype's v0 code diverged
+from its own spec, **these sections take the intended design, not the v0 shortcut**
+(noted inline).
 
 ## 18. The verify gate — full reliability contract (was just "multi-run")
 Verify is the product's **reliability promise**: "it actually runs, repeatably,
@@ -603,9 +631,11 @@ skips) and **§16 adaptive rigor** (block at production, warn at prototype).
 ## 20. prod-feedback — the production back-edge ("keeps working after deploy")
 The outer loop that closes the lifecycle: the deployed app emits structured logs →
 a scheduled scan detects anomalies → a feedback packet feeds the next iteration.
-**Non-blocking, feeds-forward** (never an LLM in a blocking path — §11). Needs
-hosting (§15 LATER), but the contract is fixed now. Drydock types the packet (like
-`Finding`/`EscalationPacket`); the scan is deterministic.
+**Non-blocking, feeds-forward** (never an LLM in a blocking path — §11). Its
+**deterministic core is MVP** (the schema, the 4 detectors, the budget math, and
+the packet — all testable against sample logs now); the **live loop activates with
+hosting** (§15 — it needs a deployed app emitting logs). Drydock types the packet
+(like `Finding`/`EscalationPacket`); the scan is deterministic.
 
 - **JSONL log schema** (app emits, append-only, one event/line → `logs/<project>/app.jsonl`):
   `{"ts":"…Z","project":"<slug>","event":"request|webhook|error","route":"/x",
@@ -679,7 +709,7 @@ The 7 controls (BLOCK = a verifiable technical control; advisory = recording/jud
   judgment ("does this framework apply / is this gap acceptable") is the skill/human.
 
 ## 22. Front-half build-process skills (intake → PRD → architecture)
-Skills that run **before** codegen — the "scoped + architected" half (§15 THEN).
+Skills that run **before** codegen — the "scoped + architected" half (§15 MVP).
 Output is a schema-validated spec/PRD (durable, ours); adaptive rigor (§16).
 
 - **buy-vs-build** (advisory, at PRD scoping). Check each requirement against a
