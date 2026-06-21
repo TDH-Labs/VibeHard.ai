@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.tgz
+
+# Gate run artifacts (scanner JSON, evidence, sentinels)
+.gate/
+.drydock/
+
+# Logs / scratch
+*.log
+.DS_Store
+
+# Local env / secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Operator-private prototype source + session transcripts carried for local
+# archaeology (see reference/PROVENANCE.md). Contains business/legal skills and
+# machine paths — kept on disk for the local session, never committed. Scrub
+# before publishing any of it.
+reference/

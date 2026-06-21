@@ -1,0 +1,22 @@
+{
+  "name": "drydock",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Safe vibe coding — an enforced gate chain between an AI app generator and deploy.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "bin": {
+    "drydock": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.7.2"
+  }
+}
