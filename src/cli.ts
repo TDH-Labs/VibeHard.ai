@@ -9,6 +9,7 @@ import { buildEscalationPacket } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { translateFinding } from "./translate/index.ts";
+import { autoFix } from "./autofix/index.ts";
 import type { Finding, Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -99,6 +100,23 @@ export async function main(argv: string[]): Promise<number> {
     return result.passed ? 0 : 1;
   }
 
+  if (cmd === "fix") {
+    if (!arg) {
+      console.error("usage: drydock fix <dir>");
+      return 2;
+    }
+    const target = resolve(arg);
+    console.log(`auto-fixing ${target} (gate → fix → re-gate, bounded) …`);
+    const result = await autoFix(target, { onStep: (m) => console.log(`  … ${m}`) });
+    if (result.fixed) {
+      console.log(`\n✅ auto-fix succeeded — gate green after ${result.attempts} attempt(s).`);
+      return 0;
+    }
+    console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s) — escalating residual:`);
+    for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
+    return 1;
+  }
+
   if (cmd === "escalate") {
     if (!arg) {
       console.error("usage: drydock escalate <dir>");
@@ -135,6 +153,7 @@ export async function main(argv: string[]): Promise<number> {
       '  drydock generate "<prompt>" <dir>   generate an app (bolt engine) + auto-gate it',
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
+      "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, escalate",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet",
       "",
       "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",

@@ -86,23 +86,26 @@ export function detectLaunch(projectPath: string): LaunchPlan {
   return null;
 }
 
-/** Outcome of build-verifying a static app — which stage ran and its exit code. */
+/** Outcome of build-verifying a static app — which stage ran, its exit code, and a
+ *  tail of the build output (so the auto-fix loop knows WHAT broke, §18). */
 export interface BuildOutcome {
   stage: "install" | "build";
   exitCode: number;
+  log?: string;
 }
 
 /** Pure: a build outcome → Finding[]. A non-zero install or build blocks the deploy. */
 export function summarizeBuild(outcome: BuildOutcome): Finding[] {
   if (outcome.exitCode === 0) return [];
   const what = outcome.stage === "install" ? "`npm install`" : "`npm run build`";
+  const tail = outcome.log?.trim() ? ` — error: ${outcome.log.trim().slice(-600)}` : "";
   return [
     {
       tool: "verify",
       ruleId: outcome.stage === "install" ? "install-failed" : "build-failed",
       severity: "high",
       file: "package.json",
-      message: `${what} exited ${outcome.exitCode} — the app does not build, so it cannot be deployed`,
+      message: `${what} exited ${outcome.exitCode} — the app does not build, so it cannot be deployed${tail}`,
     },
   ];
 }
@@ -119,13 +122,19 @@ async function runBuild(projectPath: string, script: string): Promise<BuildOutco
   if (pkg && hasDeps(pkg) && !existsSync(join(projectPath, "node_modules"))) {
     const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], {
       cwd: projectPath,
-      stdout: "ignore",
-      stderr: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
-    if ((install.exitCode ?? 1) !== 0) return { stage: "install", exitCode: install.exitCode ?? 1 };
+    if ((install.exitCode ?? 1) !== 0) {
+      return { stage: "install", exitCode: install.exitCode ?? 1, log: `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}` };
+    }
   }
-  const build = Bun.spawnSync(["npm", "run", script], { cwd: projectPath, stdout: "ignore", stderr: "ignore" });
-  return { stage: "build", exitCode: build.exitCode ?? 1 };
+  const build = Bun.spawnSync(["npm", "run", script], { cwd: projectPath, stdout: "pipe", stderr: "pipe" });
+  return {
+    stage: "build",
+    exitCode: build.exitCode ?? 1,
+    log: `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`,
+  };
 }
 
 /** Launch `node <entry>` in `projectPath` on `port`, probe /health once, tear down. */
