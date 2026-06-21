@@ -369,7 +369,14 @@ escalation + segment) comes later and is deliberately the hard part.
 - **THEN — Front door + hosting.** The non-technical browser UX (fork bolt.diy's UI consuming our `EngineEvent` stream, or our own thin React app), and **server-side execution** to run generated apps + the gates in the deploy path (replaces WebContainers; dodges its license).
 - **LATER — The moat: escalation-as-product + segment go-to-market.** Build the on-demand-engineer marketplace (ops, not just code — vetting / scheduling / liability) and sell into the chosen segment (§16). **This is the defensible part; the gates are table-stakes.**
 - **LATER — Prod-feedback** (post-deploy anomaly loop — needs hosting first) and **SaaS** (accounts, billing, multi-tenancy).
-- **Skip for MVP:** refactor phase, methodology-select, buy-vs-build (power features, not MVP).
+- **Captured & specced, sequenced later (NOT skipped):** the front-half skills
+  (buy-vs-build, refactor-phase, rigor/parallelism-select), the production-readiness
+  gates, the prod-feedback loop, and compliance-beyond-RLS now have production specs
+  in **§18–§23** (grounded in the bash+skills prototype). They are built at the
+  rigor the task calls for (§16), after the NEXT tier — captured ≠ now.
+- **Out of scope (decided):** opencode-swarm's 18-agent config and Harbor's
+  progressive-disclosure chain — see §23 (the transferable ideas are kept; the
+  machinery is not).
 
 ## 16. Product & positioning (strategic direction — firmed up 2026-06-21)
 Current direction; some of it settled only in conversation, so revisit deliberately
@@ -525,3 +532,207 @@ can't identify the stack must fail closed, not silently skip.
 **Priority reminder (unchanged):** all of the above are *captured backlog*, not
 *next*. Nothing is "skip for MVP" any longer, but the leverage is still
 validate-generation → translation → dep-vuln → auto-fix (§15). Captured ≠ now.
+**§18–§23 below are the production specs** for the pieces that were previously
+one-liners — grounded in the bash+skills prototype (`reference/prototype/`,
+`~/dev/gate-proof/`, the operator's rooms). They define the *shape* to build to;
+sequencing is still §15. Where the prototype's v0 code diverged from its own spec,
+**these sections take the intended design, not the v0 shortcut** (noted inline).
+
+## 18. The verify gate — full reliability contract (was just "multi-run")
+Verify is the product's **reliability promise**: "it actually runs, repeatably,
+on a clean machine, and shuts down cleanly." The shipped `verify.ts` does the
+node-launch / SPA-build probe; this is the full contract it grows into.
+
+- **Adaptive rigor levels** (§16): `VERIFY_RUNS = 1` prototype · `3` default · `5`
+  production. **"Pass" = ALL N runs green** — not a majority, *all*. One flake fails
+  the whole gate. Default 3.
+- **"One green run proves nothing."** A single green run says nothing about races,
+  leaks, flaky tests, or time-dependent bugs — re-run N times. (Already the
+  `verify.ts` philosophy; this is the binding statement of it.)
+- **Sentinel.** Each run's success marker is `HARD_VERIFY_PASS` (exit 0); the gate
+  passes only when every run emits it. Drydock's deploy ratchet (`.gate/HARD_VERIFY_PASS`)
+  already mirrors this — one sentinel writer, written iff all gates pass.
+- **Retry budget — default 5.** Each FAIL → fix → re-verify cycle decrements it
+  (this is the §15 auto-fix loop's bound). Budget exhausted with verify still
+  failing → **STOP; never claim DONE; route to human escalation** (§3 moat); write
+  `BLOCKED — verify failed after N attempts` to the durable status.
+- **Failure packet (typed, deterministic — §11)** — reuse the `Finding`/packet flow:
+  `{ stage: "build"|"spec"|"test", producingAgent, verifyExitCode, verifyLastLine,
+  failureExcerpt (~500 chars), claimedDoneButWasnt: bool, attempt, budget }`.
+- **Routing by stage (deterministic).** `build` → re-run codegen (auto-fix loop);
+  `spec` → back to the front-half (the PRD/architecture was unbuildable as written);
+  `test` → the verify harness itself is wrong (not the build). The router is code;
+  the fix inside each is the skill.
+- **Clean-env verify (`verify-clean.sh`) — runs ONCE before the multi-run loop.**
+  Catches "works on my machine." Steps: `mktemp -d` → copy source (`rsync -a` with
+  excludes `.venv|node_modules|.git|target|dist|.next|.terraform|__pycache__`, `cpio`
+  fallback) → detect package manager by manifest (python `requirements/pyproject` ·
+  npm `package.json` · go `go.mod` · rust `Cargo.toml`; none → not-applicable) →
+  **install from scratch** (`uv`/`npm ci`/`go mod download`/`cargo fetch`) → **run
+  tests** (`pytest`/`jest`|`vitest`/`go test`/`cargo test`) → all under a portable
+  timeout (default 120s). Sentinel `CLEAN_VERIFY_PASS`. Proves a *fresh* machine can
+  install + run, not just the pre-seeded workspace. (⚠️ the v0 `verify-clean.sh`
+  still has the pipefail/glob idiom in two `elif` branches — production must use the
+  `has_glob` form, §11.)
+- **Graceful shutdown (reliability sub-check).** A served app must handle `SIGTERM`
+  cleanly within N seconds — no `SIGKILL`, no dropped in-flight requests.
+- **Adaptive:** N and the heavy checks (clean-env, container, refactor) scale with
+  rigor; a throwaway prototype runs N=1 and skips them (§16).
+
+## 19. Production-readiness gate specs (lint · container · pinning · README)
+The "more production-ready" deterministic gates (§17 Tier 1). All obey **§11
+fail-closed** (detection that can't identify the stack fails closed, never silently
+skips) and **§16 adaptive rigor** (block at production, warn at prototype).
+
+- **Lint — ONE gate, auto-detected (not six).** Detect the stack by file presence,
+  run the family's fallback chain:
+  - Python (`*.py`): `ruff` → `pylint` → `flake8` → `py_compile` (+ `mypy --strict` advisory)
+  - JS/TS (`*.{js,ts,jsx,tsx}`): `eslint` (if config) + `tsc --noEmit --strict` (hard fail)
+  - Go (`*.go`): `go vet ./...` · Rust (`*.rs`): `cargo clippy -D warnings` → `cargo check`
+  - Shell (`*.sh`): `shellcheck` (advisory) · Docker (`Dockerfile`): `hadolint`
+  - Terraform (`*.tf`): `terraform fmt -check -diff`
+  Lint is the cheapest stage — if it fails, the run never reaches launch/build.
+- **Container hygiene** (if `Dockerfile`): non-root `USER` (block @prod), base image
+  pinned by `@sha256` digest (block @prod), `.dockerignore` present (advisory —
+  secrets leak into build context), `docker build` succeeds (advisory).
+- **Dependency pinning:** exact versions, no `^`/`>=`/`latest`, so a silent bump
+  can't break a shipped app.
+- **README gate:** a plain-language README present + non-trivial (LLM can draft a
+  starter); matters for "agency hands a build to a client."
+
+## 20. prod-feedback — the production back-edge ("keeps working after deploy")
+The outer loop that closes the lifecycle: the deployed app emits structured logs →
+a scheduled scan detects anomalies → a feedback packet feeds the next iteration.
+**Non-blocking, feeds-forward** (never an LLM in a blocking path — §11). Needs
+hosting (§15 LATER), but the contract is fixed now. Drydock types the packet (like
+`Finding`/`EscalationPacket`); the scan is deterministic.
+
+- **JSONL log schema** (app emits, append-only, one event/line → `logs/<project>/app.jsonl`):
+  `{"ts":"…Z","project":"<slug>","event":"request|webhook|error","route":"/x",
+  "source":"stripe","latency_ms":12,"status":200,"error":null}`. PII **sanitized
+  before logging** (ties to §21). ⚠️ Production fix: model webhook health *in-schema*
+  — the v0 keyed off an undocumented `webhook_delivery:"failed"` field, so an app
+  emitting the documented schema never triggered WEBHOOK_DROP.
+- **Anomaly types (4) — use the INTENDED baseline/rate definitions** (the v0 used
+  cruder per-line counts; production restores the design):
+  1. **LATENCY_SPIKE** — route p95 > 2× rolling-24h baseline, or a single request >
+     5× route median → HIGH if p95 > SLO, else MEDIUM.
+  2. **ERROR_CLUSTER** — ≥3 identical errors (same route + error type) in window → MEDIUM.
+  3. **WEBHOOK_DROP** — a source that sent ≥1 event last window sent 0 this window
+     (business hours) → HIGH (silent data loss).
+  4. **ERROR_BUDGET_BURN** — window error rate (5xx/total) > SLO budget → HIGH if
+     >2× budget, else MEDIUM.
+  (+ optional **DEPENDENCY_DEGRADATION** — external-call p95 > 3× baseline → MEDIUM.)
+- **Error-budget math.** SLO availability (default 99.9%) → budget = (1 − SLO) of
+  window events; burn = failures/allowed; tiered (>2× budget → HIGH). (v0:
+  `allowed = round(total×(1−SLO/100))`, floor 1, breach when `failures ≥ allowed` —
+  the count-based fallback.)
+- **Window + cadence.** Scan window 15m; scan cadence every 5m (Harbor cron /
+  launchd in the prototype → a Drydock scheduled job); rolling 24h latency baseline;
+  previous-window comparison for webhooks.
+- **Feedback packet (`PROD_FEEDBACK_PACKET`).** Fields: `anomaly_type, severity,
+  detected_at, window, measured vs baseline vs SLO, route/source, sample_log_lines
+  (3), suggested_fix_focus`. **HIGH → build-status.md** (drives a fix iteration);
+  **MEDIUM → prod-notes.md** (trend, non-blocking). A packet unaddressed **>72h
+  escalates** (higher-severity note + notification → human). `suggested_fix_focus`
+  becomes the next iteration's first focus; it never auto-deploys.
+
+## 21. Compliance framework beyond RLS — BOUNDED BY §16
+RLS is **one of seven** controls a sensitive-data customer needs. The prototype's
+`compliance-posture` gate (triggered when the spec flags `sensitive_data`) checks
+all seven. **Drydock keeps the technical-control checks but obeys the §16 binding
+rule: it checks controls, flags gaps, routes the rest to a human — it "helps
+toward," it NEVER certifies. Never emit "HIPAA/SOC 2 compliant."**
+
+The 7 controls (BLOCK = a verifiable technical control; advisory = recording/judgment):
+1. **Data classification** (advisory/recording) — data types (PII/PHI/financial/
+   creds), jurisdiction (US/EU/HIPAA/GLBA), retention requirement. Drives which
+   other checks apply.
+2. **Retention + deletion** (BLOCK) — a retention policy + a **hard-delete**
+   mechanism (not a soft-delete flag) + verifiable purge + GDPR erasure for EU.
+   Block if sensitive data is stored with no retention + no deletion path.
+3. **Access control** (BLOCK) — role-based, authenticated (no unauth sensitive
+   endpoints), **row-level not just table-level**, audit log of access. Block if
+   readable without auth, or shared-tenant with no row isolation.
+4. **RLS** (BLOCK — *shipped today as the `rls` gate*) — every sensitive table
+   RLS-enabled, app connects as a non-superuser, policies filter by tenant/user from
+   session, cross-tenant test.
+5. **Sanitization** (BLOCK) — no raw PII in logs/errors/stack traces; sanitize
+   before trust-boundary crossings (analytics, vendor APIs). Block if PII is logged
+   in plaintext or errors leak sensitive fields.
+6. **Governance** (advisory — policy the build should *enable*) — data-handling
+   policy, DPA-readiness, breach-notification path, access-review cadence. The build
+   enables them (audit logs, access-review tooling); it doesn't *claim* them.
+7. **SOC 2 / ISO applicability** (advisory/classification) — from the data
+   classification, flag which Trust Services Criteria apply (Security always;
+   Availability if SLA; Confidentiality if sensitive; Processing Integrity if
+   financial; Privacy if PII) and which controls are build-blocking vs org-level.
+   ISO Annex A technical controls only (A.5/A.8/A.9/A.10/A.12).
+
+**Disposition (the §16 reframe of the prototype's blunt "BLOCK DONE"):**
+- **Build-blocking technical controls missing** (no RLS on multi-tenant PII, no
+  retention/deletion, PII in logs, no auth, no encryption at rest/transit) → **BLOCK**,
+  deterministically, exactly like `sast`/`rls`. These are verifiable.
+- **Org-level gaps** (SOC 2 audit, DPA execution, ISO cert, breach runbook) →
+  **SURFACED + routed to a human** (§3), never blocked-as-noncompliance, never
+  claimed as compliant. The deterministic core checks technical controls; the
+  judgment ("does this framework apply / is this gap acceptable") is the skill/human.
+
+## 22. Front-half build-process skills (intake → PRD → architecture)
+Skills that run **before** codegen — the "scoped + architected" half (§15 THEN).
+Output is a schema-validated spec/PRD (durable, ours); adaptive rigor (§16).
+
+- **buy-vs-build** (advisory, at PRD scoping). Check each requirement against a
+  registry of **~10 mature-service categories** — document-processing (Textract/
+  Document AI), auth (Clerk/Auth0), payments (Stripe), notifications (Twilio/
+  SendGrid/Resend), search (Algolia/Meili/Typesense), observability (Sentry/Datadog),
+  jobs/queues (Inngest/Trigger.dev), database (Supabase/Neon/Turso), vector-RAG
+  (Pinecone/pgvector), LLM inference. **4-step rubric:** (1) registry covers it? no →
+  BUILD; (2) cost viable for the unit economics? no → BUILD-with-rationale; (3)
+  compliance/data-residency OK? no → BUILD; (4) integration simpler than building?
+  no → BUILD; else **BUY**. **Advisory** — surfaces the option + rationale in the
+  PRD; the human decides; default BUILD; **never auto-procures**. Pairs with the
+  segment: don't let a non-technical user rebuild Stripe.
+- **rigor & parallelism select** (the Drydock reframe of Pi's `methodology-select` —
+  §17). Two deterministic decisions made from the request/plan, *not* an
+  execution-model fork:
+  - **Adaptive rigor** (§16): prototype (N=1, skip ceremony) vs production (full
+    PRD/architecture, verify N=5, refactor, compliance) — chosen from signals
+    (sensitive data? real users? maintained over time?).
+  - **Parallel vs sequential codegen** *(the operator's question — captured as a
+    design option to revisit when the front-half exists).* The architecture phase
+    produces a **dependency graph of workstreams**; **independent** workstreams may
+    be generated by parallel codegen sub-tasks, **dependent** ones sequentially. The
+    decision (which are independent) is **deterministic from the plan**; the LLM
+    codes inside each sub-task. This is a *single-engine execution strategy*, **not
+    the opencode swarm** (§23) — adaptive (only when the plan has parallelizable
+    parts). Record the rationale for auditability.
+- **refactor-phase** (production rigor only; after verify passes, before DONE).
+  Checkpoint the passing tree first (`git stash` / `.refactor-backup` — "the passing
+  build is sacred"). A reviewer scores **quality, not correctness** (duplication,
+  function length / single-responsibility, coupling to I/O, error paths,
+  testability, missing edge tests) → a `REFACTOR_BRIEF` of concrete targets. The
+  coder makes **behavior-preserving changes only** (no features/API/config). **Re-
+  verify all N runs — any failure → REVERT to the checkpoint, record REJECTED +
+  reason.** The iron rule: *a refactor that breaks verify is reverted, no
+  exceptions.* **Bounded to 2 passes.** Skill (score/refactor) + deterministic
+  (re-verify disposes).
+
+## 23. Explicitly OUT of scope (with the transferable lesson kept)
+- **opencode-swarm (18-agent config).** The operator's prototyping tool —
+  provider-fragile, 18 role→model assignments. **Not the Drydock engine** (§10.3:
+  single bolt.diy/SDK engine; don't mistake the prototype engine for the product
+  engine). The model-assignment evidence is opencode-specific and not carried over.
+  **Transferable idea kept → §22:** parallel-vs-sequential codegen sub-tasks driven
+  by the plan — a single-engine execution strategy, not a multi-provider swarm.
+- **Harbor progressive-disclosure chain** (`agent_map → room → skills_index →
+  SKILL.md`; `harbor sync`/`skill-assign`; `config.toml [skills.rooms.*]`). Harbor's
+  room/skill *discovery* substrate serves a general multi-domain agent environment;
+  **Drydock is single-purpose** (one pipeline: intake → generate → gate → deploy)
+  and needs no room routing or progressive skill discovery. Drydock still uses the
+  Harbor *primitives* it actually needs (audit, session, budget, isolation — §6),
+  just not the discovery routing.
+- **Transferable lesson that DOES carry (already §11):** the `has_glob`/`pipefail`
+  false-PASS — detection that can't identify the stack must **fail closed**, not
+  silently skip. TS-native makes the specific bash bug moot, but the invariant
+  governs the stack-detection primitive behind §19's lint gate.
