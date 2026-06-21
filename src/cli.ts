@@ -8,8 +8,21 @@ import { deployGate, runGate } from "./gate/index.ts";
 import { buildEscalationPacket } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
+import { translateFinding } from "./translate/index.ts";
+import type { Finding, Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
+
+const SEV_DOT: Record<Severity, string> = { critical: "🔴", high: "🔴", medium: "🟠", low: "🟡" };
+
+/** Print a finding the way a non-technical operator reads it: plain-English first
+ *  (the §15 translation), with the technical ruleId kept as a dim sub-line. */
+function explainFinding(f: Finding, indent = "  "): void {
+  const e = translateFinding(f);
+  console.log(`${indent}${SEV_DOT[f.severity]} ${e.title}`);
+  console.log(`${indent}   ${e.detail}`);
+  console.log(`${indent}   ↳ ${f.tool}:${f.ruleId} @ ${f.file}:${f.line ?? "?"}`);
+}
 
 export async function main(argv: string[]): Promise<number> {
   const [cmd, arg] = argv;
@@ -26,10 +39,8 @@ export async function main(argv: string[]): Promise<number> {
     }
     const result = cmd === "deploy" ? await deployGate(arg) : await runGate(arg);
     for (const v of result.verdicts) {
-      console.log(`\n── gate: ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking) ──`);
-      for (const f of v.findings) {
-        console.log(`  [${f.severity}] ${f.tool}:${f.ruleId} @ ${f.file}:${f.line ?? "?"}`);
-      }
+      console.log(`\n── ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking) ──`);
+      for (const f of v.findings) explainFinding(f);
     }
     if (result.passed) {
       console.log("\n✅ PASS — deploy allowed");
@@ -75,9 +86,15 @@ export async function main(argv: string[]): Promise<number> {
     console.log(`\n── gating generated app at ${target} ──`);
     const result = await runGate(target);
     for (const v of result.verdicts) {
-      console.log(`  gate: ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking)`);
+      console.log(`  ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking)`);
     }
-    console.log(result.passed ? "\n✅ PASS — deploy allowed" : "\n🛑 BLOCK — fix or escalate (drydock escalate <dir>)");
+    if (!result.passed) {
+      console.log("\nWhat needs attention before this can ship:");
+      for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
+      console.log("\n🛑 BLOCK — fix or escalate (drydock escalate <dir>)");
+    } else {
+      console.log("\n✅ PASS — deploy allowed");
+    }
     return result.passed ? 0 : 1;
   }
 
@@ -94,8 +111,12 @@ export async function main(argv: string[]): Promise<number> {
     const packet = await buildEscalationPacket(result.verdicts, arg);
     console.log(`\n📦 escalation packet — ${packet.blocking} slice(s), routes: ${packet.specialties.join(", ")}`);
     for (const item of packet.items) {
-      console.log(`\n── [${item.specialty}] ${item.finding.tool}:${item.finding.ruleId} ──`);
-      console.log(`   ${item.finding.message}`);
+      const e = translateFinding(item.finding);
+      // Operator-facing plain English…
+      console.log(`\n── [${item.specialty}] ${SEV_DOT[item.finding.severity]} ${e.title} ──`);
+      console.log(`   ${e.detail}`);
+      // …then the engineer-facing technical detail + localized slice.
+      console.log(`   ↳ ${item.finding.tool}:${item.finding.ruleId}`);
       if (item.slice) {
         console.log(`   ${item.slice.file}:${item.slice.startLine}-${item.slice.endLine}`);
         for (const line of item.slice.code.split("\n")) console.log(`   │ ${line}`);

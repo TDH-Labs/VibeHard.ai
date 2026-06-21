@@ -1,0 +1,114 @@
+import { describe, expect, test } from "bun:test";
+import { translateFinding, translateFindings, type Explanation } from "./translate.ts";
+import type { Finding } from "../types.ts";
+
+const f = (over: Partial<Finding>): Finding => ({
+  tool: "semgrep",
+  ruleId: "x",
+  severity: "high",
+  file: "a",
+  message: "m",
+  ...over,
+});
+
+describe("translateFinding — every ruleId our gates emit is covered (no generic)", () => {
+  // The full set of ruleIds the shipped gates produce. None should fall to generic.
+  const OURS: Array<[string, string]> = [
+    ["rls", "rls-disabled"],
+    ["rls", "rls-policy-using-true"],
+    ["verify", "health-check-failed"],
+    ["verify", "no-entry-point"],
+    ["verify", "build-failed"],
+    ["verify", "install-failed"],
+    ["semgrep", "scan-failed"],
+    ["gitleaks", "scan-failed"],
+    ["semgrep", "rules.sqlite-template-literal-query"],
+    ["gitleaks", "stripe-access-token"],
+  ];
+
+  for (const [tool, ruleId] of OURS) {
+    test(`${tool}:${ruleId} → dictionary/heuristic, not generic`, () => {
+      const e = translateFinding(f({ tool, ruleId }));
+      expect(e.source).not.toBe("generic");
+      expect(e.title.length).toBeGreaterThan(0);
+      expect(e.detail.length).toBeGreaterThan(0);
+      expect(e.ruleId).toBe(ruleId);
+    });
+  }
+});
+
+describe("translateFinding — matching tiers", () => {
+  test("exact: an own ruleId resolves from the dictionary, consequence-framed", () => {
+    const e = translateFinding(f({ tool: "rls", ruleId: "rls-policy-using-true" }));
+    expect(e.source).toBe("dictionary");
+    expect(e.title).toMatch(/every user|everyone/i);
+  });
+
+  test("exact-by-substring: semgrep's long namespaced stripe id still resolves", () => {
+    const e = translateFinding(
+      f({ ruleId: "generic.secrets.security.detected-stripe-api-key.detected-stripe-api-key" }),
+    );
+    expect(e.source).toBe("dictionary");
+    expect(e.title).toMatch(/payment key/i);
+  });
+
+  test("keyword: an unknown semgrep SQLi id lands in the SQL-injection family", () => {
+    const e = translateFinding(f({ ruleId: "python.lang.security.audit.dangerous-sql-string" }));
+    expect(e.source).toBe("heuristic");
+    expect(e.title).toMatch(/SQL injection/i);
+  });
+
+  test("keyword: an unknown XSS id lands in the XSS family", () => {
+    expect(translateFinding(f({ ruleId: "js.react.xss.dangerouslySetInnerHTML" })).title).toMatch(/cross-site/i);
+  });
+
+  test("generic: a truly unknown id is still explained (never left blank)", () => {
+    const e = translateFinding(f({ ruleId: "some.obscure.unmatched.check", severity: "medium", tool: "semgrep" }));
+    expect(e.source).toBe("generic");
+    expect(e.detail).toContain("semgrep");
+    expect(e.detail).toContain("medium");
+  });
+});
+
+describe("§16 compliance guard — no explanation claims certification", () => {
+  test("no entry says 'compliant'/'certified'", () => {
+    const ids = [
+      "rls-disabled",
+      "rls-policy-using-true",
+      "scan-failed",
+      "rules.sqlite-template-literal-query",
+      "detected-stripe-api-key",
+      "private-key",
+      "x.xss.y",
+      "x.ssrf.y",
+    ];
+    for (const ruleId of ids) {
+      const e = translateFinding(f({ ruleId }));
+      expect(`${e.title} ${e.detail}`.toLowerCase()).not.toMatch(/compliant|certified|certification|hipaa|soc ?2/);
+    }
+  });
+});
+
+describe("translateFindings — LLM fallback seam", () => {
+  test("the translator enriches ONLY would-be-generic findings; curated content wins", async () => {
+    const findings = [
+      f({ tool: "rls", ruleId: "rls-disabled" }), // dictionary — translator must NOT touch
+      f({ tool: "semgrep", ruleId: "totally.unknown.rule" }), // generic — translator enriches
+    ];
+    const calls: string[] = [];
+    const translator = (finding: Finding): Explanation => {
+      calls.push(finding.ruleId);
+      return { ruleId: finding.ruleId, title: "LLM title", detail: "LLM detail", source: "llm" };
+    };
+    const out = await translateFindings(findings, translator);
+
+    expect(calls).toEqual(["totally.unknown.rule"]); // only the unmatched one
+    expect(out[0]!.source).toBe("dictionary");
+    expect(out[1]!.source).toBe("llm");
+  });
+
+  test("with no translator, everything still resolves deterministically", async () => {
+    const out = await translateFindings([f({ ruleId: "unmatched" })]);
+    expect(out[0]!.source).toBe("generic");
+  });
+});
