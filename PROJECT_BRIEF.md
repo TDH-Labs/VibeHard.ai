@@ -795,3 +795,37 @@ a 15-minute practical audit tells you everything.
 - **Dependencies:** validate the core loop first (the n=3 diversity runs); the
   literal deploy step needs hosting (§15); and recruiting the 1–3 reviewers is a
   people task, parallel to the wiring.
+
+### Supply + compensation — GitHub is the *workplace*, not the *workforce* or *payroll*
+GitHub provides the review **surface + plumbing** (repos, PRs, webhooks, API,
+notifications) — **NOT the reviewers and NOT their pay.** Both are separate:
+
+- **Supply (who reviews) — a spectrum, and `NEVER` crowd-work:**
+  - **MVP:** your own **vetted pool (1–3)**, recruited + NDA'd (§16 profile; vet on
+    real findings). You control quality and give full context.
+  - **Scale:** rent from an **expert code-review network** (PullRequest-type) that
+    plugs in *through* GitHub as a GitHub App. Rent supply, keep owning the workflow.
+  - **`BINDING — never crowd-work / data-labeling platforms (MTurk, Scale AI).`**
+    Security-finding review needs senior security + stack expertise; crowd workers
+    are the wrong supply and gut the trust moat. A clean API can't fix unqualified
+    people. (Same class of guardrail as the §16 compliance rule.)
+- **Context, not a stripped snippet:** the reviewer needs **the finding + enough
+  surrounding context** (the file + relevant schema / auth / deps) to judge — not a
+  naked one-file branch. "Scoped slice" = *enough to judge, minimized for privacy*,
+  never below judgeable.
+- **Compensation (GitHub processes no money):** pay reviewers **directly** as 1099
+  contractors — per-review (one closed review-PR = one billable unit, counted via
+  the GitHub API), hourly, or retainer + per-review; run payments via invoicing /
+  Stripe / a contractor platform (Deel, etc.). At scale the expert network pays its
+  own reviewers (you pay the network). GitHub gives the *record* of what was
+  reviewed, never the *payment*.
+
+### What the GitHub API/webhooks do for the "on-demand request"
+- **Create the request:** Drydock programmatically opens an Issue/PR (finding +
+  code) and **requests review from a "reviewers" team** (API) → members notified.
+- **Urgency + first-come claim:** GitHub's native notifications are *passive* (watch
+  the repo), so pair with **Slack** (GitHub→Slack app or your webhook→Slack) for the
+  real-time alert; first reviewer **self-assigns** = the claim.
+- **Resolution → re-gate:** a `pull_request.closed` / merged **webhook** → your
+  server parses the diff → re-runs the gate. API + webhooks carry the structured
+  state; Slack carries urgency; **GitHub never supplies people or processes pay.**
