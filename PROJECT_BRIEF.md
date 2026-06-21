@@ -305,3 +305,34 @@ normalized events.
 
 Encoded in `src/types.ts`: `Engine` / `EngineSession` / `EngineEvent` /
 `EngineConfig` — interfaces only, **zero implementation** until M2.
+
+## 14. bolt.diy protocol — VERIFIED 2026-06-21 (+ the reconciliation task)
+M2 built the bolt adapter (`src/engine/bolt/`) against an *assumed* wire format,
+then committed (`45e8467`). The real bolt.diy source was afterwards inspected
+(`stackblitz-labs/bolt.diy` → `app/lib/runtime/message-parser.ts`). Result:
+architecture sound, assumption mostly right, **two concrete gaps found** — fix
+these before building further on the bolt seam.
+
+**Confirmed ✓:** bolt emits `<boltArtifact>` containing
+`<boltAction type="file|shell|start">` — the three action types
+`normalizer.ts` assumed are correct.
+
+**Gap 1 — streaming vs single-shot.** bolt's `StreamingMessageParser` is stateful
+and fires callbacks (`onActionOpen`/`onActionStream`) *incrementally* as chunks
+arrive. Our `parseBoltStream` is one regex over the fully-accumulated string —
+correct, but it loses the live "watch files appear" UX (silence, then a dump),
+which matters for a non-technical audience. **Decide:** keep accumulate-then-parse
+(MVP-ok, add a progress indicator) **or** port bolt's streaming callback parser
+(live UX, more work).
+
+**Gap 2 — single-artifact + attribute spelling.** `parseBoltStream` matches only
+the FIRST `<boltArtifact>` and reads `filePath`; the real parser is
+multi-artifact-capable and also extracts a `path` attribute (message-parser.ts:119).
+If bolt emits >1 artifact, our regex **silently drops files after the first** — a
+false-incompleteness bug. Confirm bolt's real emissions and fix.
+
+**Still correct:** single coupling point (`BoltDriver`), normalizer/materialization/
+deploy all on our side, engine-agnostic above the seam. **Do NOT vendor/fork
+bolt.diy yet** — reading it was the right amount. Next task = reconcile
+`src/engine/bolt/normalizer.ts` against `message-parser.ts`, fix gaps 1 & 2, keep
+tests green; then the bolt adapter is genuinely audit-ready.
