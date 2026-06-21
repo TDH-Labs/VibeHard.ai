@@ -3,4 +3,4 @@
  * non-technical operator — the curated content asset + an LLM-fallback seam.
  */
 export { translateFinding, translateFindings, type Explanation, type Translator } from "./translate.ts";
-export { EXACT, KEYWORDS, type Entry } from "./dictionary.ts";
+export { BY_TOOL, EXACT, KEYWORDS, type Entry } from "./dictionary.ts";

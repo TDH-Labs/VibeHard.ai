@@ -85,6 +85,17 @@ export const EXACT: Record<string, Entry> = {
   },
 };
 
+/** Tool-level fallback — for scanners whose ruleIds are open-ended (e.g. trivy
+ *  emits CVE ids, which no exact/keyword entry can enumerate). Matched on the
+ *  finding's `tool` after exact + keyword, before the generic fallback. */
+export const BY_TOOL: Record<string, Entry> = {
+  trivy: {
+    title: "A dependency has a known security vulnerability",
+    detail:
+      "One of the third-party libraries this app installs has a publicly disclosed vulnerability (a CVE). An attacker could exploit it through your app. Update the package to a patched version — the finding names the affected package and the version that fixes it.",
+  },
+};
+
 /** Keyword families — matched as substrings of a lowercased ruleId, in order. */
 export const KEYWORDS: Array<{ keys: string[]; entry: Entry }> = [
   {

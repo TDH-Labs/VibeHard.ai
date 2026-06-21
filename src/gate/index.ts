@@ -10,11 +10,13 @@ import { rm } from "node:fs/promises";
 import type { Gate, GateVerdict } from "../types.ts";
 import { sastGate } from "./sast.ts";
 import { secretsGate } from "./secrets.ts";
+import { depvulnGate } from "./depvuln.ts";
 import { rlsGate } from "./rls.ts";
 import { verifyGate } from "./verify.ts";
 
-/** The default security gate chain. Order mirrors gate-proof's deploy-gate.sh. */
-export const GATES: Gate[] = [verifyGate, sastGate, secretsGate, rlsGate];
+/** The default security gate chain. verify first, then the security cluster
+ *  (sast/secrets/depvuln), then rls. */
+export const GATES: Gate[] = [verifyGate, sastGate, secretsGate, depvulnGate, rlsGate];
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";

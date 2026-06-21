@@ -9,7 +9,7 @@
  * unexplained (a blocked user must always be told, in plain terms, what's wrong).
  */
 import type { Finding } from "../types.ts";
-import { EXACT, KEYWORDS, type Entry } from "./dictionary.ts";
+import { BY_TOOL, EXACT, KEYWORDS, type Entry } from "./dictionary.ts";
 
 export interface Explanation extends Entry {
   /** The finding this explains (echoed for reference). */
@@ -46,12 +46,15 @@ function generic(f: Finding): Explanation {
   };
 }
 
-/** Synchronous, deterministic translation: exact → keyword → generic. Always returns. */
+/** Synchronous, deterministic translation: exact → keyword → tool → generic.
+ *  Always returns. */
 export function translateFinding(f: Finding): Explanation {
   const exact = exactMatch(f.ruleId);
   if (exact) return { ...exact, ruleId: f.ruleId, source: "dictionary" };
   const kw = keywordMatch(f.ruleId);
   if (kw) return { ...kw, ruleId: f.ruleId, source: "heuristic" };
+  const byTool = BY_TOOL[f.tool];
+  if (byTool) return { ...byTool, ruleId: f.ruleId, source: "dictionary" };
   return generic(f);
 }
 

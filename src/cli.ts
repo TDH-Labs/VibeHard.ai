@@ -21,6 +21,7 @@ function explainFinding(f: Finding, indent = "  "): void {
   const e = translateFinding(f);
   console.log(`${indent}${SEV_DOT[f.severity]} ${e.title}`);
   console.log(`${indent}   ${e.detail}`);
+  console.log(`${indent}   ${f.message}`); // the scanner's specific instance (e.g. which package/version)
   console.log(`${indent}   ↳ ${f.tool}:${f.ruleId} @ ${f.file}:${f.line ?? "?"}`);
 }
 
@@ -116,7 +117,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`\n── [${item.specialty}] ${SEV_DOT[item.finding.severity]} ${e.title} ──`);
       console.log(`   ${e.detail}`);
       // …then the engineer-facing technical detail + localized slice.
-      console.log(`   ↳ ${item.finding.tool}:${item.finding.ruleId}`);
+      console.log(`   ↳ ${item.finding.tool}:${item.finding.ruleId} — ${item.finding.message}`);
       if (item.slice) {
         console.log(`   ${item.slice.file}:${item.slice.startLine}-${item.slice.endLine}`);
         for (const line of item.slice.code.split("\n")) console.log(`   │ ${line}`);
@@ -136,7 +137,7 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet",
       "",
-      "Gates: verify · sast · secrets · rls (PROJECT_BRIEF.md §8, §12).",
+      "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",
       "generate needs ANTHROPIC_API_KEY.",
     ].join("\n"),
   );

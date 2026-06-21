@@ -62,7 +62,18 @@ describe("translateFinding — matching tiers", () => {
     expect(translateFinding(f({ ruleId: "js.react.xss.dangerouslySetInnerHTML" })).title).toMatch(/cross-site/i);
   });
 
-  test("generic: a truly unknown id is still explained (never left blank)", () => {
+  test("tool-level: a trivy CVE (open-ended ruleId) → the dep-vuln explanation", () => {
+    const e = translateFinding(f({ tool: "trivy", ruleId: "CVE-2019-10744", severity: "critical" }));
+    expect(e.source).toBe("dictionary");
+    expect(e.title).toMatch(/dependency .* vulnerability/i);
+    expect(e.detail).toMatch(/CVE|patched version|update the package/i);
+  });
+
+  test("trivy's scan-failed still resolves exact (fail-closed), not tool-level", () => {
+    expect(translateFinding(f({ tool: "trivy", ruleId: "scan-failed" })).title).toMatch(/couldn't run/i);
+  });
+
+  test("generic: a truly unknown id from a tool with no entry is still explained", () => {
     const e = translateFinding(f({ ruleId: "some.obscure.unmatched.check", severity: "medium", tool: "semgrep" }));
     expect(e.source).toBe("generic");
     expect(e.detail).toContain("semgrep");
