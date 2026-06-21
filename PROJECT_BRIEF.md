@@ -447,5 +447,62 @@ next iteration (advisory, feeds-forward — same pattern as prod-feedback packet
 So it's both an advisory gate and a feeder for the escalation layer.
 Track: later; advisory-only; ties into the human-escalation moat.
 
-**Skip (per §15):** refactor phase, methodology-select, buy-vs-build — power
-features, not MVP.
+**Tier 1 — more deterministic production-readiness gates (extend the lint gate):**
+- **README gate** — a plain-language README is present and non-trivial (can
+  LLM-draft a starter). **Adaptive: blocks at production rigor, warns at prototype.**
+  Matters for "agency shares the build with a client."
+- **dependency pinning** — deps locked to exact versions (no `^` / `>=` / `latest`),
+  so a future dep bump can't silently break the app.
+- **clean-env verify** — copy to a fresh dir, install from scratch, run — proves it
+  works on a *new* machine, not just where it was built. Heavier (full install);
+  shareability tier.
+
+**Tier 2 — more reliability/hosting-coupled gates (extend the observability batch):**
+- **container hygiene** — Dockerfile has a non-root `USER`, `.dockerignore` exists
+  (no host `.env`/secrets leaked into the image), no secrets baked in. Conditional
+  on Docker/hosting.
+- **graceful shutdown** — app handles `SIGTERM` cleanly within N seconds (no
+  `SIGKILL`, no dropped in-flight requests). Reliability tier; any served HTTP app.
+- **prod-feedback anomaly loop** — *(Pi source: `reference/prototype/skills/prod-feedback/` + `scan.sh`)*
+  the back-edge: deployed app emits structured logs → a scheduled scan detects
+  anomalies (latency spike, webhook drop, error-budget burn) → writes a
+  `PROD_FEEDBACK_PACKET` into build-status.md for the next iteration.
+  **Non-blocking, feeds-forward.** Needs hosting first — this *is* the observability
+  phase (§15 LATER).
+
+**Build-process steps (skills at the intake/PRD/architecture front-half — §15 — not blocking gates):**
+- **buy-vs-build** — *(Pi: `reference/prototype/skills/buy-vs-build/`)* at PRD
+  scoping, check build scope against a registry of mature APIs (Textract, Clerk,
+  Stripe, Twilio…); flag BUY-vs-BUILD with rationale. **Advisory — surfaces the
+  option, the human decides, never auto-procures.** Deterministic registry + LLM
+  match. Real senior-engineer move (agents default to BUILD); pairs with the segment
+  (don't let a non-technical user rebuild Stripe).
+- **rigor-select** — ⚠️ Drydock reframe of Pi's `methodology-select`. **Pi's version
+  chose superpowers-path vs swarm-path (the prototype's two execution models) — that
+  does NOT map to Drydock** (single bolt engine). The Drydock analog is the §16
+  **adaptive-rigor** decision (prototype vs production rigor, set from the request),
+  NOT an execution-model fork. Capture it as the rigor mechanism, not Pi's skill.
+- **refactor-phase** — *(Pi: `reference/prototype/skills/refactor-phase/`)* after
+  verify passes, before DONE, production rigor only: an LLM scores code *quality*
+  (not correctness) → refactors → **re-runs verify (all N runs); a refactor that
+  breaks verify is REVERTED**; bounded to 2 passes. Skill (refactor) + deterministic
+  (re-verify disposes). Maintainability tier.
+
+**Compliance beyond RLS — BOUNDED BY THE §16 BINDING RULE:**
+- **compliance-aware gate** — *(Pi: `reference/prototype/skills/compliance-posture/`)*
+  when the spec flags sensitive data, evaluate SOC 2 / ISO applicability, retention,
+  access-control models, sanitization, audit logs (beyond the single RLS control).
+  ⚠️ Pi's skill *"blocks DONE if a control is missing"* — **Drydock's version must
+  obey §16:** it *checks the technical controls a framework requires, flags gaps,
+  and routes the rest to a human.* It **"helps toward" compliance; it NEVER
+  certifies.** Must not become a "HIPAA / SOC 2 compliant" claim.
+
+**NEEDS DEFINITION (not in Pi source — operator to clarify):**
+- **link auto-detection** — ⚠️ *not* found in the Pi skills; meaning unconfirmed.
+  Candidate readings: (a) broken/dead hyperlink + dead-route/dead-import detection in
+  generated output, or (b) detecting external integrations the app links to and
+  flagging missing keys/config (overlaps buy-vs-build). Classify + tier once defined.
+
+**Priority reminder (unchanged):** all of the above are *captured backlog*, not
+*next*. Nothing is "skip for MVP" any longer, but the leverage is still
+validate-generation → translation → dep-vuln → auto-fix (§15). Captured ≠ now.
