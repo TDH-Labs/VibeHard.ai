@@ -2,7 +2,16 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectLaunch, findEntry, summarizeBuild, summarizeVerify } from "./verify.ts";
+import {
+  detectLaunch,
+  dummyEnvValue,
+  findEntry,
+  isUp,
+  parseEnvKeys,
+  summarizeBuild,
+  summarizeVerify,
+  synthEnv,
+} from "./verify.ts";
 import { verdictOf } from "../types.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
@@ -47,6 +56,70 @@ describe("summarizeVerify (pure)", () => {
       { run: 3, status: 0 },
     ];
     expect(summarizeVerify(runs, 3)).toHaveLength(1);
+  });
+
+  test("a server that redirects / → /login (3xx) counts as up (no false block)", () => {
+    const runs = [
+      { run: 1, status: 302 },
+      { run: 2, status: 200 },
+      { run: 3, status: 302 },
+    ];
+    expect(summarizeVerify(runs, 3)).toEqual([]);
+  });
+
+  test("a boot crash is surfaced in the finding message (actionable for auto-fix)", () => {
+    const runs = [
+      { run: 1, status: 0, log: "ReferenceError: body is not defined\n  at views/layout.ejs:25" },
+      { run: 2, status: 0, log: "ReferenceError: body is not defined\n  at views/layout.ejs:25" },
+      { run: 3, status: 0, log: "ReferenceError: body is not defined\n  at views/layout.ejs:25" },
+    ];
+    const f = summarizeVerify(runs, 3);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.message).toContain("body is not defined");
+  });
+});
+
+describe("isUp (pure probe predicate)", () => {
+  test("2xx and 3xx are up; 4xx/5xx and 0 are not", () => {
+    for (const s of [200, 201, 204, 301, 302, 308, 399]) expect(isUp(s)).toBe(true);
+    for (const s of [0, 400, 401, 404, 500, 503]) expect(isUp(s)).toBe(false);
+  });
+});
+
+describe("parseEnvKeys / dummyEnvValue / synthEnv (pure)", () => {
+  test("parseEnvKeys extracts names, ignoring comments, blanks, and export prefixes", () => {
+    const content = [
+      "# Supabase",
+      "SUPABASE_URL=https://xyz.supabase.co",
+      "SUPABASE_ANON_KEY=",
+      "export SESSION_SECRET=changeme",
+      "",
+      "PORT = 3000",
+      "not a var line",
+    ].join("\n");
+    expect(parseEnvKeys(content)).toEqual([
+      "SUPABASE_URL",
+      "SUPABASE_ANON_KEY",
+      "SESSION_SECRET",
+      "PORT",
+    ]);
+  });
+
+  test("dummyEnvValue gives a real URL for URL-shaped keys, a placeholder otherwise", () => {
+    expect(dummyEnvValue("SUPABASE_URL")).toMatch(/^https?:\/\//);
+    expect(dummyEnvValue("DATABASE_URI")).toMatch(/^https?:\/\//);
+    expect(dummyEnvValue("PORT")).toBe("3000");
+    expect(dummyEnvValue("SESSION_SECRET")).toBe("drydock-verify-placeholder");
+    expect(dummyEnvValue("SUPABASE_ANON_KEY")).toBe("drydock-verify-placeholder");
+  });
+
+  test("synthEnv unions keys across sources and is null-safe", () => {
+    const env = synthEnv(["SUPABASE_URL=\nA_KEY=x", null, undefined, "PORT="]);
+    expect(env).toEqual({
+      SUPABASE_URL: "http://localhost:54321",
+      A_KEY: "drydock-verify-placeholder",
+      PORT: "3000",
+    });
   });
 });
 
