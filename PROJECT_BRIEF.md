@@ -426,6 +426,29 @@ apps; **skip the ceremony for trivial ones** — the system decides the level fr
 the request. Forcing a PRD on "build a to-do app" recreates the friction we
 criticize; a senior engineer doesn't write a PRD for a 10-line server.
 
+### Gate notes (dogfooding-driven — dated; the gates earn trust by catching the *real* thing)
+Each entry is a false-negative or false-positive a real generated app exposed, and
+the fix. These are the receipts behind "we block, they warn" — keep appending.
+
+- **2026-06-21 — `rls` now FAILS CLOSED on missing coverage (the literal
+  CVE-2025-48757 pattern).** Dogfooding a Supabase app surfaced the dangerous gap:
+  the client reaches tables via `.from('x')` while the app ships **no** RLS
+  migration for them. The gate parsed *only* migrations, so "no migration" → nothing
+  to parse → **vacuous PASS** — exactly the false-negative the breach exploited
+  (*"RLS not found" ≠ "RLS fine"*). Fix: the gate now detects Supabase usage
+  (dependency / import + `.from()` table queries) and emits a **CRITICAL
+  `rls-missing`** for any queried table lacking `enable row level security` in a
+  migration → BLOCK. This is §11 fail-closed applied to `rls`, and it makes the "we
+  block, they warn" claim literally true for the one breach we position against.
+  Regression tests: Supabase query + no migration → block; sound per-table policies
+  → pass; non-Supabase app → no false positive. (`src/gate/rls.ts`.)
+- **2026-06-21 — `verify` hardened for the variety of real apps** (detail in §18):
+  probe `/health` **then `/`** (any 2xx/3xx, redirects followed, = booted); inject
+  dummy env from `.env.example`; **install deps before launch**; capture the boot
+  error into the finding. Turned three false-blocks (no `/health` route; uninstalled
+  fresh deps; env-at-boot crash) into correct verdicts, and made runtime crashes
+  actionable for the auto-fix loop (which then fixed a real EJS bug in 2 passes).
+
 ## 17. Candidate gates backlog (classified — add at the right time, not on impulse)
 Proposed gates beyond the shipped four (sast / secrets / rls / verify). Captured so
 they aren't lost — but **these are breadth, not the current leverage.** Per §15 the
@@ -780,9 +803,11 @@ security-literate (not a generalist), deep in the generated stack
 (TS/React/Next/Supabase/Postgres), judgment over speed-coding, accurate
 *block-or-clear* discipline, clear written rationale, reliable/available.
 **Vet by testing on REAL findings** (hand them the dogfood outputs — the `.next/`
-false positives, a real RLS gap, the `next` CVE — and see if they distinguish
-true/false positives and propose the right minimal fix). Résumés tell you nothing;
-a 15-minute practical audit tells you everything.
+false positives, a real RLS gap (incl. the **vacuous-RLS** case: a Supabase app
+that queries tables via `.from()` but ships no migration → `rls-missing`, per the
+§16 gate note), the `next` CVE — and see if they distinguish true/false positives
+and propose the right minimal fix). Résumés tell you nothing; a 15-minute practical
+audit tells you everything.
 
 ### MVP boundary (build now vs defer)
 - **Build (MVP glue):** GitHub repo/Issue/PR convention, gate-as-GitHub-Action
