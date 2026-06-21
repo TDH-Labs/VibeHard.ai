@@ -42,6 +42,7 @@ describe("BoltEngine / BoltSession", () => {
     const events = await collect(session.prompt("make an app"));
 
     expect(events).toEqual([
+      { type: "thinking", text: "Generating your app…" },
       { type: "message", text: "Building it." },
       { type: "file-changed", path: "src/app.ts", action: "create" },
       { type: "file-changed", path: "README.md", action: "create" },
@@ -67,7 +68,39 @@ describe("BoltEngine / BoltSession", () => {
     };
     const session = await new BoltEngine(boom).startSession(dir, CONFIG);
     const events = await collect(session.prompt("go"));
-    expect(events).toEqual([{ type: "error", message: "engine driver failed: model unreachable" }]);
+    expect(events).toEqual([
+      { type: "thinking", text: "Generating your app…" },
+      { type: "error", message: "engine driver failed: model unreachable" },
+    ]);
+  });
+
+  test("materializes files from EVERY artifact (multi-artifact, §14 Gap 2)", async () => {
+    const dir = await workspace();
+    const multi =
+      '<boltArtifact id="a1" title="be"><boltAction type="file" filePath="server.js">A</boltAction></boltArtifact>' +
+      '<boltArtifact id="a2" title="fe"><boltAction type="file" filePath="public/index.html">B</boltAction></boltArtifact>';
+    const session = await new BoltEngine(replayDriver([multi])).startSession(dir, CONFIG);
+    await collect(session.prompt("build"));
+
+    // The old first-artifact-only parser would have dropped public/index.html.
+    expect(await Bun.file(join(dir, "server.js")).text()).toBe("A");
+    expect(await Bun.file(join(dir, "public/index.html")).text()).toBe("B");
+  });
+
+  test("materializes a supabase migration into supabase/migrations (RLS gate input)", async () => {
+    const dir = await workspace();
+    const stream =
+      '<boltArtifact id="db" title="db">' +
+      '<boltAction type="supabase" operation="migration" filePath="/supabase/migrations/init.sql">' +
+      "create table public.profiles (id uuid primary key);" +
+      "</boltAction></boltArtifact>";
+    const session = await new BoltEngine(replayDriver([stream])).startSession(dir, CONFIG);
+    const events = await collect(session.prompt("add a table"));
+
+    // It lands as a real file at the path the RLS gate scans — not lost as a shell cmd.
+    const sql = await Bun.file(join(dir, "supabase/migrations/init.sql")).text();
+    expect(sql).toContain("create table public.profiles");
+    expect(events).toContainEqual({ type: "file-changed", path: "/supabase/migrations/init.sql", action: "create" });
   });
 
   test("dispose forwards to the driver", async () => {

@@ -53,6 +53,16 @@ class BoltSession implements EngineSession {
   }
 
   async *prompt(text: string): AsyncIterable<EngineEvent> {
+    // Progress indicator (§14 Gap 1 decision: keep accumulate-then-parse). We
+    // consume the whole bolt stream before parsing, so without this the user sees
+    // silence until every file lands at once. An immediate "working" signal is the
+    // honest MVP until the front door exists; live per-file streaming is the
+    // deferred incremental-parse path — and the seam (AsyncIterable<EngineEvent>)
+    // already supports it, so that swap stays behind this boundary with zero
+    // consumer changes. The deterministic gate is unaffected either way: it scans
+    // the final materialized workspace, not the live stream.
+    yield { type: "thinking", text: "Generating your app…" };
+
     let raw = "";
     try {
       for await (const chunk of this.driver.run(text, this.config)) raw += chunk;

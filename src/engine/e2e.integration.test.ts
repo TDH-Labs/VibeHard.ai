@@ -101,6 +101,35 @@ run("generate → gate → deploy (real gate)", () => {
     expect(blocked).toEqual(expect.arrayContaining(["sast", "secrets", "rls"]));
   }, 120_000);
 
+  test("a supabase-action migration with RLS off is materialized and BLOCKED", async () => {
+    // The whole point of the §14 supabase fix: bolt emits the migration as a
+    // supabase action (not a file action). The old parser routed it to a shell
+    // command — never written, so the RLS gate saw no migrations and the
+    // CVE-2025-48757 pattern shipped. Now it lands in supabase/migrations and the
+    // gate catches it. Everything else here is clean, so rls is the decisive block.
+    const dir = await workspace();
+    const stream =
+      "Setting up your database." +
+      '<boltArtifact id="app" title="app">' +
+      `<boltAction type="file" filePath="server.js">${CLEAN_SERVER}</boltAction>` +
+      `<boltAction type="file" filePath="package.json">${PKG("supa-app")}</boltAction>` +
+      '<boltAction type="supabase" operation="migration" filePath="/supabase/migrations/0001_init.sql">' +
+      "create table public.profiles (id uuid primary key, ssn text);" + // ❌ no RLS enabled
+      "</boltAction>" +
+      "</boltArtifact>";
+    const session = await new BoltEngine(replayDriver([stream])).startSession(dir, CONFIG);
+    await drain(session.prompt("store user profiles in supabase"));
+
+    // The migration really landed where the RLS gate looks.
+    expect(await Bun.file(join(dir, "supabase/migrations/0001_init.sql")).exists()).toBe(true);
+
+    const target = spyTarget();
+    const r = await gatedDeploy(dir, target);
+    expect(r.deployed).toBe(false);
+    expect(target.calls).toBe(0);
+    expect(r.verdict.verdicts.filter((v) => v.status === "block").map((v) => v.gate)).toContain("rls");
+  }, 120_000);
+
   test("clean generated app PASSES the gate and reaches the target", async () => {
     const dir = await workspace();
     const session = await new BoltEngine(

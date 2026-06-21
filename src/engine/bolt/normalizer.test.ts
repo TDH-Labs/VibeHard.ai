@@ -34,6 +34,75 @@ describe("parseBoltStream (pure)", () => {
   });
 });
 
+describe("parseBoltStream — multi-artifact (§14 Gap 2 regression)", () => {
+  // The real bolt parser is stateful + multi-artifact. The old single-.exec parser
+  // kept only the FIRST artifact and silently dropped every file after it.
+  const MULTI = [
+    "First, the backend.",
+    '<boltArtifact id="a1" title="backend">',
+    '<boltAction type="file" filePath="server.js">A</boltAction>',
+    "</boltArtifact>",
+    "Now the frontend.",
+    '<boltArtifact id="a2" title="frontend">',
+    '<boltAction type="file" filePath="index.html">B</boltAction>',
+    '<boltAction type="file" filePath="app.js">C</boltAction>',
+    "</boltArtifact>",
+    "Done.",
+  ].join("");
+
+  test("parses ALL artifacts, in order, with prose preserved between them", () => {
+    expect(parseBoltStream(MULTI)).toEqual([
+      { kind: "text", text: "First, the backend." },
+      { kind: "file", filePath: "server.js", content: "A" },
+      { kind: "text", text: "Now the frontend." },
+      { kind: "file", filePath: "index.html", content: "B" },
+      { kind: "file", filePath: "app.js", content: "C" },
+      { kind: "text", text: "Done." },
+    ]);
+  });
+
+  test("no file from a later artifact is dropped", () => {
+    const files = parseBoltStream(MULTI).filter((s) => s.kind === "file");
+    expect(files.map((f) => (f.kind === "file" ? f.filePath : ""))).toEqual(["server.js", "index.html", "app.js"]);
+  });
+
+  test("tolerates an unterminated trailing artifact (partial stream)", () => {
+    const partial = '<boltArtifact id="a"><boltAction type="file" filePath="x.js">X</boltAction>';
+    expect(parseBoltStream(partial)).toEqual([{ kind: "file", filePath: "x.js", content: "X" }]);
+  });
+});
+
+describe("parseBoltStream — supabase actions (security-critical routing)", () => {
+  // bolt emits DB changes as supabase actions; the migration carries the SQL file
+  // the RLS gate scans. Routing it anywhere but `file` blinds the gate.
+  const SUPA = [
+    '<boltArtifact id="db" title="Create users">',
+    '<boltAction type="supabase" operation="migration" filePath="/supabase/migrations/create_users.sql">',
+    "create table public.users (id uuid primary key);",
+    "</boltAction>",
+    '<boltAction type="supabase" operation="query" projectId="p1">',
+    "create table public.users (id uuid primary key);",
+    "</boltAction>",
+    "</boltArtifact>",
+  ].join("");
+
+  test("a supabase migration becomes a FILE (materialized → RLS gate sees it)", () => {
+    const segs = parseBoltStream(SUPA);
+    const file = segs.find((s) => s.kind === "file");
+    expect(file).toEqual({
+      kind: "file",
+      filePath: "/supabase/migrations/create_users.sql",
+      content: "create table public.users (id uuid primary key);",
+    });
+  });
+
+  test("a supabase query carries no file → surfaced as a command, not materialized", () => {
+    const segs = parseBoltStream(SUPA);
+    expect(segs.filter((s) => s.kind === "file")).toHaveLength(1);
+    expect(segs.some((s) => s.kind === "shell")).toBe(true);
+  });
+});
+
 describe("segmentToEvent (pure)", () => {
   test("first write is create, repeat write is edit", () => {
     const seen = new Set<string>();
