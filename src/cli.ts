@@ -18,6 +18,7 @@ import { architectApp, buildOrder, llmArchitect, type Architecture } from "./arc
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
+import { deployApp } from "./substrate/index.ts";
 import {
   capabilitiesFromSpec,
   combinedCandidateSource,
@@ -423,6 +424,36 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (cmd === "ship") {
+    if (!arg) {
+      console.error("usage: drydock ship <dir>   (gates, then provisions a backend + deploys to a live URL)");
+      return 2;
+    }
+    const dir = resolve(arg);
+    // 1. gate FIRST — never deploy unverified code (writes the HARD_VERIFY_PASS sentinel on pass)
+    console.log("── gating before deploy ──");
+    const gate = await deployGate(dir);
+    for (const v of gate.verdicts) console.log(`   ${v.status === "pass" ? "✅" : "🛑"} ${v.gate}`);
+    if (!gate.passed) {
+      console.log("\n🛑 BLOCK — not deploying. Fix or escalate first (drydock escalate <dir>).");
+      return 1;
+    }
+    // 2. provision (customer-owned Supabase) → migrate → VERIFY LIVE RLS → deploy (Vercel) → live URL
+    console.log("\n── provisioning + deploying ──");
+    try {
+      const outcome = await deployApp(dir, { onStep: (m) => console.log(`   · ${m}`) });
+      if (outcome.live) {
+        console.log(`\n✅ LIVE → ${outcome.url}`);
+        return 0;
+      }
+      console.log(`\n🛑 deploy aborted at "${outcome.abortedAt}": ${outcome.reason}`);
+      return 1;
+    } catch (e) {
+      console.error(`\n🛑 deploy failed: ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
+  }
+
   if (cmd === "research") {
     if (!arg) {
       console.error("usage: drydock research <dir>   (reads .drydock/spec.json; ONLINE — queries npm + deps.dev)");
@@ -496,6 +527,7 @@ export async function main(argv: string[]): Promise<number> {
       '  drydock generate "<prompt>" <dir>   generate an app from a raw prompt (engine only) + auto-gate it',
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
+      "  drydock ship <dir>                  gate → provision a customer-owned backend → verify live RLS → deploy → live URL",
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
       "  drydock refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
       "  drydock research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",

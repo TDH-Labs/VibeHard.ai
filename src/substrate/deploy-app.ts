@@ -1,0 +1,66 @@
+/**
+ * deployApp — the last-mile wiring (docs/runtime-substrate § W5). Assembles the REAL
+ * providers (Supabase backend, Vercel host, encrypted secrets, file records) from the
+ * environment and runs the deterministic `provisionAndDeploy` orchestrator on a gated,
+ * passing app workspace. It derives the migrations (supabase/migrations/*.sql) and the
+ * RLS-probe tables (the `create table`s) from the workspace. Zero LLM in this path (§11).
+ *
+ * The orchestrator enforces the HARD_VERIFY_PASS sentinel precondition, so deployApp can
+ * only push an app the gate already passed (defense in depth — the CLI gates first too).
+ */
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { homedir } from "node:os";
+import { FileRecordStore } from "./record.ts";
+import { LocalEncryptedSecretsStore } from "./secrets.ts";
+import { refFromUrl, SupabaseBackendProvider } from "./supabase.ts";
+import { VercelHostProvider } from "./vercel.ts";
+import { provisionAndDeploy, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
+import type { Migration } from "./types.ts";
+
+/** Read the workspace's Supabase migrations (sorted by filename), each file → one Migration. */
+export function parseMigrations(workspacePath: string): Migration[] {
+  const dir = join(workspacePath, "supabase", "migrations");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => ({ id: f, sql: readFileSync(join(dir, f), "utf8") }));
+}
+
+/** The tables the live-RLS probe should check — every `create table` in the migrations. */
+export function tablesFromMigrations(migrations: Migration[]): string[] {
+  const tables = new Set<string>();
+  const re = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:"?public"?\s*\.\s*)?"?([a-z_][a-z0-9_]*)"?/gi;
+  for (const m of migrations) for (const match of m.sql.matchAll(re)) tables.add(match[1]!);
+  return [...tables];
+}
+
+/** Assemble the real providers from env. Records + secrets live under stateDir (default ~/.drydock). */
+export function defaultSubstrateDeps(opts: { stateDir?: string; onStep?: (m: string) => void } = {}): SubstrateDeps {
+  const stateDir = opts.stateDir ?? join(homedir(), ".drydock");
+  return {
+    backend: new SupabaseBackendProvider(),
+    host: new VercelHostProvider(),
+    secrets: new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY ?? ""),
+    records: new FileRecordStore(join(stateDir, "deployments")),
+    onStep: opts.onStep,
+  };
+}
+
+export interface DeployAppOptions {
+  app?: string; // defaults to the workspace dir basename
+  deps?: SubstrateDeps; // defaults to defaultSubstrateDeps (the real providers)
+  stateDir?: string;
+  onStep?: (message: string) => void;
+}
+
+/** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
+export async function deployApp(workspacePath: string, opts: DeployAppOptions = {}): Promise<DeployOutcome> {
+  const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep });
+  const migrations = parseMigrations(workspacePath);
+  const rlsTables = tablesFromMigrations(migrations);
+  const app = opts.app ?? basename(workspacePath);
+  const orgRef = process.env.SUPABASE_URL ? refFromUrl(process.env.SUPABASE_URL) : "default";
+  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables }, deps);
+}

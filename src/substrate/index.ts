@@ -24,3 +24,4 @@ export { LocalEncryptedSecretsStore } from "./secrets.ts";
 export { provisionAndDeploy, destroy, type DeployInput, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
 export { SupabaseBackendProvider, refFromUrl, resolveDbUrl, type SupabaseEnv, type SupabaseProviderOptions, type DbExecutor } from "./supabase.ts";
 export { VercelHostProvider, bunRunner, sanitizeProjectName, firstVercelUrl, type CommandRunner, type CommandResult, type VercelHostOptions } from "./vercel.ts";
+export { deployApp, defaultSubstrateDeps, parseMigrations, tablesFromMigrations, type DeployAppOptions } from "./deploy-app.ts";
