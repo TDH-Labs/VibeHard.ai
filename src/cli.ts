@@ -11,7 +11,8 @@ import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import type { Finding, Severity } from "./types.ts";
+import { decideRigor, llmIntake, planIntake, type Prd } from "./prd/index.ts";
+import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
 
@@ -24,6 +25,23 @@ function queuePath(): string {
 }
 function localSink(): LocalEscalationSink {
   return new LocalEscalationSink(queuePath());
+}
+
+/** Print a PRD the way an operator reads it (§22 front-half). */
+function printPrd(prd: Prd): void {
+  console.log(`\n📄 PRD: ${prd.name}`);
+  if (prd.summary) console.log(`   ${prd.summary}`);
+  console.log(`   users: ${prd.users || "—"} · tenancy: ${prd.tenancy} · auth: ${prd.auth}`);
+  if (prd.features.length) {
+    console.log("   features:");
+    for (const f of prd.features) console.log(`     - ${f}`);
+  }
+  if (prd.dataEntities.length) {
+    console.log("   data model:");
+    for (const e of prd.dataEntities) console.log(`     - ${e.name}(${e.fields.join(", ")})${e.sensitive ? "  [sensitive]" : ""}`);
+  }
+  const sens = prd.sensitiveData.filter((c) => c !== "none");
+  if (sens.length) console.log(`   sensitive data: ${sens.join(", ")}`);
 }
 
 /** Print a finding the way a non-technical operator reads it: plain-English first
@@ -62,6 +80,38 @@ export async function main(argv: string[]): Promise<number> {
       if ("sentinel" in result) console.log("   no sentinel written");
     }
     return result.passed ? 0 : 1;
+  }
+
+  if (cmd === "plan") {
+    const [, promptText] = argv;
+    if (!promptText) {
+      console.error('usage: drydock plan "<prompt>"');
+      return 2;
+    }
+    // Front-half (§22): the LLM drafts a PRD, the deterministic readiness check grills
+    // it, and it re-drafts to resolve blocking gaps — bounded. Spec proposed, gate disposes.
+    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    console.log(`drafting a spec with ${provider}/${model} …`);
+    const result = await planIntake(promptText, {
+      intake: llmIntake({ config: { provider, model } }),
+      onStep: (m) => console.log(`  … ${m}`),
+    });
+    printPrd(result.prd);
+    console.log(`\n   rigor: ${decideRigor(result.prd)} (§16 adaptive)`);
+
+    const advisory = result.gaps.filter((f) => !isBlocking(f));
+    if (advisory.length) {
+      console.log("\n⚠️  Heads-up to carry into the build (not blocking):");
+      for (const f of advisory) explainFinding(f);
+    }
+    if (result.ready) {
+      console.log(`\n✅ spec ready to build (after ${result.rounds} round(s)) — next: drydock generate "<this app>" <dir>`);
+      return 0;
+    }
+    console.log(`\n🛑 spec NOT ready after ${result.rounds} round(s) — these need clarifying first:`);
+    for (const f of result.gaps.filter(isBlocking)) explainFinding(f);
+    return 1;
   }
 
   if (cmd === "generate") {
@@ -195,6 +245,7 @@ export async function main(argv: string[]): Promise<number> {
     [
       "drydock — safe vibe coding.",
       "",
+      '  drydock plan "<prompt>"             draft + grill a PRD spec before building (front-half §22)',
       '  drydock generate "<prompt>" <dir>   generate an app (bolt engine) + auto-gate it',
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",

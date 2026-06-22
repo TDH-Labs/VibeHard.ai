@@ -15,3 +15,6 @@ export {
   type SensitiveClass,
   type Tenancy,
 } from "./prd.ts";
+export { coercePrd, extractJsonObject, parsePrd } from "./coerce.ts";
+export { planIntake, type Intake, type PlanOptions, type PlanResult } from "./intake.ts";
+export { llmIntake, type LlmIntakeOptions } from "./intake-llm.ts";
