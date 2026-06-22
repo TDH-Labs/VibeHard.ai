@@ -18,3 +18,4 @@ export {
 export { coercePrd, extractJsonObject, parsePrd } from "./coerce.ts";
 export { planIntake, type Intake, type PlanOptions, type PlanResult } from "./intake.ts";
 export { llmIntake, type LlmIntakeOptions } from "./intake-llm.ts";
+export { buildGenerationBrief, securityRequirements } from "./brief.ts";

@@ -1,0 +1,68 @@
+/**
+ * PRD → generation brief (PROJECT_BRIEF.md §22, §15). This is where the front-half
+ * PAYS OFF: the grilled spec's security posture is turned into EXPLICIT codegen
+ * instructions, so the model builds the protections in from the start instead of
+ * relying on its defaults. Each requirement directly pre-empts a back-half gate
+ * finding — RLS scoping pre-empts `rls-policy-using-true` / `rls-policy-authenticated`
+ * / `rls-disabled`; parameterized queries pre-empt the SQLi `sast` finding; secrets
+ * in env pre-empt `secrets`. Better spec in → fewer blocks out → less escalation.
+ *
+ * §16 BINDING: the brief asks for technical controls; it never claims compliance.
+ * Pure — a function of the PRD only.
+ */
+import { isSensitive, type Prd } from "./prd.ts";
+
+/** The security instructions implied by the spec — each maps to a gate it pre-empts. */
+export function securityRequirements(prd: Prd): string[] {
+  const reqs: string[] = [];
+  const sensitive = isSensitive(prd);
+  // A purely static, no-data, no-auth app needs none of this.
+  if (!(prd.storesData || prd.auth !== "none" || sensitive)) return reqs;
+
+  if (sensitive || prd.tenancy === "multi-tenant") {
+    reqs.push("Require authentication on every route that reads or writes data; never expose data on an unauthenticated endpoint.");
+  }
+  if (sensitive && prd.storesData) {
+    reqs.push("Add a migration that ENABLES Row-Level Security on every table holding sensitive data AND defines access policies (RLS on with no policy is not enough).");
+    reqs.push(
+      prd.tenancy === "multi-tenant"
+        ? "Scope every RLS policy to the owning user/tenant — e.g. `using (auth.uid() = user_id)` or a tenant-membership check. Do NOT use `using (true)` or `auth.uid() is not null` for reads; those let any logged-in user read everyone's rows."
+        : "Scope every RLS policy to the owning user — e.g. `using (auth.uid() = user_id)`. Do NOT use `using (true)`.",
+    );
+    reqs.push("Connect to the database as a non-privileged role so RLS is actually enforced.");
+  }
+  if (prd.storesData) {
+    reqs.push("Use parameterized queries for all database access; never build SQL by string interpolation.");
+  }
+  reqs.push("Keep all secrets, API keys, and tokens in environment variables — never hardcode them in source.");
+  if (sensitive) {
+    reqs.push("Never log sensitive fields (PII / PHI / financial) or include them in error messages.");
+  }
+  return reqs;
+}
+
+/** Turn a ready PRD into the build instruction the generation engine receives. */
+export function buildGenerationBrief(prd: Prd): string {
+  const out: string[] = ["Build this application to the following specification.", ""];
+  if (prd.summary) out.push(prd.summary, "");
+  if (prd.users) out.push(`Users: ${prd.users}`);
+  out.push(`Tenancy: ${prd.tenancy}`, `Authentication: ${prd.auth}`, "");
+
+  if (prd.features.length) {
+    out.push("Features:");
+    for (const f of prd.features) out.push(`- ${f}`);
+    out.push("");
+  }
+  if (prd.dataEntities.length) {
+    out.push("Data model:");
+    for (const e of prd.dataEntities) out.push(`- ${e.name}(${e.fields.join(", ")})${e.sensitive ? "  [sensitive]" : ""}`);
+    out.push("");
+  }
+
+  const reqs = securityRequirements(prd);
+  if (reqs.length) {
+    out.push("SECURITY REQUIREMENTS — these are checked by automated gates; the build MUST satisfy every one:");
+    for (const r of reqs) out.push(`- ${r}`);
+  }
+  return out.join("\n");
+}

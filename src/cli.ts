@@ -11,7 +11,7 @@ import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { decideRigor, llmIntake, planIntake, type Prd } from "./prd/index.ts";
+import { buildGenerationBrief, decideRigor, llmIntake, planIntake, type Prd } from "./prd/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -42,6 +42,47 @@ function printPrd(prd: Prd): void {
   }
   const sens = prd.sensitiveData.filter((c) => c !== "none");
   if (sens.length) console.log(`   sensitive data: ${sens.join(", ")}`);
+}
+
+/** Run the engine over `target` with `prompt`; stream events. Returns false on a
+ *  generation error (so the caller skips gating a half-built app). Shared by
+ *  `generate` (raw prompt) and `build` (PRD brief). */
+async function streamGeneration(target: string, prompt: string, provider: string, model: string): Promise<boolean> {
+  const session = await new BoltEngine(liveBoltDriver()).startSession(target, { provider, model });
+  let ok = true;
+  try {
+    for await (const ev of session.prompt(prompt)) {
+      if (ev.type === "thinking") console.log(`… ${ev.text}`);
+      else if (ev.type === "message") console.log(ev.text);
+      else if (ev.type === "file-changed") console.log(`  ${ev.action}: ${ev.path}`);
+      else if (ev.type === "error") {
+        console.error(`generation error: ${ev.message}`);
+        ok = false;
+      }
+    }
+  } finally {
+    await session.dispose();
+  }
+  return ok;
+}
+
+/** Gate `target` and print the verdict the operator-facing way. Returns passed. */
+async function gateAndReport(target: string): Promise<boolean> {
+  const result = await runGate(target);
+  for (const v of result.verdicts) console.log(`  ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking)`);
+  if (!result.passed) {
+    console.log("\nWhat needs attention before this can ship:");
+    for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
+    console.log("\n🛑 BLOCK — fix or escalate (drydock escalate <dir>)");
+  } else {
+    const warnings = result.verdicts.flatMap((v) => v.findings);
+    if (warnings.length) {
+      console.log("\n⚠️  Heads-up (not blocking — worth a reviewer's eye):");
+      for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
+    }
+    console.log("\n✅ PASS — deploy allowed");
+  }
+  return result.passed;
 }
 
 /** Print a finding the way a non-technical operator reads it: plain-English first
@@ -114,6 +155,45 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
 
+  if (cmd === "build") {
+    const [, promptText, dir] = argv;
+    if (!promptText || !dir) {
+      console.error('usage: drydock build "<prompt>" <dir>');
+      return 2;
+    }
+    const target = resolve(dir);
+    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+
+    // 1. Front-half (§22): plan + grill. A spec with BLOCKING gaps must not proceed
+    //    to codegen — the front-half gate refuses to build an underspecified app.
+    console.log(`planning with ${provider}/${model} …`);
+    const plan = await planIntake(promptText, {
+      intake: llmIntake({ config: { provider, model } }),
+      onStep: (m) => console.log(`  … ${m}`),
+    });
+    printPrd(plan.prd);
+    console.log(`\n   rigor: ${decideRigor(plan.prd)} (§16 adaptive)`);
+    for (const f of plan.gaps.filter((g) => !isBlocking(g))) {
+      console.log("\n⚠️  built into the spec (not blocking):");
+      explainFinding(f);
+    }
+    if (!plan.ready) {
+      console.log("\n🛑 spec NOT ready — clarify these and retry (not building an underspecified app):");
+      for (const f of plan.gaps.filter(isBlocking)) explainFinding(f);
+      return 1;
+    }
+
+    // 2. Generate AGAINST the spec — its security posture becomes explicit build
+    //    instructions (the front-half's payoff).
+    console.log(`\n── generating against the spec → ${target} ──`);
+    if (!(await streamGeneration(target, buildGenerationBrief(plan.prd), provider, model))) return 1;
+
+    // 3. Back-half: gate the result.
+    console.log(`\n── gating generated app at ${target} ──`);
+    return (await gateAndReport(target)) ? 0 : 1;
+  }
+
   if (cmd === "generate") {
     const [, promptText, dir] = argv;
     if (!promptText || !dir) {
@@ -127,45 +207,9 @@ export async function main(argv: string[]): Promise<number> {
     const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
     const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     console.log(`generating with ${provider}/${model} → ${target}`);
-    const engine = new BoltEngine(liveBoltDriver());
-    const session = await engine.startSession(target, { provider, model });
-    let failed = false;
-    try {
-      for await (const ev of session.prompt(promptText)) {
-        if (ev.type === "thinking") console.log(`… ${ev.text}`);
-        else if (ev.type === "message") console.log(ev.text);
-        else if (ev.type === "file-changed") console.log(`  ${ev.action}: ${ev.path}`);
-        else if (ev.type === "error") {
-          console.error(`generation error: ${ev.message}`);
-          failed = true;
-        }
-      }
-    } finally {
-      await session.dispose();
-    }
-    if (failed) return 1; // don't gate a half-generated app
-
+    if (!(await streamGeneration(target, promptText, provider, model))) return 1; // don't gate a half-built app
     console.log(`\n── gating generated app at ${target} ──`);
-    const result = await runGate(target);
-    for (const v of result.verdicts) {
-      console.log(`  ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking)`);
-    }
-    if (!result.passed) {
-      console.log("\nWhat needs attention before this can ship:");
-      for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
-      console.log("\n🛑 BLOCK — fix or escalate (drydock escalate <dir>)");
-    } else {
-      // On PASS every finding is non-blocking (medium/low) — surface them as
-      // heads-up warnings (e.g. an RLS rule that's broader than per-user) so they
-      // don't vanish on the happy path; a reviewer should still eyeball them.
-      const warnings = result.verdicts.flatMap((v) => v.findings);
-      if (warnings.length) {
-        console.log("\n⚠️  Heads-up (not blocking — worth a reviewer's eye):");
-        for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
-      }
-      console.log("\n✅ PASS — deploy allowed");
-    }
-    return result.passed ? 0 : 1;
+    return (await gateAndReport(target)) ? 0 : 1;
   }
 
   if (cmd === "fix") {
@@ -246,7 +290,8 @@ export async function main(argv: string[]): Promise<number> {
       "drydock — safe vibe coding.",
       "",
       '  drydock plan "<prompt>"             draft + grill a PRD spec before building (front-half §22)',
-      '  drydock generate "<prompt>" <dir>   generate an app (bolt engine) + auto-gate it',
+      '  drydock build "<prompt>" <dir>      plan → generate against the spec → gate (full pipeline)',
+      '  drydock generate "<prompt>" <dir>   generate an app from a raw prompt (engine only) + auto-gate it',
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
