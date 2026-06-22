@@ -46,6 +46,8 @@ describe("translateFinding — every ruleId our gates emit is covered (no generi
     ["verify", "no-entry-point"],
     ["verify", "build-failed"],
     ["verify", "install-failed"],
+    ["verify", "clean-verify-failed"],
+    ["verify", "unclean-shutdown"],
     ["semgrep", "scan-failed"],
     ["gitleaks", "scan-failed"],
     ["semgrep", "rules.sqlite-template-literal-query"],

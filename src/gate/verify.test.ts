@@ -9,8 +9,10 @@ import {
   isUp,
   parseEnvKeys,
   summarizeBuild,
+  summarizeShutdown,
   summarizeVerify,
   synthEnv,
+  verifyRuns,
 } from "./verify.ts";
 import { verdictOf } from "../types.ts";
 
@@ -76,6 +78,30 @@ describe("summarizeVerify (pure)", () => {
     const f = summarizeVerify(runs, 3);
     expect(f).toHaveLength(1);
     expect(f[0]!.message).toContain("body is not defined");
+  });
+});
+
+describe("verifyRuns — §18 adaptive rigor (1 / 3 / 5)", () => {
+  test("prototype → 1, production → 5, unknown → 3 (all-N-green is required by the loop)", () => {
+    expect(verifyRuns("prototype")).toBe(1);
+    expect(verifyRuns("production")).toBe(5);
+    expect(verifyRuns(null)).toBe(3);
+  });
+});
+
+describe("summarizeShutdown — §18 graceful shutdown (advisory)", () => {
+  test("an app that came up but was force-killed → one MEDIUM advisory (not a block)", () => {
+    const f = summarizeShutdown([
+      { run: 1, status: 200, cleanShutdown: false },
+      { run: 2, status: 200, cleanShutdown: true },
+    ]);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ ruleId: "unclean-shutdown", severity: "medium" });
+  });
+
+  test("clean shutdowns → no finding; and a down run's shutdown is irrelevant", () => {
+    expect(summarizeShutdown([{ run: 1, status: 200, cleanShutdown: true }])).toEqual([]);
+    expect(summarizeShutdown([{ run: 1, status: 0, cleanShutdown: false }])).toEqual([]); // never came up → n/a
   });
 });
 

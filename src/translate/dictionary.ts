@@ -191,6 +191,16 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "Installing the libraries the app needs failed, so it can't be built or run — usually a missing or broken dependency.",
   },
+  "clean-verify-failed": {
+    title: "The app works here, but not on a fresh machine",
+    detail:
+      "On a clean copy with nothing pre-installed, the app failed to install or build — usually a dependency it actually uses but didn't list, or a stale lock file. It would break the first time someone else (or the deploy server) sets it up.",
+  },
+  "unclean-shutdown": {
+    title: "The app doesn't shut down gracefully",
+    detail:
+      "When asked to stop, the app didn't exit promptly and had to be force-killed. On a deploy restart or scale-down it could drop requests that were in flight. It should handle the stop signal and exit cleanly.",
+  },
   // ── fail-closed (§11) — any gate's scanner that couldn't run ─────────────
   "scan-failed": {
     title: "A security check couldn't run — we stopped to be safe",

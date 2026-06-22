@@ -21,17 +21,28 @@
  * `synthEnv`) are separated from the I/O (spawning node/npm) and unit-tested; the
  * launches are integration-tested.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
+import { coerceSpec, decideRigor, type Rigor } from "../spec/index.ts";
+import { DERIVED_DIRS } from "./scan-scope.ts";
 
-const RUNS = 3;
+const RUNS = 3; // default when rigor is unknown; see verifyRuns
 const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
 const PROBE_INTERVAL_MS = 100;
+const SHUTDOWN_GRACE_MS = 5000; // §18: a served app must exit on SIGTERM within this
+const CLEAN_TIMEOUT_MS = 120_000; // §18: clean-env install/build under a portable timeout
 /** Probe order: the conventional health route first, then root. The first to
  *  return an "up" status wins — an app serving either has booted. */
 const PROBE_PATHS = ["/health", "/"] as const;
+
+/** §18/§16 adaptive rigor: how many launch runs to require. "Pass" = ALL N green —
+ *  one flake fails the gate. prototype 1 · default 3 (rigor unknown) · production 5. */
+export function verifyRuns(rigor: Rigor | null): number {
+  return rigor === "production" ? 5 : rigor === "prototype" ? 1 : 3;
+}
 
 /** A server is "up" if it answers with any 2xx or 3xx — it booted and is serving
  *  (a 3xx is the common "/ → /login" redirect of a server-rendered app). 4xx/5xx
@@ -47,6 +58,8 @@ export interface VerifyRun {
   run: number;
   status: number;
   log?: string;
+  /** did the process exit on SIGTERM within the grace window (vs needing SIGKILL)? */
+  cleanShutdown?: boolean;
 }
 
 interface Pkg {
@@ -136,6 +149,23 @@ export function summarizeVerify(runs: VerifyRun[], required: number = RUNS): Fin
       severity: "high",
       file: "server.js",
       message: `launch probe: ${healthy}/${required} runs came up on /health or / — app is not reliably healthy${tail}`,
+    },
+  ];
+}
+
+/** Pure (§18 graceful shutdown): an app that came up but had to be force-killed
+ *  (didn't exit on SIGTERM within the grace window) → an advisory. It ran, so this
+ *  doesn't block; but it risks dropping in-flight requests on a deploy restart. */
+export function summarizeShutdown(runs: VerifyRun[]): Finding[] {
+  const unclean = runs.some((r) => isUp(r.status) && r.cleanShutdown === false);
+  if (!unclean) return [];
+  return [
+    {
+      tool: "verify",
+      ruleId: "unclean-shutdown",
+      severity: "medium",
+      file: "server.js",
+      message: `The app didn't exit within ${SHUTDOWN_GRACE_MS / 1000}s of SIGTERM and had to be force-killed — on a deploy restart or scale-down it may drop in-flight requests. Handle SIGTERM to shut down gracefully.`,
     },
   ];
 }
@@ -231,6 +261,79 @@ async function runBuild(projectPath: string, script: string): Promise<BuildOutco
   };
 }
 
+/** Read the rigor the front-half persisted (.drydock/spec.json). Null → unknown
+ *  (default rigor — 3 runs, no heavy clean-env check). */
+function readRigor(projectPath: string): Rigor | null {
+  const p = join(projectPath, ".drydock", "spec.json");
+  if (!existsSync(p)) return null;
+  try {
+    return decideRigor(coerceSpec(JSON.parse(readFileSync(p, "utf8"))));
+  } catch {
+    return null;
+  }
+}
+
+const COPY_EXCLUDE = new Set<string>(DERIVED_DIRS);
+
+/**
+ * Clean-env verify (§18): prove a FRESH machine can install + build — copy the
+ * AUTHORED source (no node_modules / derived) to a temp dir, install from scratch
+ * (`npm ci` if a lockfile, else `npm install`), then build. Catches "works on my
+ * machine": an undeclared dependency that's present locally, or lockfile drift. Heavy
+ * (a from-scratch install) → run at production rigor only, ONCE, before the loop.
+ */
+async function cleanEnvVerify(projectPath: string, env: Record<string, string | undefined>): Promise<Finding[]> {
+  const pkg = readPkg(projectPath);
+  if (!pkg || !hasDeps(pkg)) return []; // nothing to install → not applicable
+  let tmp: string;
+  try {
+    tmp = mkdtempSync(join(tmpdir(), "drydock-clean-"));
+  } catch (e) {
+    return [cleanFinding("copy", String(e))]; // §11 fail-closed: couldn't run the check
+  }
+  try {
+    cpSync(projectPath, tmp, {
+      recursive: true,
+      // skip derived dirs by basename → a fresh tree, like a clean checkout
+      filter: (src) => !COPY_EXCLUDE.has(src.split("/").pop() ?? ""),
+    });
+    const cmd = existsSync(join(tmp, "package-lock.json"))
+      ? ["npm", "ci", "--no-audit", "--no-fund"]
+      : ["npm", "install", "--no-audit", "--no-fund"];
+    const install = Bun.spawnSync(cmd, { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+    if ((install.exitCode ?? 1) !== 0) {
+      return [cleanFinding("install", `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`)];
+    }
+    if (pkg.scripts?.build) {
+      const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+      if ((build.exitCode ?? 1) !== 0) {
+        return [cleanFinding("build", `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`)];
+      }
+    }
+    return [];
+  } catch (e) {
+    return [cleanFinding("copy", String(e))];
+  } finally {
+    try {
+      rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+}
+
+function cleanFinding(stage: "copy" | "install" | "build", log: string): Finding {
+  const what = stage === "build" ? "`npm run build`" : stage === "install" ? "`npm ci` / `npm install`" : "copying the source";
+  const tail = log.trim() ? ` — error: ${log.trim().slice(-500)}` : "";
+  return {
+    tool: "verify",
+    ruleId: "clean-verify-failed",
+    severity: "high",
+    file: "package.json",
+    message: `On a clean machine (fresh copy, no node_modules), ${what} failed — the app works locally but not from scratch (an undeclared dependency or lockfile drift)${tail}`,
+  };
+}
+
 /** Try each probe path once; return the first "up" status, else 0. Redirects are
  *  followed, so a `/ → /login` app resolves to its real page status. */
 async function probePaths(port: number): Promise<number> {
@@ -254,7 +357,7 @@ async function probeOnce(
   entry: string,
   port: number,
   env: Record<string, string | undefined>,
-): Promise<{ status: number; log: string }> {
+): Promise<{ status: number; log: string; cleanShutdown: boolean }> {
   const proc = Bun.spawn(["node", entry], {
     cwd: projectPath,
     env: { ...env, PORT: String(port) },
@@ -262,6 +365,7 @@ async function probeOnce(
     stderr: "pipe",
   });
   let status = 0;
+  let cleanShutdown = true;
   try {
     for (let i = 0; i < PROBE_ATTEMPTS; i++) {
       await Bun.sleep(PROBE_INTERVAL_MS);
@@ -269,13 +373,21 @@ async function probeOnce(
       if (status) break;
     }
   } finally {
-    proc.kill();
-    await proc.exited.catch(() => {});
+    // §18 graceful shutdown: SIGTERM, then up to SHUTDOWN_GRACE_MS to exit. A clean
+    // app exits at once (the sleep is abandoned); one that hangs is force-killed and
+    // marked unclean. (A well-behaved process adds ~0ms here.)
+    proc.kill(); // SIGTERM
+    const exited = await Promise.race([proc.exited.then(() => true), Bun.sleep(SHUTDOWN_GRACE_MS).then(() => false)]);
+    if (!exited) {
+      cleanShutdown = false;
+      proc.kill(9); // SIGKILL
+      await proc.exited.catch(() => {});
+    }
   }
   const out = await new Response(proc.stdout).text().catch(() => "");
   const err = await new Response(proc.stderr).text().catch(() => "");
   // Prefer stderr — that's where a crash trace lands; fall back to stdout.
-  return { status, log: err.trim() || out.trim() };
+  return { status, log: err.trim() || out.trim(), cleanShutdown };
 }
 
 /** Verify `projectPath` boots: launch-probe a server, or build-verify a static app. */
@@ -302,20 +414,34 @@ export async function runVerify(
     );
   }
 
+  const env = { ...synthEnv(readEnvTemplates(projectPath)), ...process.env };
+  const rigor = readRigor(projectPath);
+  const findings: Finding[] = [];
+
+  // §18 clean-env verify (production rigor, heavy): prove a fresh machine can
+  // install + build. Runs ONCE, before the path-specific check.
+  if (rigor === "production") findings.push(...(await cleanEnvVerify(projectPath, env)));
+
   if (plan.kind === "build") {
-    return verdictOf("verify", summarizeBuild(await runBuild(projectPath, plan.script)), ranAt);
+    findings.push(...summarizeBuild(await runBuild(projectPath, plan.script)));
+    return verdictOf("verify", findings, ranAt);
   }
 
-  const env = { ...synthEnv(readEnvTemplates(projectPath)), ...process.env };
   // A node app can't launch without its deps; a fresh generation has none yet.
   const installFail = ensureInstalled(projectPath, env);
-  if (installFail) return verdictOf("verify", summarizeBuild(installFail), ranAt);
-  const runs: VerifyRun[] = [];
-  for (let i = 1; i <= RUNS; i++) {
-    const { status, log } = await probeOnce(projectPath, plan.entry, 4100 + i, env);
-    runs.push({ run: i, status, log });
+  if (installFail) {
+    findings.push(...summarizeBuild(installFail));
+    return verdictOf("verify", findings, ranAt);
   }
-  return verdictOf("verify", summarizeVerify(runs), ranAt);
+  // §18 adaptive: ALL N runs must come up healthy (N scales with rigor).
+  const required = verifyRuns(rigor);
+  const runs: VerifyRun[] = [];
+  for (let i = 1; i <= required; i++) {
+    const { status, log, cleanShutdown } = await probeOnce(projectPath, plan.entry, 4100 + i, env);
+    runs.push({ run: i, status, log, cleanShutdown });
+  }
+  findings.push(...summarizeVerify(runs, required), ...summarizeShutdown(runs));
+  return verdictOf("verify", findings, ranAt);
 }
 
 export const verifyGate = { name: "verify", run: (p: string) => runVerify(p) };
