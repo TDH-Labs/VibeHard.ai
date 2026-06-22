@@ -17,6 +17,7 @@ import { elaboratePrd, llmElaborator } from "./prd/index.ts";
 import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
+import { fileCheckpointer, llmRefactorer, llmScorer, refactorPhase } from "./refactor/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -291,6 +292,35 @@ export async function main(argv: string[]): Promise<number> {
     return runAutoFixAndReport(target);
   }
 
+  if (cmd === "refactor") {
+    if (!arg) {
+      console.error("usage: drydock refactor <dir>");
+      return 2;
+    }
+    const target = resolve(arg);
+    // refactor-phase runs ONLY on a passing build — improving quality presupposes a
+    // correct + secure starting point (§22). Confirm green before touching it.
+    const pre = await runGate(target);
+    if (!pre.passed) {
+      console.log("🛑 refactor runs only on a PASSING build — gate it (and fix/escalate) first.");
+      return 1;
+    }
+    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const config = { provider, model };
+    console.log("refactor-phase: score quality → refactor (behavior-preserving) → re-verify, revert on break …");
+    const result = await refactorPhase(target, {
+      scorer: llmScorer({ config }),
+      refactorer: llmRefactorer({ config }),
+      verify: (ws) => runGate(ws).then((r) => r.passed), // the deterministic disposer: must still pass ALL gates
+      checkpoint: fileCheckpointer,
+      onStep: (m) => console.log(`  … ${m}`),
+    });
+    for (const l of result.log) console.log(`  ${l}`);
+    console.log(`\n✨ refactor-phase done — ${result.accepted} accepted, ${result.rejected} reverted (the passing build is preserved).`);
+    return 0;
+  }
+
   if (cmd === "queue") {
     const state = arg as TicketState | undefined; // optional filter: needs-human | claimed | resolved
     const tickets = await localSink().list(state);
@@ -369,6 +399,7 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
+      "  drydock refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",
       "  drydock queue [state]              list held escalations (needs-human | claimed | resolved)",
       "  drydock prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
