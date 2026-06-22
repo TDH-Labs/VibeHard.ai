@@ -1,7 +1,7 @@
 /**
- * The live `Intake` (PROJECT_BRIEF.md §22): an LLM drafts a `Prd` as JSON, which
- * `parsePrd` then forces through the deterministic trust boundary (coerce.ts). The
- * model proposes the spec; our code validates its shape and `reviewPrd` judges its
+ * The live `Intake` (PROJECT_BRIEF.md §22): an LLM drafts a `Spec` as JSON, which
+ * `parseSpec` then forces through the deterministic trust boundary (coerce.ts). The
+ * model proposes the spec; our code validates its shape and `reviewSpec` judges its
  * readiness. Reuses the engine's ModelFactory so provider/model selection is the
  * single source of truth (§13). The I/O half — the loop in intake.ts stays pure.
  */
@@ -9,7 +9,7 @@ import { generateText } from "ai";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
-import { parsePrd } from "./coerce.ts";
+import { parseSpec } from "./coerce.ts";
 import type { Intake } from "./intake.ts";
 
 const INTAKE_SYSTEM_PROMPT = `You turn a non-technical person's app idea into a structured PRD (product spec) that a builder AND an automated security gate will use. Assess the idea HONESTLY — especially the security-relevant fields, which decide what protections the build needs.
@@ -40,7 +40,7 @@ export interface LlmIntakeOptions {
   config?: EngineConfig;
 }
 
-/** The production intake: prompt → PRD JSON → coerced `Prd`. */
+/** The production intake: prompt → PRD JSON → coerced `Spec`. */
 export function llmIntake(opts: LlmIntakeOptions = {}): Intake {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   const config: EngineConfig =
@@ -55,7 +55,7 @@ export function llmIntake(opts: LlmIntakeOptions = {}): Intake {
           "Your previous PRD draft had these BLOCKING gaps — fix every one:",
           ...prior.gaps.filter(isBlocking).map((g) => `- ${g.message}`),
           "",
-          `Previous draft:\n${JSON.stringify(prior.prd)}`,
+          `Previous draft:\n${JSON.stringify(prior.spec)}`,
           "",
           "Return the corrected PRD JSON.",
         ].join("\n")
@@ -67,6 +67,6 @@ export function llmIntake(opts: LlmIntakeOptions = {}): Intake {
       prompt: user,
       maxOutputTokens: 4000,
     });
-    return parsePrd(text);
+    return parseSpec(text);
   };
 }

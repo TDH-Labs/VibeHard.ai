@@ -10,28 +10,28 @@
  * §16 BINDING: the brief asks for technical controls; it never claims compliance.
  * Pure — a function of the PRD only.
  */
-import { isSensitive, type Prd } from "./prd.ts";
+import { isSensitive, type Spec } from "./spec.ts";
 
 /** The security instructions implied by the spec — each maps to a gate it pre-empts. */
-export function securityRequirements(prd: Prd): string[] {
+export function securityRequirements(spec: Spec): string[] {
   const reqs: string[] = [];
-  const sensitive = isSensitive(prd);
+  const sensitive = isSensitive(spec);
   // A purely static, no-data, no-auth app needs none of this.
-  if (!(prd.storesData || prd.auth !== "none" || sensitive)) return reqs;
+  if (!(spec.storesData || spec.auth !== "none" || sensitive)) return reqs;
 
-  if (sensitive || prd.tenancy === "multi-tenant") {
+  if (sensitive || spec.tenancy === "multi-tenant") {
     reqs.push("Require authentication on every route that reads or writes data; never expose data on an unauthenticated endpoint.");
   }
-  if (sensitive && prd.storesData) {
+  if (sensitive && spec.storesData) {
     reqs.push("Add a migration that ENABLES Row-Level Security on every table holding sensitive data AND defines access policies (RLS on with no policy is not enough).");
     reqs.push(
-      prd.tenancy === "multi-tenant"
+      spec.tenancy === "multi-tenant"
         ? "Scope every RLS policy to the owning user/tenant — e.g. `using (auth.uid() = user_id)` or a tenant-membership check. Do NOT use `using (true)` or `auth.uid() is not null` for reads; those let any logged-in user read everyone's rows."
         : "Scope every RLS policy to the owning user — e.g. `using (auth.uid() = user_id)`. Do NOT use `using (true)`.",
     );
     reqs.push("Connect to the database as a non-privileged role so RLS is actually enforced.");
   }
-  if (prd.storesData) {
+  if (spec.storesData) {
     reqs.push("Use parameterized queries for all database access; never build SQL by string interpolation.");
   }
   reqs.push("Keep all secrets, API keys, and tokens in environment variables — never hardcode them in source.");
@@ -42,24 +42,24 @@ export function securityRequirements(prd: Prd): string[] {
 }
 
 /** Turn a ready PRD into the build instruction the generation engine receives. */
-export function buildGenerationBrief(prd: Prd): string {
+export function buildGenerationBrief(spec: Spec): string {
   const out: string[] = ["Build this application to the following specification.", ""];
-  if (prd.summary) out.push(prd.summary, "");
-  if (prd.users) out.push(`Users: ${prd.users}`);
-  out.push(`Tenancy: ${prd.tenancy}`, `Authentication: ${prd.auth}`, "");
+  if (spec.summary) out.push(spec.summary, "");
+  if (spec.users) out.push(`Users: ${spec.users}`);
+  out.push(`Tenancy: ${spec.tenancy}`, `Authentication: ${spec.auth}`, "");
 
-  if (prd.features.length) {
+  if (spec.features.length) {
     out.push("Features:");
-    for (const f of prd.features) out.push(`- ${f}`);
+    for (const f of spec.features) out.push(`- ${f}`);
     out.push("");
   }
-  if (prd.dataEntities.length) {
+  if (spec.dataEntities.length) {
     out.push("Data model:");
-    for (const e of prd.dataEntities) out.push(`- ${e.name}(${e.fields.join(", ")})${e.sensitive ? "  [sensitive]" : ""}`);
+    for (const e of spec.dataEntities) out.push(`- ${e.name}(${e.fields.join(", ")})${e.sensitive ? "  [sensitive]" : ""}`);
     out.push("");
   }
 
-  const reqs = securityRequirements(prd);
+  const reqs = securityRequirements(spec);
   if (reqs.length) {
     out.push("SECURITY REQUIREMENTS — these are checked by automated gates; the build MUST satisfy every one:");
     for (const r of reqs) out.push(`- ${r}`);

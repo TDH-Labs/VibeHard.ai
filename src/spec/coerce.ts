@@ -2,12 +2,12 @@
  * The PRD trust boundary (PROJECT_BRIEF.md §11: the LLM proposes, deterministic
  * code disposes). An LLM drafts a PRD as free-form JSON; NONE of its shape is
  * trusted. `extractJsonObject` pulls the object out of the model's text (fenced or
- * bare), and `coercePrd` forces arbitrary parsed JSON into a valid `Prd` — clamping
+ * bare), and `coerceSpec` forces arbitrary parsed JSON into a valid `Spec` — clamping
  * enums, coercing types, filling conservative defaults (unknown auth → "none",
  * unknown tenancy → "single-user"), so a malformed or adversarial draft can never
  * produce an invalid spec that the readiness check then mis-judges. Pure.
  */
-import type { DataEntity, Prd, SensitiveClass, Tenancy } from "./prd.ts";
+import type { DataEntity, Spec, SensitiveClass, Tenancy } from "./spec.ts";
 
 const TENANCIES: readonly Tenancy[] = ["single-user", "single-tenant", "multi-tenant"];
 const SENSITIVE: readonly SensitiveClass[] = ["none", "pii", "phi", "financial", "credentials"];
@@ -25,10 +25,10 @@ function coerceEntity(v: unknown): DataEntity | null {
   return { name, fields: asStrArr(o.fields), sensitive: asBool(o.sensitive) };
 }
 
-/** Force any parsed JSON into a valid `Prd`. Conservative defaults so a missing
+/** Force any parsed JSON into a valid `Spec`. Conservative defaults so a missing
  *  field never silently looks "safe" (e.g. omitted auth → "none", which the
  *  readiness check then flags for a sensitive app rather than assuming auth exists). */
-export function coercePrd(raw: unknown): Prd {
+export function coerceSpec(raw: unknown): Spec {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const tenancy = TENANCIES.includes(o.tenancy as Tenancy) ? (o.tenancy as Tenancy) : "single-user";
   const sensitiveData = (Array.isArray(o.sensitiveData) ? o.sensitiveData : []).filter(
@@ -63,7 +63,7 @@ export function extractJsonObject(text: string): unknown {
   return JSON.parse(body.slice(start, end + 1));
 }
 
-/** Extract + coerce in one step: untrusted model text → a valid `Prd`. */
-export function parsePrd(text: string): Prd {
-  return coercePrd(extractJsonObject(text));
+/** Extract + coerce in one step: untrusted model text → a valid `Spec`. */
+export function parseSpec(text: string): Spec {
+  return coerceSpec(extractJsonObject(text));
 }

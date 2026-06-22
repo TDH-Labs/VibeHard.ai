@@ -7,15 +7,15 @@
 export {
   decideRigor,
   isSensitive,
-  prdVerdict,
-  reviewPrd,
+  specVerdict,
+  reviewSpec,
   type DataEntity,
-  type Prd,
+  type Spec,
   type Rigor,
   type SensitiveClass,
   type Tenancy,
-} from "./prd.ts";
-export { coercePrd, extractJsonObject, parsePrd } from "./coerce.ts";
+} from "./spec.ts";
+export { coerceSpec, extractJsonObject, parseSpec } from "./coerce.ts";
 export { planIntake, type Intake, type PlanOptions, type PlanResult } from "./intake.ts";
 export { llmIntake, type LlmIntakeOptions } from "./intake-llm.ts";
 export { buildGenerationBrief, securityRequirements } from "./brief.ts";

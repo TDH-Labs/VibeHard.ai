@@ -4,7 +4,7 @@
  * verified": this is the *scoped* half. An LLM DRAFTS a PRD from the operator's
  * prompt (the proposing seam — next increment); this module is the DISPOSING half:
  *
- *   • `reviewPrd` — a deterministic spec-readiness check (the "grill"). It returns
+ *   • `reviewSpec` — a deterministic spec-readiness check (the "grill"). It returns
  *     the SAME `Finding` shape the gates emit, so a PRD gap flows through the same
  *     translation + escalation machinery, and a *blocking* gap stops codegen exactly
  *     like a gate stops a deploy. Crucially it PREDICTS the back-half: a multi-tenant
@@ -33,7 +33,7 @@ export interface DataEntity {
 }
 
 /** The structured spec the front-half produces and the back-half builds against. */
-export interface Prd {
+export interface Spec {
   name: string;
   summary: string;
   features: string[];
@@ -48,12 +48,12 @@ export interface Prd {
 }
 
 /** True if the spec involves sensitive data, by classification OR a flagged entity. */
-export function isSensitive(prd: Prd): boolean {
-  return prd.sensitiveData.some((c) => c !== "none") || prd.dataEntities.some((e) => e.sensitive);
+export function isSensitive(spec: Spec): boolean {
+  return spec.sensitiveData.some((c) => c !== "none") || spec.dataEntities.some((e) => e.sensitive);
 }
 
 const gap = (ruleId: string, severity: Finding["severity"], field: string, message: string): Finding => ({
-  tool: "prd",
+  tool: "spec",
   ruleId,
   severity,
   file: field, // the PRD field the gap is in (no file/line — this is a spec, not code)
@@ -65,24 +65,24 @@ const gap = (ruleId: string, severity: Finding["severity"], field: string, messa
  * an underspecified spec); medium/low = ADVISORY (surface, don't block). Mirrors the
  * gate disposition so the front-half is a quality bar, not just an LLM prompt.
  */
-export function reviewPrd(prd: Prd): Finding[] {
+export function reviewSpec(spec: Spec): Finding[] {
   const out: Finding[] = [];
-  const sensitive = isSensitive(prd);
+  const sensitive = isSensitive(spec);
 
   // Nothing to build.
-  if (prd.features.length === 0) {
+  if (spec.features.length === 0) {
     out.push(gap("no-features", "high", "features", "No features are defined — there's nothing concrete to build yet."));
   }
 
   // Stores data but no model → you can't safely build the schema (and the rls gate
   // would have nothing coherent to check).
-  if (prd.storesData && prd.dataEntities.length === 0) {
+  if (spec.storesData && spec.dataEntities.length === 0) {
     out.push(gap("no-data-model", "high", "dataEntities", "The app stores data but no data model (entities/fields) is defined."));
   }
 
   // Sensitive or multi-tenant with no auth = open to anyone. The CVE-class mistake,
   // caught at the spec.
-  if ((sensitive || prd.tenancy === "multi-tenant") && prd.auth === "none") {
+  if ((sensitive || spec.tenancy === "multi-tenant") && spec.auth === "none") {
     out.push(
       gap("no-auth-for-sensitive", "critical", "auth", "Sensitive or multi-tenant data with no authentication — anyone could reach it. Define how users sign in before building."),
     );
@@ -92,7 +92,7 @@ export function reviewPrd(prd: Prd): Finding[] {
   // isolation will be required. ADVISORY, not blocking — the spec is buildable; this
   // is a heads-up to carry into the architecture/codegen plan, and the rls gate
   // ENFORCES it after codegen (front-half advises, back-half disposes).
-  if (prd.tenancy === "multi-tenant" && sensitive) {
+  if (spec.tenancy === "multi-tenant" && sensitive) {
     out.push(
       gap(
         "tenant-isolation-required",
@@ -104,14 +104,14 @@ export function reviewPrd(prd: Prd): Finding[] {
   }
 
   // §21 control 2 (advisory): sensitive data needs a retention + deletion story.
-  if (sensitive && !/\b(retention|delet|purge|erasure|expire|ttl)\w*/i.test(`${prd.summary} ${prd.features.join(" ")}`)) {
+  if (sensitive && !/\b(retention|delet|purge|erasure|expire|ttl)\w*/i.test(`${spec.summary} ${spec.features.join(" ")}`)) {
     out.push(
       gap("no-retention-plan", "medium", "sensitiveData", "Sensitive data with no stated retention or deletion plan — note how long it's kept and how it's removed (helps toward compliance; it never certifies it)."),
     );
   }
 
   // Consistency: an entity is flagged sensitive but the classification is empty.
-  if (prd.dataEntities.some((e) => e.sensitive) && !prd.sensitiveData.some((c) => c !== "none")) {
+  if (spec.dataEntities.some((e) => e.sensitive) && !spec.sensitiveData.some((c) => c !== "none")) {
     out.push(
       gap("sensitive-classification-gap", "low", "sensitiveData", "A data entity is marked sensitive but the data classification is empty — classify it (PII / PHI / financial)."),
     );
@@ -121,8 +121,8 @@ export function reviewPrd(prd: Prd): Finding[] {
 }
 
 /** Wrap the readiness check as a gate-style verdict (block iff a blocking gap). */
-export function prdVerdict(prd: Prd, ranAt: string = new Date().toISOString()): GateVerdict {
-  return verdictOf("prd", reviewPrd(prd), ranAt);
+export function specVerdict(spec: Spec, ranAt: string = new Date().toISOString()): GateVerdict {
+  return verdictOf("spec", reviewSpec(spec), ranAt);
 }
 
 /**
@@ -130,6 +130,6 @@ export function prdVerdict(prd: Prd, ranAt: string = new Date().toISOString()): 
  * when the spec serves real users, is maintained over time, OR touches sensitive
  * data; otherwise prototype rigor (skip the ceremony — a throwaway doesn't need a PRD).
  */
-export function decideRigor(prd: Prd): Rigor {
-  return prd.realUsers || prd.maintained || isSensitive(prd) ? "production" : "prototype";
+export function decideRigor(spec: Spec): Rigor {
+  return spec.realUsers || spec.maintained || isSensitive(spec) ? "production" : "prototype";
 }

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { planIntake, type Intake } from "./intake.ts";
-import type { Prd } from "./prd.ts";
+import type { Spec } from "./spec.ts";
 
-/** A ready, non-sensitive prototype spec (reviewPrd → no findings at all). */
-const readyPrd: Prd = {
+/** A ready, non-sensitive prototype spec (reviewSpec → no findings at all). */
+const readySpec: Spec = {
   name: "converter",
   summary: "metric/imperial converter",
   features: ["convert length"],
@@ -18,8 +18,8 @@ const readyPrd: Prd = {
 };
 
 /** A spec with a BLOCKING gap: sensitive + multi-tenant with no auth. */
-const blockedPrd: Prd = {
-  ...readyPrd,
+const blockedSpec: Spec = {
+  ...readySpec,
   name: "leaky",
   tenancy: "multi-tenant",
   storesData: true,
@@ -28,12 +28,12 @@ const blockedPrd: Prd = {
   auth: "none",
 };
 
-describe("planIntake — grill loop (LLM proposes, reviewPrd disposes)", () => {
+describe("planIntake — grill loop (LLM proposes, reviewSpec disposes)", () => {
   test("a ready first draft → one round, ready, no re-draft", async () => {
     let calls = 0;
     const intake: Intake = async () => {
       calls++;
-      return readyPrd;
+      return readySpec;
     };
     const r = await planIntake("a converter", { intake });
     expect(r.ready).toBe(true);
@@ -42,7 +42,7 @@ describe("planIntake — grill loop (LLM proposes, reviewPrd disposes)", () => {
   });
 
   test("blocked, then fixed on the next pass → two rounds, ready", async () => {
-    const drafts = [blockedPrd, { ...blockedPrd, auth: "email-password", name: "fixed" }];
+    const drafts = [blockedSpec, { ...blockedSpec, auth: "email-password", name: "fixed" }];
     let i = 0;
     const intake: Intake = async (_p, prior) => {
       expect(i === 0 ? prior === null : prior !== null).toBe(true); // prior carried on refine
@@ -51,11 +51,11 @@ describe("planIntake — grill loop (LLM proposes, reviewPrd disposes)", () => {
     const r = await planIntake("a clinic", { intake });
     expect(r.rounds).toBe(2);
     expect(r.ready).toBe(true);
-    expect(r.prd.name).toBe("fixed");
+    expect(r.spec.name).toBe("fixed");
   });
 
   test("never-fixable → stops at budget, NOT ready (the gate disposes — a bad draft can't force ready)", async () => {
-    const intake: Intake = async () => blockedPrd; // always blocked
+    const intake: Intake = async () => blockedSpec; // always blocked
     const r = await planIntake("a clinic", { intake, budget: 3 });
     expect(r.rounds).toBe(3);
     expect(r.ready).toBe(false);
@@ -66,7 +66,7 @@ describe("planIntake — grill loop (LLM proposes, reviewPrd disposes)", () => {
     let calls = 0;
     const intake: Intake = async () => {
       calls++;
-      return blockedPrd;
+      return blockedSpec;
     };
     const r = await planIntake("x", { intake, budget: 0 });
     expect(calls).toBe(1);

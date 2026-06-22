@@ -11,7 +11,7 @@ import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { buildGenerationBrief, decideRigor, llmIntake, planIntake, type Prd } from "./prd/index.ts";
+import { buildGenerationBrief, decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -27,20 +27,20 @@ function localSink(): LocalEscalationSink {
   return new LocalEscalationSink(queuePath());
 }
 
-/** Print a PRD the way an operator reads it (§22 front-half). */
-function printPrd(prd: Prd): void {
-  console.log(`\n📄 PRD: ${prd.name}`);
-  if (prd.summary) console.log(`   ${prd.summary}`);
-  console.log(`   users: ${prd.users || "—"} · tenancy: ${prd.tenancy} · auth: ${prd.auth}`);
-  if (prd.features.length) {
+/** Print a spec the way an operator reads it (§22 front-half). */
+function printSpec(spec: Spec): void {
+  console.log(`\n📄 Spec: ${spec.name}`);
+  if (spec.summary) console.log(`   ${spec.summary}`);
+  console.log(`   users: ${spec.users || "—"} · tenancy: ${spec.tenancy} · auth: ${spec.auth}`);
+  if (spec.features.length) {
     console.log("   features:");
-    for (const f of prd.features) console.log(`     - ${f}`);
+    for (const f of spec.features) console.log(`     - ${f}`);
   }
-  if (prd.dataEntities.length) {
+  if (spec.dataEntities.length) {
     console.log("   data model:");
-    for (const e of prd.dataEntities) console.log(`     - ${e.name}(${e.fields.join(", ")})${e.sensitive ? "  [sensitive]" : ""}`);
+    for (const e of spec.dataEntities) console.log(`     - ${e.name}(${e.fields.join(", ")})${e.sensitive ? "  [sensitive]" : ""}`);
   }
-  const sens = prd.sensitiveData.filter((c) => c !== "none");
+  const sens = spec.sensitiveData.filter((c) => c !== "none");
   if (sens.length) console.log(`   sensitive data: ${sens.join(", ")}`);
 }
 
@@ -138,8 +138,8 @@ export async function main(argv: string[]): Promise<number> {
       intake: llmIntake({ config: { provider, model } }),
       onStep: (m) => console.log(`  … ${m}`),
     });
-    printPrd(result.prd);
-    console.log(`\n   rigor: ${decideRigor(result.prd)} (§16 adaptive)`);
+    printSpec(result.spec);
+    console.log(`\n   rigor: ${decideRigor(result.spec)} (§16 adaptive)`);
 
     const advisory = result.gaps.filter((f) => !isBlocking(f));
     if (advisory.length) {
@@ -172,8 +172,8 @@ export async function main(argv: string[]): Promise<number> {
       intake: llmIntake({ config: { provider, model } }),
       onStep: (m) => console.log(`  … ${m}`),
     });
-    printPrd(plan.prd);
-    console.log(`\n   rigor: ${decideRigor(plan.prd)} (§16 adaptive)`);
+    printSpec(plan.spec);
+    console.log(`\n   rigor: ${decideRigor(plan.spec)} (§16 adaptive)`);
     for (const f of plan.gaps.filter((g) => !isBlocking(g))) {
       console.log("\n⚠️  built into the spec (not blocking):");
       explainFinding(f);
@@ -187,7 +187,7 @@ export async function main(argv: string[]): Promise<number> {
     // 2. Generate AGAINST the spec — its security posture becomes explicit build
     //    instructions (the front-half's payoff).
     console.log(`\n── generating against the spec → ${target} ──`);
-    if (!(await streamGeneration(target, buildGenerationBrief(plan.prd), provider, model))) return 1;
+    if (!(await streamGeneration(target, buildGenerationBrief(plan.spec), provider, model))) return 1;
 
     // 3. Back-half: gate the result.
     console.log(`\n── gating generated app at ${target} ──`);
