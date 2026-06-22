@@ -3,9 +3,10 @@
  * drydock CLI. M1: `drydock gate <dir>` runs the deterministic security gate
  * chain on a project directory (PROJECT_BRIEF.md §8, §12).
  */
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { deployGate, runGate } from "./gate/index.ts";
-import { buildEscalationPacket } from "./escalation/index.ts";
+import { buildEscalationPacket, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { translateFinding } from "./translate/index.ts";
@@ -15,6 +16,15 @@ import type { Finding, Severity } from "./types.ts";
 export const VERSION = "0.0.0";
 
 const SEV_DOT: Record<Severity, string> = { critical: "🔴", high: "🔴", medium: "🟠", low: "🟡" };
+
+/** The escalation queue location — a per-machine reviewer queue (§24 async queue).
+ *  Override with DRYDOCK_QUEUE_DIR. */
+function queuePath(): string {
+  return process.env.DRYDOCK_QUEUE_DIR ?? join(homedir(), ".drydock", "queue");
+}
+function localSink(): LocalEscalationSink {
+  return new LocalEscalationSink(queuePath());
+}
 
 /** Print a finding the way a non-technical operator reads it: plain-English first
  *  (the §15 translation), with the technical ruleId kept as a dim sub-line. */
@@ -120,9 +130,34 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`\n✅ auto-fix succeeded — gate green after ${result.attempts} attempt(s).`);
       return 0;
     }
-    console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s) — escalating residual:`);
+    // Auto-fix exhausted → HOLD for human review (a distinct `needs-human` state,
+    // not a failed build — §24) and QUEUE it async. The pipeline stops here; the
+    // human works it off-path and the re-gate (resume) returns it to the line.
+    console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
+    if (result.escalation) {
+      const ticket = await localSink().open(result.escalation);
+      console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
+      console.log(`   queued at ${queuePath()} — list with: drydock queue`);
+    }
+    console.log("\n   residual blocking findings:");
     for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
     return 1;
+  }
+
+  if (cmd === "queue") {
+    const state = arg as TicketState | undefined; // optional filter: needs-human | claimed | resolved
+    const tickets = await localSink().list(state);
+    if (!tickets.length) {
+      console.log(`queue empty${state ? ` (state: ${state})` : ""} — ${queuePath()}`);
+      return 0;
+    }
+    console.log(`${tickets.length} ticket(s)${state ? ` in ${state}` : ""} — ${queuePath()}`);
+    for (const t of tickets) {
+      console.log(`\n  ${t.id}  [${t.state}]${t.claimedBy ? ` · claimed by ${t.claimedBy}` : ""}`);
+      console.log(`     ${t.packet.blocking} blocking · routes: ${t.packet.specialties.join(", ")}`);
+      console.log(`     app: ${t.packet.workspacePath} · created ${t.createdAt}`);
+    }
+    return 0;
   }
 
   if (cmd === "escalate") {
@@ -136,7 +171,9 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     const packet = await buildEscalationPacket(result.verdicts, arg);
+    const ticket = await localSink().open(packet); // hold + queue for async human review (§24)
     console.log(`\n📦 escalation packet — ${packet.blocking} slice(s), routes: ${packet.specialties.join(", ")}`);
+    console.log(`   held for review: ticket ${ticket.id} [${ticket.state}] — queued at ${queuePath()}`);
     for (const item of packet.items) {
       const e = translateFinding(item.finding);
       // Operator-facing plain English…
@@ -161,11 +198,12 @@ export async function main(argv: string[]): Promise<number> {
       '  drydock generate "<prompt>" <dir>   generate an app (bolt engine) + auto-gate it',
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
-      "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, escalate",
-      "  drydock escalate <dir>             localize blocking findings into a routed review packet",
+      "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
+      "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",
+      "  drydock queue [state]              list held escalations (needs-human | claimed | resolved)",
       "",
       "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",
-      "generate needs ANTHROPIC_API_KEY.",
+      "generate needs ANTHROPIC_API_KEY. Review queue dir: DRYDOCK_QUEUE_DIR (default ~/.drydock/queue).",
     ].join("\n"),
   );
   return 0;

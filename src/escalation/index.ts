@@ -21,3 +21,13 @@ export {
   type WaivedResult,
 } from "./review.ts";
 export { resumeDeploy, type GateRunner, type ResumeOptions, type ResumeOutcome } from "./resume.ts";
+export {
+  LocalEscalationSink,
+  claimTicket,
+  openTicket,
+  resolveTicket,
+  ticketId,
+  type EscalationSink,
+  type EscalationTicket,
+  type TicketState,
+} from "./queue.ts";
