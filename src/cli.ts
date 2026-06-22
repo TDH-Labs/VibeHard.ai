@@ -5,6 +5,7 @@
  */
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
 import { buildEscalationPacket, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
@@ -28,6 +29,14 @@ function queuePath(): string {
 }
 function localSink(): LocalEscalationSink {
   return new LocalEscalationSink(queuePath());
+}
+
+/** Persist the spec into the project (.drydock/spec.json) so the compliance gate
+ *  (§21) has the data classification at gate time — the front-half's durable output. */
+function persistSpec(target: string, spec: Spec): void {
+  const dir = join(target, ".drydock");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "spec.json"), JSON.stringify(spec, null, 2));
 }
 
 /** Print a spec the way an operator reads it (§22 front-half). */
@@ -220,6 +229,7 @@ export async function main(argv: string[]): Promise<number> {
       for (const f of plan.gaps.filter(isBlocking)) explainFinding(f);
       return 1;
     }
+    persistSpec(target, plan.spec); // durable classification for the compliance gate (§21)
 
     // 2. spec → PRD (requirements + acceptance criteria + NFRs + buy-vs-build)
     console.log("\n── elaborating the PRD … ──");

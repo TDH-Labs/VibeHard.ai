@@ -12,12 +12,15 @@ import { sastGate } from "./sast.ts";
 import { secretsGate } from "./secrets.ts";
 import { depvulnGate } from "./depvuln.ts";
 import { rlsGate } from "./rls.ts";
+import { complianceGate } from "./compliance.ts";
 import { verifyGate } from "./verify.ts";
 
-/** The default gate chain. Source scanners (sast/secrets/depvuln/rls) run FIRST,
- *  on authored source; verify runs LAST because it builds the app (creating
- *  .next/dist/…) — keeping derived output out of the source scans (§11, §19). */
-export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, verifyGate];
+/** The default gate chain. Source scanners (sast/secrets/depvuln/rls/compliance) run
+ *  FIRST, on authored source; verify runs LAST because it builds the app (creating
+ *  .next/dist/…) — keeping derived output out of the source scans (§11, §19).
+ *  compliance is classification-driven: a no-op unless the app's spec flags sensitive
+ *  data (§21), so it never fires on a project that didn't go through the front-half. */
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, verifyGate];
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";

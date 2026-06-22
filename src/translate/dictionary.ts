@@ -113,6 +113,32 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "The architecture has a circular dependency, so there's no valid order to build the components in. The graph must be acyclic (e.g. database → API → UI).",
   },
+  // ── our compliance-posture gate (§21, bounded by §16) ────────────────────
+  "unauthenticated-sensitive-data": {
+    title: "Sensitive data with no login protecting it",
+    detail:
+      "The app handles sensitive data but doesn't require users to sign in to reach it. It must sit behind authentication before it can ship.",
+  },
+  "no-deletion-path": {
+    title: "No way to permanently delete sensitive records",
+    detail:
+      "The app stores sensitive data but offers no hard delete — only ways to hide records, not remove them. People can have a right to have their data erased, so the app needs a real delete path.",
+  },
+  "pii-logging-review": {
+    title: "Sensitive data might be written to the logs",
+    detail:
+      "A log line looks like it could record sensitive fields (passwords, card numbers, and the like) in plain text, where anyone with log access could read them. A reviewer should confirm and redact it.",
+  },
+  "governance-posture": {
+    title: "Organizational safeguards to put in place",
+    detail:
+      "Beyond the code, handling sensitive data needs organizational practices — a data-handling policy, a breach-notification plan, agreements with any third parties, and periodic access reviews. The app supports these; your organization has to establish them.",
+  },
+  "compliance-applicability": {
+    title: "Which data-protection programs likely apply to you",
+    detail:
+      "Based on the kind of data this app handles, certain organizational control areas typically apply. These are programs your organization runs (audits, policies); the build helps toward the technical parts, but it does not by itself satisfy them.",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",

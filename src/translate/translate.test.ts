@@ -31,6 +31,11 @@ describe("translateFinding — every ruleId our gates emit is covered (no generi
     ["architecture", "workstream-no-files"],
     ["architecture", "unknown-dependency"],
     ["architecture", "dependency-cycle"],
+    ["compliance", "unauthenticated-sensitive-data"],
+    ["compliance", "no-deletion-path"],
+    ["compliance", "pii-logging-review"],
+    ["compliance", "governance-posture"],
+    ["compliance", "compliance-applicability"],
     ["verify", "health-check-failed"],
     ["verify", "no-entry-point"],
     ["verify", "build-failed"],
@@ -96,8 +101,12 @@ describe("translateFinding — matching tiers", () => {
   });
 });
 
-describe("§16 compliance guard — no explanation claims certification", () => {
-  test("no entry says 'compliant'/'certified'", () => {
+describe("§16 compliance guard — no explanation CLAIMS compliance/certification", () => {
+  // §16 BINDING is about CLAIMS ("HIPAA compliant", "SOC 2 certified"), not mentions —
+  // the compliance gate legitimately NAMES frameworks to state applicability ("SOC 2
+  // Security likely applies… it does not certify"). So the guard bans the claim words,
+  // not the framework names.
+  test("no entry uses a compliance-CLAIM word (compliant / certified / certification)", () => {
     const ids = [
       "rls-disabled",
       "rls-policy-using-true",
@@ -106,6 +115,9 @@ describe("§16 compliance guard — no explanation claims certification", () => 
       "no-auth-for-sensitive",
       "tenant-isolation-required",
       "no-retention-plan",
+      "governance-posture",
+      "compliance-applicability",
+      "no-deletion-path",
       "scan-failed",
       "rules.sqlite-template-literal-query",
       "detected-stripe-api-key",
@@ -115,7 +127,7 @@ describe("§16 compliance guard — no explanation claims certification", () => 
     ];
     for (const ruleId of ids) {
       const e = translateFinding(f({ ruleId }));
-      expect(`${e.title} ${e.detail}`.toLowerCase()).not.toMatch(/compliant|certified|certification|hipaa|soc ?2/);
+      expect(`${e.title} ${e.detail}`.toLowerCase()).not.toMatch(/\b(compliant|certified|certification)\b/);
     }
   });
 });
