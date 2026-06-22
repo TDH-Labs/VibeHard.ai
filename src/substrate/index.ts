@@ -22,3 +22,4 @@ export type {
 export { FileRecordStore } from "./record.ts";
 export { LocalEncryptedSecretsStore } from "./secrets.ts";
 export { provisionAndDeploy, destroy, type DeployInput, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
+export { SupabaseBackendProvider, refFromUrl, resolveDbUrl, type SupabaseEnv, type SupabaseProviderOptions, type DbExecutor } from "./supabase.ts";
