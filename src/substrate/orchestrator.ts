@@ -1,0 +1,137 @@
+/**
+ * provisionAndDeploy — the deterministic runtime-substrate orchestrator
+ * (docs/runtime-substrate § W5). Turns a gated, passing app into a live one in the
+ * customer's own Supabase org. Fixed sequence of provider calls, ZERO LLM (§11):
+ *
+ *   gate sentinel present (precondition) → ensure project → apply migrations →
+ *   VERIFY LIVE RLS (abort if not enforced) → configure auth → store secrets →
+ *   deploy frontend → mark live.
+ *
+ * "Mark live" is reached ONLY if every step passed — including the live-RLS probe,
+ * the differentiated step that carries the gate guarantee into runtime. Any failure
+ * leaves the record at its last good state (status "failed"), so a re-run resumes.
+ * The providers are injected, so this whole flow is unit-tested with fakes.
+ */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { SENTINEL_REL } from "../gate/index.ts";
+import type { CustomerOrg, DeploymentRecord, Migration, RecordStore, BackendProvider, HostProvider, SecretsStore } from "./types.ts";
+
+export interface DeployInput {
+  app: string;
+  org: CustomerOrg;
+  workspacePath: string;
+  migrations: Migration[];
+  rlsTables: string[]; // the tables the live-RLS probe must find denied to anon
+  authRedirectUrl?: string;
+}
+
+export interface SubstrateDeps {
+  backend: BackendProvider;
+  host: HostProvider;
+  secrets: SecretsStore;
+  records: RecordStore;
+  now?: () => string;
+  onStep?: (message: string) => void;
+}
+
+export interface DeployOutcome {
+  live: boolean;
+  url: string | null;
+  abortedAt: string | null; // which step aborted (null on success)
+  reason: string;
+  record: DeploymentRecord;
+}
+
+function freshRecord(input: DeployInput, now: string): DeploymentRecord {
+  return {
+    app: input.app,
+    customerOrgRef: input.org.orgRef,
+    projectRef: null,
+    hostRef: null,
+    url: null,
+    appliedMigrations: [],
+    secretsRef: null,
+    status: "provisioning",
+    updatedAt: now,
+  };
+}
+
+export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps): Promise<DeployOutcome> {
+  const now = deps.now ?? (() => new Date().toISOString());
+  const step = (m: string): void => deps.onStep?.(m);
+
+  // §11 precondition (defense in depth): a build that didn't pass the gate must never
+  // reach provisioning/deploy. The deploy path already enforces this; we re-check.
+  if (!existsSync(join(input.workspacePath, SENTINEL_REL))) {
+    throw new Error("runtime substrate refused: no HARD_VERIFY_PASS sentinel — the gate must pass before deploy");
+  }
+
+  let record = deps.records.get(input.app) ?? freshRecord(input, now());
+  record = { ...record, status: "provisioning", updatedAt: now() };
+  deps.records.put(record);
+
+  const abort = (at: string, reason: string): DeployOutcome => {
+    record = { ...record, status: "failed", updatedAt: now() };
+    deps.records.put(record);
+    return { live: false, url: null, abortedAt: at, reason, record };
+  };
+
+  try {
+    // 1. provision OR reuse the project, in the CUSTOMER's org (idempotent via record)
+    step(`provisioning backend (reuse=${Boolean(record.projectRef)})`);
+    const { handle, secrets } = await deps.backend.ensureProject(record, input.org);
+    record = { ...record, projectRef: handle.projectRef, updatedAt: now() };
+    deps.records.put(record);
+
+    // 2. apply only NEW migrations; a SQL error is a hard stop (first place it runs)
+    step("applying migrations");
+    const mig = await deps.backend.applyMigrations(handle, input.migrations, record.appliedMigrations);
+    if (!mig.ok) return abort("apply-migrations", `migration failed: ${mig.error ?? "unknown"}`);
+    record = { ...record, appliedMigrations: [...record.appliedMigrations, ...mig.appliedNow], updatedAt: now() };
+    deps.records.put(record);
+
+    // 3. ⭐ verify RLS is enforced LIVE — the gate guarantee carried into runtime
+    step("verifying live RLS");
+    const rls = await deps.backend.verifyLiveRls(handle, input.rlsTables);
+    if (!rls.enforced) {
+      return abort("verify-live-rls", `live RLS NOT enforced — an anonymous query could read: ${rls.leakedTables.join(", ")}`);
+    }
+
+    // 4. auth
+    step("configuring auth");
+    await deps.backend.configureAuth(handle, input.authRedirectUrl ?? record.url ?? "");
+
+    // 5. store secrets (encrypted). Inject ONLY url + anon key into the host — the
+    //    service-role key never reaches the frontend env/bundle (R6/AC6.2).
+    step("storing secrets");
+    const secretsRef = await deps.secrets.put(input.app, secrets);
+    record = { ...record, secretsRef, updatedAt: now() };
+    deps.records.put(record);
+
+    // 6. deploy the frontend (idempotent on hostRef)
+    step("deploying frontend");
+    const deployed = await deps.host.deploy(input.workspacePath, { SUPABASE_URL: secrets.url, SUPABASE_ANON_KEY: secrets.anonKey }, record.hostRef);
+    record = { ...record, url: deployed.url, hostRef: deployed.hostRef, updatedAt: now() };
+    deps.records.put(record);
+
+    // 7. live — only reachable if steps 1–6 all succeeded
+    record = { ...record, status: "live", updatedAt: now() };
+    deps.records.put(record);
+    step(`live at ${deployed.url}`);
+    return { live: true, url: deployed.url, abortedAt: null, reason: "deployed", record };
+  } catch (e) {
+    return abort("exception", e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Crude teardown (R9, v1): delete the app's resources + clear its record. */
+export async function destroy(app: string, deps: SubstrateDeps): Promise<{ destroyed: boolean }> {
+  const record = deps.records.get(app);
+  if (!record) return { destroyed: false };
+  if (record.projectRef) await deps.backend.deleteProject({ projectRef: record.projectRef });
+  if (record.hostRef) await deps.host.teardown(record.hostRef);
+  await deps.secrets.remove(app);
+  deps.records.remove(app);
+  return { destroyed: true };
+}
