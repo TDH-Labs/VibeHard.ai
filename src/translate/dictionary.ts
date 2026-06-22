@@ -76,6 +76,22 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "A piece of data is flagged sensitive without saying what kind (personal, health, financial). Classifying it decides which protections apply.",
   },
+  // ── front-half: PRD completeness (§22) ───────────────────────────────────
+  "requirement-coverage-gap": {
+    title: "Some of what you asked for isn't written into the plan yet",
+    detail:
+      "One or more features from the spec have no matching requirement in the PRD, so they'd likely be missed when the app is built. Each feature needs a concrete requirement first.",
+  },
+  "no-acceptance-criteria": {
+    title: "A requirement has no way to tell when it's done",
+    detail:
+      "A requirement was written with no acceptance criteria — no checkable definition of 'working'. Add specific, testable conditions so the build can be verified against them.",
+  },
+  "no-nfrs": {
+    title: "A sensitive app with no security requirements written down",
+    detail:
+      "This app handles sensitive data but the PRD lists no non-functional (security) requirements. The protections it needs must be stated so the build and the gates can enforce them.",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",
