@@ -11,7 +11,10 @@ import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { buildGenerationBrief, decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
+import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
+import { elaboratePrd, llmElaborator } from "./prd/index.ts";
+import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
+import { workstreamBrief } from "./build/workstream-brief.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -83,6 +86,41 @@ async function gateAndReport(target: string): Promise<boolean> {
     console.log("\n✅ PASS — deploy allowed");
   }
   return result.passed;
+}
+
+/** Build an app from its architecture: generate each workstream in dependency-tier
+ *  order (sequential within a tier for now; tiers are parallel-eligible — §22). Each
+ *  workstream is a scoped engine pass that accumulates files into `target`. */
+async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
+  const tiers = buildOrder(arch);
+  const built: string[] = [];
+  for (const tier of tiers) {
+    for (const ws of tier) {
+      console.log(`\n  ▸ workstream: ${ws.name} — ${ws.files.length} file(s)`);
+      if (!(await streamGeneration(target, workstreamBrief(arch, ws, built), provider, model))) return false;
+      built.push(ws.name);
+    }
+  }
+  return true;
+}
+
+/** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human
+ *  review on exhaustion (§24). Returns the exit code. Shared by `fix` and `build`. */
+async function runAutoFixAndReport(target: string): Promise<number> {
+  const result = await autoFix(target, { onStep: (m) => console.log(`  … ${m}`) });
+  if (result.fixed) {
+    console.log(`\n✅ gate green after ${result.attempts} auto-fix attempt(s) — deploy-ready.`);
+    return 0;
+  }
+  console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
+  if (result.escalation) {
+    const ticket = await localSink().open(result.escalation);
+    console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
+    console.log(`   queued at ${queuePath()} — list with: drydock queue`);
+  }
+  console.log("\n   residual blocking findings:");
+  for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
+  return 1;
 }
 
 /** Print a finding the way a non-technical operator reads it: plain-English first
@@ -164,34 +202,54 @@ export async function main(argv: string[]): Promise<number> {
     const target = resolve(dir);
     const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
     const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const config = { provider, model };
+    const onStep = (m: string) => console.log(`  … ${m}`);
 
-    // 1. Front-half (§22): plan + grill. A spec with BLOCKING gaps must not proceed
-    //    to codegen — the front-half gate refuses to build an underspecified app.
+    // The full pipeline (§22 front-half → back-half). Each front-half stage's
+    // deterministic review must pass before the next; a blocking gap refuses to
+    // proceed — we never build (or fix) an underspecified app.
+
+    // 1. intake → spec
     console.log(`planning with ${provider}/${model} …`);
-    const plan = await planIntake(promptText, {
-      intake: llmIntake({ config: { provider, model } }),
-      onStep: (m) => console.log(`  … ${m}`),
-    });
+    const plan = await planIntake(promptText, { intake: llmIntake({ config }), onStep });
     printSpec(plan.spec);
-    console.log(`\n   rigor: ${decideRigor(plan.spec)} (§16 adaptive)`);
-    for (const f of plan.gaps.filter((g) => !isBlocking(g))) {
-      console.log("\n⚠️  built into the spec (not blocking):");
-      explainFinding(f);
-    }
+    console.log(`   rigor: ${decideRigor(plan.spec)} (§16 adaptive)`);
+    for (const f of plan.gaps.filter((g) => !isBlocking(g))) explainFinding(f);
     if (!plan.ready) {
-      console.log("\n🛑 spec NOT ready — clarify these and retry (not building an underspecified app):");
+      console.log("\n🛑 spec not ready — clarify and retry:");
       for (const f of plan.gaps.filter(isBlocking)) explainFinding(f);
       return 1;
     }
 
-    // 2. Generate AGAINST the spec — its security posture becomes explicit build
-    //    instructions (the front-half's payoff).
-    console.log(`\n── generating against the spec → ${target} ──`);
-    if (!(await streamGeneration(target, buildGenerationBrief(plan.spec), provider, model))) return 1;
+    // 2. spec → PRD (requirements + acceptance criteria + NFRs + buy-vs-build)
+    console.log("\n── elaborating the PRD … ──");
+    const prdRes = await elaboratePrd(plan.spec, { elaborator: llmElaborator({ config }), onStep });
+    console.log(`   ${prdRes.prd.requirements.length} requirement(s), ${prdRes.prd.nfrs.length} security NFR(s)`);
+    for (const b of prdRes.prd.buyVsBuild) console.log(`   💡 buy-vs-build: ${b.category} → consider ${b.service} (advisory)`);
+    if (!prdRes.ready) {
+      console.log("\n🛑 PRD not complete:");
+      for (const f of prdRes.gaps.filter(isBlocking)) explainFinding(f);
+      return 1;
+    }
 
-    // 3. Back-half: gate the result.
-    console.log(`\n── gating generated app at ${target} ──`);
-    return (await gateAndReport(target)) ? 0 : 1;
+    // 3. PRD → architecture (workstream dependency graph)
+    console.log("\n── architecting … ──");
+    const archRes = await architectApp(prdRes.prd, { architect: llmArchitect({ config }), onStep });
+    if (!archRes.ready) {
+      console.log("\n🛑 architecture not buildable:");
+      for (const f of archRes.gaps.filter(isBlocking)) explainFinding(f);
+      return 1;
+    }
+    const tiers = buildOrder(archRes.arch);
+    console.log(`   ${archRes.arch.stack} · ${archRes.arch.workstreams.length} workstream(s) in ${tiers.length} tier(s): ${tiers.map((t) => t.map((w) => w.name).join("+")).join(" → ")}`);
+
+    // 4. build each workstream from the plan, in dependency order
+    console.log(`\n── building → ${target} ──`);
+    if (!(await buildFromArchitecture(target, archRes.arch, provider, model))) return 1;
+
+    // 5. back-half: gate → auto-fix → hold-for-review
+    console.log("\n── gating + auto-fixing ──");
+    return runAutoFixAndReport(target);
   }
 
   if (cmd === "generate") {
@@ -219,23 +277,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     const target = resolve(arg);
     console.log(`auto-fixing ${target} (gate → fix → re-gate, bounded) …`);
-    const result = await autoFix(target, { onStep: (m) => console.log(`  … ${m}`) });
-    if (result.fixed) {
-      console.log(`\n✅ auto-fix succeeded — gate green after ${result.attempts} attempt(s).`);
-      return 0;
-    }
-    // Auto-fix exhausted → HOLD for human review (a distinct `needs-human` state,
-    // not a failed build — §24) and QUEUE it async. The pipeline stops here; the
-    // human works it off-path and the re-gate (resume) returns it to the line.
-    console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
-    if (result.escalation) {
-      const ticket = await localSink().open(result.escalation);
-      console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
-      console.log(`   queued at ${queuePath()} — list with: drydock queue`);
-    }
-    console.log("\n   residual blocking findings:");
-    for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
-    return 1;
+    return runAutoFixAndReport(target);
   }
 
   if (cmd === "queue") {
@@ -289,8 +331,8 @@ export async function main(argv: string[]): Promise<number> {
     [
       "drydock — safe vibe coding.",
       "",
-      '  drydock plan "<prompt>"             draft + grill a PRD spec before building (front-half §22)',
-      '  drydock build "<prompt>" <dir>      plan → generate against the spec → gate (full pipeline)',
+      '  drydock plan "<prompt>"             draft + grill a spec before building (front-half §22)',
+      '  drydock build "<prompt>" <dir>      full pipeline: spec → PRD → architecture → build → gate → fix → hold',
       '  drydock generate "<prompt>" <dir>   generate an app from a raw prompt (engine only) + auto-gate it',
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
