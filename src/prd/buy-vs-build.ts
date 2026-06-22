@@ -6,6 +6,13 @@
  * integration judgment (steps 2-4) is the human's. Default BUILD, NEVER auto-procure
  * — this only puts the option in front of the operator so a non-technical user
  * doesn't unknowingly rebuild Stripe.
+ *
+ * Each advisory is framed as the first two rungs of a build-vs-complexity ladder:
+ * (1) NECESSITY — do you need this capability at all? (an unrequested feature is the
+ * cheapest thing to cut), then (2) if you do, prefer the proven service over rebuilding
+ * the commodity. The lower rungs (platform/standard-library/existing-deps over a fresh
+ * build) live in the codegen system prompt, where code is actually written — these
+ * commodity categories are precisely the ones a stdlib can't stand in for.
  */
 import type { Spec } from "../spec/index.ts";
 
@@ -49,7 +56,7 @@ export function buyVsBuild(spec: Spec): BuyVsBuild[] {
         category: cat.key,
         recommendation: "buy",
         service: cat.services[0]!,
-        rationale: `A mature ${cat.key} service exists (${cat.services.join(" / ")}). Integrating ${cat.services[0]} is almost always safer and faster than building it — unless cost, data-residency/compliance, or integration complexity rule it out, in which case build with that rationale recorded. Default stays build; you decide.`,
+        rationale: `First ask whether you need ${cat.key} at all — an unrequested capability is the cheapest thing to cut. If you do need it, don't build it: a mature ${cat.key} service exists (${cat.services.join(" / ")}), and integrating ${cat.services[0]} is almost always safer and faster than rebuilding it — unless cost, data-residency/compliance, or integration complexity rule it out, in which case build with that rationale recorded. Default stays build; you decide.`,
       });
     }
   }
