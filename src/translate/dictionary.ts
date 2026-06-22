@@ -45,6 +45,37 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "Access is switched on, but the rule only checks that someone is signed in — it doesn't limit them to their own rows. If more than one customer or team uses the app, each could read the others' data. Confirm this table is meant to be fully shared; if not, scope the rule to the row's owner (e.g. only their own records).",
   },
+  // ── front-half: PRD spec-readiness (§22) ─────────────────────────────────
+  "no-features": {
+    title: "The plan doesn't say what to build yet",
+    detail:
+      "No features are defined, so there's nothing concrete to generate. List what the app should actually do first.",
+  },
+  "no-data-model": {
+    title: "The app stores data, but the data isn't described",
+    detail:
+      "The plan says the app keeps data but not what — which records and fields. We can't build (or secure) a database we can't see. Describe the data the app stores.",
+  },
+  "no-auth-for-sensitive": {
+    title: "Sensitive or shared data with no way to sign in",
+    detail:
+      "The plan involves sensitive or multi-user data but no login, so anyone could reach it. Decide how users sign in before building — this is the mistake behind the well-known data leaks.",
+  },
+  "tenant-isolation-required": {
+    title: "Each customer's data needs to be walled off from the others",
+    detail:
+      "Several tenants will share this app's sensitive data, so each must see only their own — enforced at the database (row-level), not just the screen. Plan the per-tenant access model now; the security gate checks it after the app is built.",
+  },
+  "no-retention-plan": {
+    title: "Sensitive data with no stated keep-or-delete plan",
+    detail:
+      "The plan stores sensitive data but doesn't say how long it's kept or how it's deleted. Note the retention and deletion path — this helps toward data-protection obligations; it does not by itself satisfy them.",
+  },
+  "sensitive-classification-gap": {
+    title: "Something is marked sensitive but not classified",
+    detail:
+      "A piece of data is flagged sensitive without saying what kind (personal, health, financial). Classifying it decides which protections apply.",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",
