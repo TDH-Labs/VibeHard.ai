@@ -25,14 +25,19 @@ Return ONLY a JSON object (no prose, no markdown fence) with exactly these field
   "storesData": boolean,     // does it persist data?
   "dataEntities": [ { "name": string, "fields": string[], "sensitive": boolean } ],  // the data model; sensitive=true for PII/PHI/financial/credentials
   "sensitiveData": ("none"|"pii"|"phi"|"financial"|"credentials")[],  // classify the data; ["none"] if none
-  "realUsers": boolean,      // for real users, not a throwaway/demo?
-  "maintained": boolean      // will it live and be maintained over time?
+  "realUsers": boolean,      // see the INTENT question below
+  "maintained": boolean      // see the INTENT question below
 }
 
 Rules:
 - Be honest about tenancy/auth/sensitiveData — understating them hides real risk.
 - If multiple customers/teams share one deployment and any data is sensitive, set tenancy "multi-tenant".
 - NEVER describe the app as "compliant" or "certified" with any standard.
+- INTENT (this drives how much rigor the build gets). Read how they describe the idea and answer one question: "Is this something they're building to RELY ON and keep improving — or a quick experiment they might not keep?"
+    • sounds real / ongoing / for actual use → realUsers=true AND maintained=true
+    • clearly a throwaway, demo, or one-off experiment → both false
+    • UNCLEAR → default BOTH to true. Under-investing in something real is worse than over-investing in a throwaway, so when in doubt, treat it as real.
+  (Sensitive data always gets the careful path regardless of this answer.)
 - If given previous blocking gaps, FIX them in the new JSON.`;
 
 export interface LlmIntakeOptions {
