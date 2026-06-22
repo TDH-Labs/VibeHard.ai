@@ -13,14 +13,15 @@ import { secretsGate } from "./secrets.ts";
 import { depvulnGate } from "./depvuln.ts";
 import { rlsGate } from "./rls.ts";
 import { complianceGate } from "./compliance.ts";
+import { prodReadinessGate } from "./prod-readiness.ts";
 import { verifyGate } from "./verify.ts";
 
-/** The default gate chain. Source scanners (sast/secrets/depvuln/rls/compliance) run
- *  FIRST, on authored source; verify runs LAST because it builds the app (creating
- *  .next/dist/…) — keeping derived output out of the source scans (§11, §19).
- *  compliance is classification-driven: a no-op unless the app's spec flags sensitive
- *  data (§21), so it never fires on a project that didn't go through the front-half. */
-export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, verifyGate];
+/** The default gate chain. Source scanners run FIRST, on authored source; verify runs
+ *  LAST because it builds the app (creating .next/dist/…) — keeping derived output out
+ *  of the source scans (§11, §19). compliance and prod-readiness are
+ *  classification/rigor-driven: a no-op unless the app's spec was persisted by the
+ *  front-half, so they never fire on a project that didn't go through it. */
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, prodReadinessGate, verifyGate];
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";

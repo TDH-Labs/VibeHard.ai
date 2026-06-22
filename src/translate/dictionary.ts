@@ -139,6 +139,37 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "Based on the kind of data this app handles, certain organizational control areas typically apply. These are programs your organization runs (audits, policies); the build helps toward the technical parts, but it does not by itself satisfy them.",
   },
+  // ── our production-readiness gate (§19) ──────────────────────────────────
+  "unpinned-dependency": {
+    title: "A dependency can silently upgrade and break the app",
+    detail:
+      "Some libraries are set to an open-ended version, so a future release could be installed automatically and break the shipped app without anyone changing the code. Pin them to fixed versions.",
+  },
+  "missing-readme": {
+    title: "No clear README explaining the app",
+    detail:
+      "There's no readable README, so whoever receives this build can't easily tell what it does, how to run it, or what it needs. Add a short plain-language one.",
+  },
+  "container-runs-as-root": {
+    title: "The app's container runs as the all-powerful root user",
+    detail:
+      "The container image doesn't switch to a limited user, so the app runs as root — if it's ever compromised, the attacker gets full control of the container. Run it as a non-root user.",
+  },
+  "unpinned-base-image": {
+    title: "The container's base image isn't locked down",
+    detail:
+      "The Dockerfile's base image isn't pinned to an exact digest, so a rebuild could pull a different — possibly tampered — image. Pin it by its `@sha256:` digest.",
+  },
+  "missing-dockerignore": {
+    title: "Build files (and possibly secrets) could leak into the image",
+    detail:
+      "There's no `.dockerignore`, so local files like `.env`, `node_modules`, and `.git` can be copied into the image — leaking secrets or bloating it. Add one.",
+  },
+  "typescript-not-strict": {
+    title: "TypeScript's safety checks are turned off",
+    detail:
+      "The project doesn't use TypeScript strict mode, which catches whole classes of bugs (missing null checks, untyped values) before they ship. Turn strict mode on.",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",
