@@ -5,7 +5,7 @@
  */
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
 import { buildEscalationPacket, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
@@ -18,6 +18,16 @@ import { architectApp, buildOrder, llmArchitect, type Architecture } from "./arc
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
+import {
+  capabilitiesFromSpec,
+  combinedCandidateSource,
+  depsDevEvidenceProvider,
+  llmSummarizer,
+  npmSearchCandidateSource,
+  registryCandidateSource,
+  researchProcurement,
+  type Advisory,
+} from "./procurement/index.ts";
 import { fileCheckpointer, llmRefactorer, llmScorer, refactorPhase } from "./refactor/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
@@ -40,6 +50,42 @@ function persistSpec(target: string, spec: Spec): void {
   const dir = join(target, ".drydock");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "spec.json"), JSON.stringify(spec, null, 2));
+}
+
+const DISPOSITION_LABEL: Record<Advisory["disposition"], string> = {
+  "adopt-oss": "✅ ADOPT open-source",
+  "buy-service": "💳 BUY a service",
+  build: "🔨 BUILD it",
+  "needs-human": "🤔 YOUR CALL",
+};
+
+/** Print one procurement advisory the way a non-technical operator reads it (§22). */
+function printAdvisory(a: Advisory): void {
+  console.log(`\n━━ ${a.capability.key} → ${DISPOSITION_LABEL[a.disposition]} ━━`);
+  console.log(`   ${a.rationale}`);
+  const top = a.options.slice(0, 4);
+  if (top.length) console.log("   options (vetted):");
+  for (const o of top) {
+    const meta =
+      o.candidate.kind === "service"
+        ? "service"
+        : [
+            o.evidence?.license ?? "license?",
+            o.evidence?.scorecard != null ? `scorecard ${o.evidence.scorecard.toFixed(1)}` : null,
+            o.evidence?.ageDays != null ? `${Math.round(o.evidence.ageDays / 30)}mo old` : null,
+          ]
+            .filter(Boolean)
+            .join(", ");
+    console.log(`   ${o.safety.safe ? "✓" : "✗"} ${o.candidate.name}  (${meta})  health ${o.score}/100`);
+    const note = o.safety.safe ? o.safety.warnings[0] : o.safety.blockers[0];
+    if (note) console.log(`       ${o.safety.safe ? "⚠" : "✗"} ${note}`);
+  }
+  if (top.some((o) => o.candidate.kind === "package")) {
+    // The number rates HEALTH (license/security/maintenance/adoption), NOT fitness for
+    // this app — OSS options are keyword-discovered, so a healthy-but-wrong package can
+    // out-score a proven service. Fitness is the recommendation above, or a person's call.
+    console.log('   ↳ open-source options are keyword-discovered + vetted for safety only; "health" ≠ fitness for your app');
+  }
 }
 
 /** Print a spec the way an operator reads it (§22 front-half). */
@@ -377,6 +423,39 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (cmd === "research") {
+    if (!arg) {
+      console.error("usage: drydock research <dir>   (reads .drydock/spec.json; ONLINE — queries npm + deps.dev)");
+      return 2;
+    }
+    // §22 full make-vs-buy advisor: discover OSS + service candidates, vet them on
+    // deterministic evidence (license / advisories / maintenance / OpenSSF Scorecard),
+    // rank, and summarize. ONLINE + OPT-IN — keyless (npm + deps.dev), NOT a gate. It
+    // never auto-installs; anything actually adopted still passes the security gates.
+    const specPath = join(resolve(arg), ".drydock", "spec.json");
+    if (!existsSync(specPath)) {
+      console.error(`no .drydock/spec.json in ${arg} — run \`drydock plan\` or \`build\` first so there's a spec to research.`);
+      return 2;
+    }
+    const spec = JSON.parse(readFileSync(specPath, "utf8")) as Spec;
+    const caps = capabilitiesFromSpec(spec);
+    if (!caps.length) {
+      console.log(`No commodity capabilities detected in "${spec.name}" — nothing obvious to procure (it's bespoke). Build it; the gates will vet the result.`);
+      return 0;
+    }
+    const hasKey = !!(process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY);
+    console.log(`\n🔎 researching ${caps.length} capabilit${caps.length === 1 ? "y" : "ies"} for "${spec.name}" — querying npm + deps.dev (licenses, advisories, OpenSSF Scorecard)…`);
+    console.log(`   make-vs-buy advisory — Drydock never installs or procures for you${hasKey ? "" : "  ·  no LLM key → deterministic summaries"}.`);
+    const advisories = await researchProcurement(caps, {
+      candidateSource: combinedCandidateSource(registryCandidateSource, npmSearchCandidateSource({ limit: 5 })),
+      evidenceProvider: depsDevEvidenceProvider(),
+      summarizer: hasKey ? llmSummarizer() : undefined,
+    });
+    for (const a of advisories) printAdvisory(a);
+    console.log("\n  (advisory only — you own the cost / data-residency / compliance decision; anything you adopt is re-checked by the gates)");
+    return 0;
+  }
+
   if (cmd === "escalate") {
     if (!arg) {
       console.error("usage: drydock escalate <dir>");
@@ -419,6 +498,7 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
       "  drydock refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
+      "  drydock research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",
       "  drydock queue [state]              list held escalations (needs-human | claimed | resolved)",
       "  drydock prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
