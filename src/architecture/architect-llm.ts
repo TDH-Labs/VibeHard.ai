@@ -5,7 +5,7 @@
  * the design; the deterministic checks + topological build order are ours.
  */
 import { generateText } from "ai";
-import { extractJsonObject } from "../spec/index.ts";
+import { tryExtractJsonObject } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
@@ -55,7 +55,9 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
         ].join("\n")
       : `PRD:\n${JSON.stringify(summary)}\n\nReturn the architecture JSON.`;
 
-    const { text } = await generateText({ model: modelFactory(config), system: ARCHITECT_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 4000 });
-    return coerceArchitecture(extractJsonObject(text), prd);
+    const { text } = await generateText({ model: modelFactory(config), system: ARCHITECT_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 8000 });
+    // Resilient: a malformed/empty response → empty workstreams, which
+    // reviewArchitecture flags (no-workstreams) so the loop retries, never crashes.
+    return coerceArchitecture(tryExtractJsonObject(text), prd);
   };
 }

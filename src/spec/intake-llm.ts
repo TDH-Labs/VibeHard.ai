@@ -9,7 +9,7 @@ import { generateText } from "ai";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
-import { parseSpec } from "./coerce.ts";
+import { coerceSpec, tryExtractJsonObject } from "./coerce.ts";
 import type { Intake } from "./intake.ts";
 
 const INTAKE_SYSTEM_PROMPT = `You turn a non-technical person's app idea into a structured PRD (product spec) that a builder AND an automated security gate will use. Assess the idea HONESTLY — especially the security-relevant fields, which decide what protections the build needs.
@@ -65,8 +65,10 @@ export function llmIntake(opts: LlmIntakeOptions = {}): Intake {
       model: modelFactory(config),
       system: INTAKE_SYSTEM_PROMPT,
       prompt: user,
-      maxOutputTokens: 4000,
+      maxOutputTokens: 6000,
     });
-    return parseSpec(text);
+    // Resilient: a malformed/empty response → a default spec, which reviewSpec flags
+    // (no-features) so the grill loop retries instead of the build crashing.
+    return coerceSpec(tryExtractJsonObject(text));
   };
 }

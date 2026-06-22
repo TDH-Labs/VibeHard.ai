@@ -1,5 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { coerceSpec, extractJsonObject, parseSpec } from "./coerce.ts";
+import { coerceSpec, extractJsonObject, parseSpec, tryExtractJsonObject } from "./coerce.ts";
+
+describe("tryExtractJsonObject — resilient extractor (never throws)", () => {
+  test("returns the object on good input, null on missing/invalid JSON", () => {
+    expect(tryExtractJsonObject('{"a":1}')).toEqual({ a: 1 });
+    expect(tryExtractJsonObject("no json here")).toBeNull(); // would-throw → null
+    expect(tryExtractJsonObject("{ broken")).toBeNull(); // unparseable → null
+  });
+
+  test("coerce* turn a null (bad response) into a safe degenerate artifact, not a crash", () => {
+    // This is the contract the resilient LLM stages rely on.
+    expect(coerceSpec(tryExtractJsonObject("garbage")).features).toEqual([]);
+  });
+});
 
 describe("coerceSpec — the trust boundary (untrusted JSON → valid Spec)", () => {
   test("a well-formed object is preserved", () => {

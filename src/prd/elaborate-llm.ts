@@ -5,7 +5,7 @@
  * deterministically. The model only proposes the functional requirements.
  */
 import { generateText } from "ai";
-import { extractJsonObject, type Spec } from "../spec/index.ts";
+import { tryExtractJsonObject, type Spec } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
@@ -48,7 +48,9 @@ export function llmElaborator(opts: LlmElaboratorOptions = {}): Elaborator {
       : `${base}\n\nReturn the requirements JSON.`;
 
     const { text } = await generateText({ model: modelFactory(config), system: ELABORATE_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 6000 });
-    const obj = extractJsonObject(text) as { requirements?: unknown };
-    return coerceRequirements(obj.requirements);
+    // Resilient: a malformed response → no requirements, which reviewPrd flags (coverage
+    // gap) so the loop retries rather than crashing the build.
+    const obj = tryExtractJsonObject(text) as { requirements?: unknown } | null;
+    return coerceRequirements(obj?.requirements);
   };
 }

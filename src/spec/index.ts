@@ -15,7 +15,7 @@ export {
   type SensitiveClass,
   type Tenancy,
 } from "./spec.ts";
-export { coerceSpec, extractJsonObject, parseSpec } from "./coerce.ts";
+export { coerceSpec, extractJsonObject, parseSpec, tryExtractJsonObject } from "./coerce.ts";
 export { planIntake, type Intake, type PlanOptions, type PlanResult } from "./intake.ts";
 export { llmIntake, type LlmIntakeOptions } from "./intake-llm.ts";
 export { buildGenerationBrief, securityRequirements } from "./brief.ts";

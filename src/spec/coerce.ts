@@ -67,3 +67,14 @@ export function extractJsonObject(text: string): unknown {
 export function parseSpec(text: string): Spec {
   return coerceSpec(extractJsonObject(text));
 }
+
+/** Like `extractJsonObject` but returns null instead of throwing. For the resilient
+ *  LLM path: a malformed model response becomes a degenerate artifact the grill loop
+ *  retries (and ultimately reports as "not ready"), never an uncaught crash. */
+export function tryExtractJsonObject(text: string): unknown | null {
+  try {
+    return extractJsonObject(text);
+  } catch {
+    return null;
+  }
+}
