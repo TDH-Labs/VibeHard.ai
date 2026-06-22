@@ -42,8 +42,27 @@ function lineAt(text: string, index: number): number {
 }
 
 const DERIVED = new Set<string>(DERIVED_DIRS);
-const CODE_GLOB = "**/*.{ts,tsx,js,jsx,mjs,cjs,vue,svelte,astro}";
+// Scan code AND server-rendered templates: a CDN-loaded Supabase client lives in a
+// `<script src>` in .html/.ejs, and inline `.from()` queries can too — missing those
+// would re-open the vacuous-RLS hole for client-side apps (where the anon key ships
+// to the browser, so RLS is the ONLY protection).
+const CODE_GLOB = "**/*.{ts,tsx,js,jsx,mjs,cjs,vue,svelte,astro,html,htm,ejs,hbs,handlebars,pug}";
 const MAX_CODE_BYTES = 200_000;
+
+/** Markers that an app talks to a Supabase Postgres (the surface RLS protects),
+ *  covering BOTH npm and CDN/global usage. Each is Supabase-specific enough not to
+ *  fire on unrelated code. */
+const SUPABASE_MARKERS: RegExp[] = [
+  /@supabase\/supabase-js/, //                       npm import OR a CDN <script src=...>
+  /\bwindow\.supabase\b/, //                          CDN UMD global (window.supabase.createClient)
+  /[a-z0-9-]+\.supabase\.co\b/i, //                   a Supabase project URL
+  /SUPABASE_(?:URL|ANON_KEY|SERVICE_ROLE_KEY|KEY)\b/, // Supabase env names (incl. VITE_/NEXT_PUBLIC_ prefixes)
+];
+
+/** Does this source show any sign of using Supabase? */
+function signalsSupabase(code: string): boolean {
+  return SUPABASE_MARKERS.some((re) => re.test(code));
+}
 
 // ── Migration facts (shared by both checks) ──────────────────────────────────
 
@@ -140,13 +159,15 @@ export interface SupabaseUsage {
 /**
  * Pure: app source (+ whether package.json depends on supabase) → the set of
  * tables the client queries via `.from('x')`. We only trust `.from()` as a table
- * query once Supabase is confirmed (import or dependency), so we don't mistake an
- * unrelated `.from()` (knex, RxJS, Array.from) for a Supabase table.
+ * query once Supabase is confirmed (npm import/dependency, CDN global, project URL,
+ * or a SUPABASE_* env name — see SUPABASE_MARKERS), so we don't mistake an unrelated
+ * `.from()` (knex, RxJS, Array.from) for a Supabase table, and we DO catch the
+ * CDN/client-side case where the client never appears in package.json.
  */
 export function detectSupabaseUsage(sources: CodeSource[], pkgHasSupabase = false): SupabaseUsage {
   let usesSupabase = pkgHasSupabase;
   for (const { code } of sources) {
-    if (code.includes("@supabase/supabase-js")) {
+    if (signalsSupabase(code)) {
       usesSupabase = true;
       break;
     }

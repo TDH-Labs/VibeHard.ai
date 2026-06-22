@@ -130,6 +130,34 @@ describe("detectSupabaseUsage (pure)", () => {
     expect(u.usesSupabase).toBe(false);
     expect(u.tables.size).toBe(0);
   });
+
+  test("detects CDN/client-side Supabase with NO npm dep (the Run-3 blind spot)", () => {
+    // The client comes from a CDN <script> + window.supabase global; package.json
+    // has no @supabase dep. Each of these markers alone must confirm usage.
+    const cdnTag = { file: "views/index.ejs", code: '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>' };
+    const global = { file: "public/app.js", code: "const supabase = window.supabase.createClient(u, k);\nawait supabase.from('feedbacks').insert(x);" };
+    const u = detectSupabaseUsage([cdnTag, global]); // pkgHasSupabase = false
+    expect(u.usesSupabase).toBe(true);
+    expect([...u.tables.keys()]).toEqual(["feedbacks"]);
+  });
+
+  test("a SUPABASE_* env name alone (e.g. server.js) confirms usage", () => {
+    const u = detectSupabaseUsage([
+      { file: "server.js", code: "const url = process.env.SUPABASE_URL;\nsupabase.from('rows')" },
+    ]);
+    expect(u.usesSupabase).toBe(true);
+    expect([...u.tables.keys()]).toEqual(["rows"]);
+  });
+
+  test("a .supabase.co project URL confirms usage", () => {
+    const u = detectSupabaseUsage([{ file: "config.js", code: "const URL='https://abcd.supabase.co'; db.from('t')" }]);
+    expect(u.usesSupabase).toBe(true);
+  });
+
+  test("VITE_ / NEXT_PUBLIC_ prefixed env names are still detected", () => {
+    expect(detectSupabaseUsage([{ file: "c.ts", code: "import.meta.env.VITE_SUPABASE_URL" }]).usesSupabase).toBe(true);
+    expect(detectSupabaseUsage([{ file: "c.ts", code: "process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY" }]).usesSupabase).toBe(true);
+  });
 });
 
 describe("parseRlsCoverage (pure, fail-closed)", () => {
@@ -199,6 +227,33 @@ describe("runRls end-to-end (§11 fail-closed for rls)", () => {
     const dir = await scratch({
       "package.json": JSON.stringify({ dependencies: { react: "^18.0.0" } }),
       "src/App.tsx": "export default function App() { return null; }",
+    });
+    expect((await runRls(dir, ts)).status).toBe("pass");
+  });
+
+  test("CDN/client-side Supabase (no npm dep) + NO migration → BLOCK (blind spot closed)", async () => {
+    const dir = await scratch({
+      // Express server, Supabase only via a CDN <script> + window.supabase — exactly Run 3.
+      "package.json": JSON.stringify({ dependencies: { express: "^4.18.2", ejs: "^3.1.9" } }),
+      "server.js": "const url = process.env.SUPABASE_URL; require('express')();",
+      "views/index.ejs": '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>',
+      "public/app.js": "const supabase = window.supabase.createClient(u, k);\nawait supabase.from('feedbacks').select('*');",
+    });
+    const v = await runRls(dir, ts);
+    expect(v.status).toBe("block");
+    expect(v.findings.some((f) => f.ruleId === "rls-missing" && f.severity === "critical")).toBe(true);
+  });
+
+  test("CDN/client-side Supabase WITH a sound migration → PASS (no false fire)", async () => {
+    const dir = await scratch({
+      "package.json": JSON.stringify({ dependencies: { express: "^4.18.2", ejs: "^3.1.9" } }),
+      "views/index.ejs": '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>',
+      "public/app.js": "const supabase = window.supabase.createClient(u, k);\nawait supabase.from('feedbacks').select('*');",
+      "supabase/migrations/001.sql": [
+        "create table public.feedbacks (id uuid primary key, owner uuid);",
+        "alter table public.feedbacks enable row level security;",
+        "create policy own on public.feedbacks for select using (auth.uid() = owner);",
+      ].join("\n"),
     });
     expect((await runRls(dir, ts)).status).toBe("pass");
   });
