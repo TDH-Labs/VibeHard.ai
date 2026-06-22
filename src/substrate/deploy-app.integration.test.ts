@@ -88,10 +88,11 @@ describe("LIVE e2e — deployApp provisions a real Supabase backend (fake host)"
         const outcome = await deployApp(ws, { app: "dd-e2e-app", deps });
         expect(outcome.live).toBe(true);
         expect(outcome.url).toBe("https://dd-e2e.fake.vercel.app");
-        // §16/R6: only url + anon reached the host; the service key never did
-        expect(Object.keys(captured.hostEnv ?? {}).sort()).toEqual(["SUPABASE_ANON_KEY", "SUPABASE_URL"]);
-        expect(captured.hostEnv?.SUPABASE_URL).toBe(process.env.SUPABASE_URL);
-        expect(captured.hostEnv?.SUPABASE_ANON_KEY).toBe(process.env.SUPABASE_ANON_KEY);
+        // §16/R6: only url + anon reached the host; the service-role key NEVER did
+        const vals = Object.values(captured.hostEnv ?? {});
+        expect(vals).not.toContain(process.env.SUPABASE_SERVICE_ROLE_KEY);
+        expect(vals.every((v) => v === process.env.SUPABASE_URL || v === process.env.SUPABASE_ANON_KEY)).toBe(true);
+        expect(captured.hostEnv?.NEXT_PUBLIC_SUPABASE_URL).toBe(process.env.SUPABASE_URL);
 
         // the migration really ran on live Supabase
         const db = new SQL(resolveDbUrl(envFrom()));

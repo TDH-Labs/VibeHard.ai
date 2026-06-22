@@ -83,7 +83,9 @@ describe("provisionAndDeploy — the deterministic sequence", () => {
   test("the service-role key NEVER goes into the host env — only url + anon key", async () => {
     const host = fakeHost();
     await provisionAndDeploy(await input(), deps({ host }));
-    expect(host.lastEnv).toEqual({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "ANON" });
+    // every value is url or anon (under canonical + framework-public names); never the service key
+    expect(Object.values(host.lastEnv!).every((v) => v === "https://x.supabase.co" || v === "ANON")).toBe(true);
+    expect(host.lastEnv!.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("ANON");
     expect(JSON.stringify(host.lastEnv)).not.toContain("SERVICE");
   });
 

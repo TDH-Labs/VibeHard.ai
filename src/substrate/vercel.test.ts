@@ -32,7 +32,7 @@ describe("VercelHostProvider.deploy", () => {
 
     expect(out.url).toBe("https://myapp-abc.vercel.app");
     expect(out.hostRef).toBe("myapp"); // from the workspace basename
-    expect(calls[0]!.cmd).toEqual(["bunx", "vercel", "deploy", "--yes", "--name", "myapp", "--prod", "-e", "SUPABASE_URL=u", "-e", "SUPABASE_ANON_KEY=a"]);
+    expect(calls[0]!.cmd).toEqual(["bunx", "vercel", "deploy", "--yes", "--name", "myapp", "--prod", "-e", "SUPABASE_URL=u", "--build-env", "SUPABASE_URL=u", "-e", "SUPABASE_ANON_KEY=a", "--build-env", "SUPABASE_ANON_KEY=a"]);
     expect(calls[0]!.cmd).not.toContain("tok-secret"); // token NEVER in argv
     expect(calls[0]!.env?.VERCEL_TOKEN).toBe("tok-secret"); // …passed via env
     expect(calls[0]!.cwd).toBe("/work/myapp");
@@ -41,7 +41,7 @@ describe("VercelHostProvider.deploy", () => {
   test("only the env handed in is injected (service key never reaches here by construction)", async () => {
     const { runner, calls } = capturingRunner({ stdout: "https://x.vercel.app" });
     await new VercelHostProvider({ token: "t", runner }).deploy("/w/app", { SUPABASE_URL: "u", SUPABASE_ANON_KEY: "a" }, null);
-    const flags = calls[0]!.cmd.filter((a) => a.startsWith("SUPABASE_"));
+    const flags = [...new Set(calls[0]!.cmd.filter((a) => a.startsWith("SUPABASE_")))]; // deduped across -e + --build-env
     expect(flags).toEqual(["SUPABASE_URL=u", "SUPABASE_ANON_KEY=a"]);
     expect(calls[0]!.cmd.some((a) => /SERVICE_ROLE/.test(a))).toBe(false);
   });

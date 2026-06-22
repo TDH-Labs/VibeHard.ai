@@ -82,8 +82,13 @@ describe("deployApp — derives input + runs the orchestrator", () => {
       expect(captured.migrations).toEqual(["001_init.sql"]);
       expect(captured.rlsTables).toEqual(["notes"]);
       expect(outcome.record.app).toBe("my-notes-app");
-      // §16/R6: only url + anon reach the host — never the service key
-      expect(captured.hostEnv).toEqual({ SUPABASE_URL: "u", SUPABASE_ANON_KEY: "a" });
+      // §16/R6: only url + anon reach the host (under canonical + framework-public names);
+      // the service-role key (fake value "s") is NEVER injected
+      const vals = Object.values(captured.hostEnv ?? {});
+      expect(vals.length).toBeGreaterThan(0);
+      expect(vals.every((v) => v === "u" || v === "a")).toBe(true);
+      expect(vals).not.toContain("s");
+      expect(captured.hostEnv?.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("a"); // Next reads the public name
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

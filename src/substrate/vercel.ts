@@ -83,7 +83,13 @@ export class VercelHostProvider implements HostProvider {
     const args = [...this.vercelBin, "deploy", "--yes", "--name", project];
     if (this.scope) args.push("--scope", this.scope);
     if (this.prod) args.push("--prod");
-    for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`); // only what the orchestrator passed
+    for (const [k, v] of Object.entries(env)) {
+      // Pass BOTH runtime (-e) and build-time (--build-env): Next.js inlines NEXT_PUBLIC_*
+      // during `next build`, so a runtime-only var is undefined at prerender. (All values
+      // here are url/anon — public — so build-time exposure is fine; never the service key.)
+      args.push("-e", `${k}=${v}`);
+      args.push("--build-env", `${k}=${v}`);
+    }
     const res = await this.runner.run(args, { cwd: workspacePath, env: { VERCEL_TOKEN: this.token } });
     if (res.exitCode !== 0) throw new Error(`vercel deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(0, 400)}`);
     const url = firstVercelUrl(res.stdout, res.stderr);

@@ -109,9 +109,20 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     record = { ...record, secretsRef, updatedAt: now() };
     deps.records.put(record);
 
-    // 6. deploy the frontend (idempotent on hostRef)
+    // 6. deploy the frontend (idempotent on hostRef). Inject url + anon under the canonical
+    //    AND the framework-public names (Next's NEXT_PUBLIC_*, Vite's VITE_*) so the
+    //    generated app finds them however it reads them. EVERY value here is url or anon
+    //    (public, RLS-gated) — the service-role key is never injected (§16/R6.2).
     step("deploying frontend");
-    const deployed = await deps.host.deploy(input.workspacePath, { SUPABASE_URL: secrets.url, SUPABASE_ANON_KEY: secrets.anonKey }, record.hostRef);
+    const hostEnv: Record<string, string> = {
+      SUPABASE_URL: secrets.url,
+      SUPABASE_ANON_KEY: secrets.anonKey,
+      NEXT_PUBLIC_SUPABASE_URL: secrets.url,
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: secrets.anonKey,
+      VITE_SUPABASE_URL: secrets.url,
+      VITE_SUPABASE_ANON_KEY: secrets.anonKey,
+    };
+    const deployed = await deps.host.deploy(input.workspacePath, hostEnv, record.hostRef);
     record = { ...record, url: deployed.url, hostRef: deployed.hostRef, updatedAt: now() };
     deps.records.put(record);
 
