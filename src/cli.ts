@@ -16,6 +16,7 @@ import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator } from "./prd/index.ts";
 import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
+import { runProdScan } from "./prod-feedback/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -306,6 +307,27 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (cmd === "prod-scan") {
+    if (!arg) {
+      console.error("usage: drydock prod-scan <path-to-app.jsonl>");
+      return 2;
+    }
+    // §20 production back-edge: scan a deployed app's logs for anomalies → feedback
+    // packets. NON-BLOCKING (always exits 0) — it feeds the next iteration, never gates.
+    const result = runProdScan(resolve(arg), { now: new Date().toISOString() });
+    console.log(`prod-feedback scan — ${result.high} high, ${result.medium} medium`);
+    for (const p of result.packets) {
+      const subject = p.route ? ` ${p.route}` : p.source ? ` ${p.source}` : "";
+      console.log(`\n  ${SEV_DOT[p.severity]} ${p.anomaly_type}${subject}`);
+      console.log(`     ${p.measured}`);
+      console.log(`     → ${p.suggested_fix_focus}`);
+    }
+    console.log(`\n  HIGH → ${result.buildStatusPath}`);
+    console.log(`  MEDIUM → ${result.prodNotesPath}`);
+    console.log("  (non-blocking — the production back-edge, not a deploy gate)");
+    return 0;
+  }
+
   if (cmd === "escalate") {
     if (!arg) {
       console.error("usage: drydock escalate <dir>");
@@ -349,6 +371,7 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",
       "  drydock queue [state]              list held escalations (needs-human | claimed | resolved)",
+      "  drydock prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
       "",
       "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",
       "generate needs ANTHROPIC_API_KEY. Review queue dir: DRYDOCK_QUEUE_DIR (default ~/.drydock/queue).",
