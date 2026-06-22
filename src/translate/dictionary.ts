@@ -92,6 +92,27 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "This app handles sensitive data but the PRD lists no non-functional (security) requirements. The protections it needs must be stated so the build and the gates can enforce them.",
   },
+  // ── front-half: architecture (§22) ───────────────────────────────────────
+  "no-workstreams": {
+    title: "The build plan has no components",
+    detail:
+      "The architecture defines no workstreams (components), so there's nothing concrete to generate. The plan needs to break the app into buildable parts.",
+  },
+  "workstream-no-files": {
+    title: "A component in the plan produces no files",
+    detail:
+      "A workstream was defined with no files to generate, so it can't build anything. Each component must own at least one file.",
+  },
+  "unknown-dependency": {
+    title: "A component depends on something that doesn't exist",
+    detail:
+      "A workstream lists a dependency that isn't one of the planned components, so the build order can't be resolved. Fix the name or add the missing component.",
+  },
+  "dependency-cycle": {
+    title: "The components depend on each other in a loop",
+    detail:
+      "The architecture has a circular dependency, so there's no valid order to build the components in. The graph must be acyclic (e.g. database → API → UI).",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",

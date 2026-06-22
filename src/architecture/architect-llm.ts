@@ -1,0 +1,61 @@
+/**
+ * The live `Architect` (PROJECT_BRIEF.md §22): an LLM designs the stack + workstream
+ * dependency graph from a PRD. `coerceArchitecture` forces its JSON through the trust
+ * boundary; `reviewArchitecture` (in the loop) validates the graph. The model proposes
+ * the design; the deterministic checks + topological build order are ours.
+ */
+import { generateText } from "ai";
+import { extractJsonObject } from "../spec/index.ts";
+import { isBlocking } from "../types.ts";
+import type { EngineConfig } from "../types.ts";
+import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import type { Prd } from "../prd/index.ts";
+import { coerceArchitecture } from "./architecture.ts";
+import type { Architect } from "./architect.ts";
+
+const ARCHITECT_SYSTEM_PROMPT = `You design the technical architecture for an app from its PRD: the stack and the WORKSTREAMS (components), each owning a set of files, with a dependency graph between them.
+
+Return ONLY a JSON object (no prose, no fence):
+{ "stack": string, "workstreams": [ { "name": string, "responsibility": string, "files": string[], "dependsOn": string[] } ] }
+
+Rules:
+- The dependency graph MUST be acyclic. Typical order: data/schema → server/api → ui. Put each workstream's prerequisites in "dependsOn" (by name).
+- Every workstream MUST own at least one file in "files".
+- "dependsOn" may only name other workstreams in the list.
+- Cover the PRD's requirements and data model with workstreams. If the PRD's NFRs require RLS, the data/schema workstream owns the migration with the policies.
+- If given previous gaps, FIX every one (e.g. break a cycle, add files, remove an unknown dependency).`;
+
+export interface LlmArchitectOptions {
+  modelFactory?: ModelFactory;
+  config?: EngineConfig;
+}
+
+export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
+  const modelFactory = opts.modelFactory ?? defaultModelFactory;
+  const config: EngineConfig =
+    opts.config ??
+    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+
+  return async (prd, prior) => {
+    const summary = {
+      name: prd.spec.name,
+      stack_hint: { tenancy: prd.spec.tenancy, auth: prd.spec.auth, storesData: prd.spec.storesData },
+      requirements: prd.requirements.map((r) => r.feature),
+      dataModel: prd.spec.dataEntities,
+      nfrs: prd.nfrs,
+    };
+    const user = prior
+      ? [
+          `PRD:\n${JSON.stringify(summary)}`,
+          "",
+          "Your previous architecture had these BLOCKING gaps — fix every one:",
+          ...prior.gaps.filter(isBlocking).map((g) => `- ${g.message}`),
+          "",
+          "Return the corrected architecture JSON.",
+        ].join("\n")
+      : `PRD:\n${JSON.stringify(summary)}\n\nReturn the architecture JSON.`;
+
+    const { text } = await generateText({ model: modelFactory(config), system: ARCHITECT_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 4000 });
+    return coerceArchitecture(extractJsonObject(text), prd);
+  };
+}
