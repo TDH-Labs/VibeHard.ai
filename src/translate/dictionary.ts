@@ -170,6 +170,27 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "The project doesn't use TypeScript strict mode, which catches whole classes of bugs (missing null checks, untyped values) before they ship. Turn strict mode on.",
   },
+  // ── adversarial front-half review (the plan, before it's built) ──────────
+  "prd-misses-spec-feature": {
+    title: "Part of what you asked for got lost on the way to the build",
+    detail:
+      "A feature in the spec has no matching requirement in the detailed plan, so it would silently never be built. The plan must carry every feature forward.",
+  },
+  "architecture-misses-data-layer": {
+    title: "The plan stores data but has nowhere to put it",
+    detail:
+      "The app saves data, but no part of the build plan owns the database setup — so the data model (and the security rules protecting it) would have nowhere to live. The plan needs a database component.",
+  },
+  "builds-what-should-be-bought": {
+    title: "The plan rebuilds something you could just plug in",
+    detail:
+      "Part of the plan builds a capability (like payments or auth) that a mature, safer off-the-shelf service already provides. Confirm you really want to build it rather than integrate the proven option.",
+  },
+  "spec-risk": {
+    title: "A reviewer flagged a risk in the plan",
+    detail:
+      "An adversarial review of the plan (spec → requirements → architecture) raised a concern worth weighing before building — the specific issue is in the finding. It's advisory: a person should judge whether it matters.",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",

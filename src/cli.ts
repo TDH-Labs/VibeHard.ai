@@ -15,6 +15,7 @@ import { autoFix } from "./autofix/index.ts";
 import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator } from "./prd/index.ts";
 import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
+import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
 import { fileCheckpointer, llmRefactorer, llmScorer, refactorPhase } from "./refactor/index.ts";
@@ -254,6 +255,24 @@ export async function main(argv: string[]): Promise<number> {
     }
     const tiers = buildOrder(archRes.arch);
     console.log(`   ${archRes.arch.stack} · ${archRes.arch.workstreams.length} workstream(s) in ${tiers.length} tier(s): ${tiers.map((t) => t.map((w) => w.name).join("+")).join(" → ")}`);
+
+    // 3b. Adversarial review of the PLAN before codegen: deterministic spec↔PRD↔arch
+    //     cross-checks (can block) + an LLM red-team (advisory; serious findings flagged
+    //     for a human). The red-team runs at production rigor only (§16). §11: only the
+    //     deterministic cross-checks block — the LLM never auto-blocks the plan.
+    console.log("\n── reviewing the plan (adversarial) … ──");
+    const review = await reviewFrontHalf(
+      { spec: plan.spec, prd: prdRes.prd, architecture: archRes.arch },
+      { adversary: decideRigor(plan.spec) === "production" ? llmAdversary({ config }) : undefined },
+    );
+    for (const fdg of [...review.crossChecks, ...review.adversarial]) explainFinding(fdg);
+    if (review.blocked) {
+      console.log("\n🛑 the plan is internally inconsistent — fix the spec / PRD / architecture before building.");
+      return 1;
+    }
+    if (review.needsHuman.length) {
+      console.log(`\n⚠️  ${review.needsHuman.length} risk(s) a reviewer should weigh (advisory — not blocking the build).`);
+    }
 
     // 4. build each workstream from the plan, in dependency order
     console.log(`\n── building → ${target} ──`);
