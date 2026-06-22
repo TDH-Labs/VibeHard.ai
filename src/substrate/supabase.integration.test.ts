@@ -24,13 +24,17 @@ const maybe = RUN ? test : test.skip;
 const OPEN = "_drydock_probe_open";
 const SECURE = "_drydock_probe_secure";
 
-// Faithful CVE reproduction: BOTH tables are exposed to anon (the Supabase default), but
-// only SECURE enables RLS. So OPEN leaks its row to an anonymous caller; SECURE returns none.
+// Faithful CVE-2025-48757 reproduction. Supabase now AUTO-ENABLES RLS on new tables, so
+// the real leak isn't "no RLS" — it's a permissive policy. OPEN has RLS on but a
+// `using (true)` policy (the "I added RLS" trap) → it leaks every row to anon. SECURE has
+// RLS on with NO permissive policy → anon is denied. Both granted to anon (Supabase default).
 const SETUP_SQL = `
 drop table if exists ${OPEN};
 drop table if exists ${SECURE};
 create table ${OPEN} (id int primary key, secret text);
 create table ${SECURE} (id int primary key, secret text);
+alter table ${OPEN} enable row level security;
+create policy "leaky_all" on ${OPEN} for select using (true);
 alter table ${SECURE} enable row level security;
 grant usage on schema public to anon;
 grant select on ${OPEN} to anon;
@@ -47,6 +51,8 @@ function envFrom(): SupabaseEnv {
     serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
     dbUrl: process.env.SUPABASE_DB_URL,
     dbPassword: process.env.SUPABASE_DB_PASSWORD,
+    dbHost: process.env.SUPABASE_DB_HOST,
+    dbPort: process.env.SUPABASE_DB_PORT ? Number(process.env.SUPABASE_DB_PORT) : undefined,
   };
 }
 

@@ -31,14 +31,30 @@ describe("refFromUrl / resolveDbUrl", () => {
   test("ref is the first hostname label", () => {
     expect(refFromUrl("https://abc123.supabase.co")).toBe("abc123");
   });
-  test("prefers a real SUPABASE_DB_URL", () => {
+  test("prefers a complete SUPABASE_DB_URL (direct or pooler) as-is", () => {
     expect(resolveDbUrl({ ...env, dbUrl: "postgresql://real@host/db", dbPassword: undefined })).toBe("postgresql://real@host/db");
   });
-  test("ignores the [YOUR-PASSWORD] placeholder URL and builds from the password (encoded)", () => {
-    const out = resolveDbUrl({ ...env, dbUrl: "postgresql://postgres:[YOUR-PASSWORD]@x:5432/postgres" });
+  test("injects the discrete password into a placeholder POOLER URL, preserving host + user", () => {
+    const out = resolveDbUrl({
+      ...env,
+      dbUrl: "postgresql://postgres.abc123:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:5432/postgres",
+      dbPassword: "p@ss/word",
+    });
+    expect(out).toContain("@aws-0-us-east-1.pooler.supabase.com:5432/postgres"); // pooler host kept
+    expect(out).toContain("postgres.abc123"); // pooler username kept
+    expect(out).toContain("%40"); // '@' in the password got percent-encoded
+    expect(out).not.toContain("YOUR-PASSWORD");
+  });
+  test("with only a password (no URL), assembles a direct connection from the ref", () => {
+    const out = resolveDbUrl({ url: env.url, anonKey: "a", serviceKey: "s", dbPassword: "p@ss/word" });
     expect(out).toContain("@db.abc123.supabase.co:5432/postgres");
-    expect(out).toContain(encodeURIComponent("p@ss/word")); // p%40ss%2Fword — no encoding footgun
-    expect(out).not.toContain("[YOUR-PASSWORD]");
+    expect(out).toContain(encodeURIComponent("p@ss/word")); // p%40ss%2Fword
+  });
+  test("with a pooler SUPABASE_DB_HOST, assembles the postgres.<ref>@host pooler form", () => {
+    const out = resolveDbUrl({ url: env.url, anonKey: "a", serviceKey: "s", dbPassword: "p@ss/word", dbHost: "aws-1-us-east-1.pooler.supabase.com" });
+    expect(out).toContain("postgres.abc123:"); // tenant rides in the username
+    expect(out).toContain("@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
+    expect(out).toContain(encodeURIComponent("p@ss/word"));
   });
   test("throws when neither a real URL nor a password is available", () => {
     expect(() => resolveDbUrl({ url: env.url, anonKey: "a", serviceKey: "s" })).toThrow(/SUPABASE_DB_PASSWORD/);

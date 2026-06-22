@@ -33,6 +33,8 @@ export interface SupabaseEnv {
   serviceKey: string; // SUPABASE_SERVICE_ROLE_KEY (secret — server-side only)
   dbUrl?: string; // SUPABASE_DB_URL (full; used only if real, not a placeholder)
   dbPassword?: string; // SUPABASE_DB_PASSWORD (preferred — we build the URL, no encoding footguns)
+  dbHost?: string; // SUPABASE_DB_HOST — set to the pooler host (aws-N-<region>.pooler.supabase.com) for IPv4 + serverless
+  dbPort?: number; // SUPABASE_DB_PORT — defaults to 5432 (session pooler / direct)
 }
 
 /** Minimal DB seam so applyMigrations is testable without a live Postgres. */
@@ -54,14 +56,41 @@ export function refFromUrl(url: string): string {
   return new URL(url).hostname.split(".")[0]!;
 }
 
-/** Build a usable Postgres URL: prefer a real SUPABASE_DB_URL, else assemble from the
- *  ref + an (encoded) password. Throws if neither is usable. */
+/** Inject a password into a connection URL, preserving host/user/port. A [BRACKETED]
+ *  placeholder is replaced by string surgery (brackets in userinfo break `new URL`);
+ *  otherwise the WHATWG URL setter handles userinfo percent-encoding. */
+function injectPassword(rawUrl: string, password: string): string {
+  if (/:\[[^\]]*\]@/.test(rawUrl)) return rawUrl.replace(/:\[[^\]]*\]@/, `:${encodeURIComponent(password)}@`);
+  const u = new URL(rawUrl);
+  u.password = password;
+  return u.toString();
+}
+
+/**
+ * Resolve a usable Postgres URL. Priority:
+ *   1. a complete SUPABASE_DB_URL (direct OR pooler) → use as-is;
+ *   2. a SUPABASE_DB_URL with the [YOUR-PASSWORD] placeholder + SUPABASE_DB_PASSWORD →
+ *      inject the password (keeps the pooler host/user);
+ *   3. SUPABASE_DB_PASSWORD + SUPABASE_DB_HOST → assemble a POOLER connection
+ *      (postgres.<ref>@host) — the IPv4 path for serverless deploys;
+ *   4. just SUPABASE_DB_PASSWORD → assemble a DIRECT connection from the project ref.
+ * Throws if none is usable.
+ */
 export function resolveDbUrl(env: SupabaseEnv): string {
-  if (env.dbUrl && !PLACEHOLDER.test(env.dbUrl)) return env.dbUrl;
-  if (env.dbPassword) {
-    return `postgresql://postgres:${encodeURIComponent(env.dbPassword)}@db.${refFromUrl(env.url)}.supabase.co:5432/postgres`;
+  if (env.dbUrl) {
+    if (!PLACEHOLDER.test(env.dbUrl)) return env.dbUrl;
+    if (env.dbPassword) return injectPassword(env.dbUrl, env.dbPassword);
   }
-  throw new Error("no usable DB connection — set SUPABASE_DB_PASSWORD (preferred) or a real SUPABASE_DB_URL (not the [YOUR-PASSWORD] placeholder)");
+  if (env.dbPassword) {
+    const pw = encodeURIComponent(env.dbPassword);
+    const port = env.dbPort ?? 5432;
+    if (env.dbHost) {
+      // pooler (Supavisor): the tenant ref rides in the username → postgres.<ref>
+      return `postgresql://postgres.${refFromUrl(env.url)}:${pw}@${env.dbHost}:${port}/postgres`;
+    }
+    return `postgresql://postgres:${pw}@db.${refFromUrl(env.url)}.supabase.co:${port}/postgres`;
+  }
+  throw new Error("no usable DB connection — set SUPABASE_DB_PASSWORD (+ SUPABASE_DB_HOST for the pooler) or a real SUPABASE_DB_URL");
 }
 
 function envFromProcess(): SupabaseEnv {
@@ -76,6 +105,8 @@ function envFromProcess(): SupabaseEnv {
     serviceKey: need("SUPABASE_SERVICE_ROLE_KEY"),
     dbUrl: process.env.SUPABASE_DB_URL,
     dbPassword: process.env.SUPABASE_DB_PASSWORD,
+    dbHost: process.env.SUPABASE_DB_HOST,
+    dbPort: process.env.SUPABASE_DB_PORT ? Number(process.env.SUPABASE_DB_PORT) : undefined,
   };
 }
 
