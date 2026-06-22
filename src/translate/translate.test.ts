@@ -16,6 +16,8 @@ describe("translateFinding — every ruleId our gates emit is covered (no generi
   const OURS: Array<[string, string]> = [
     ["rls", "rls-disabled"],
     ["rls", "rls-policy-using-true"],
+    ["rls", "rls-missing"],
+    ["rls", "rls-policy-authenticated"],
     ["verify", "health-check-failed"],
     ["verify", "no-entry-point"],
     ["verify", "build-failed"],
@@ -86,6 +88,8 @@ describe("§16 compliance guard — no explanation claims certification", () => 
     const ids = [
       "rls-disabled",
       "rls-policy-using-true",
+      "rls-missing",
+      "rls-policy-authenticated",
       "scan-failed",
       "rules.sqlite-template-literal-query",
       "detected-stripe-api-key",

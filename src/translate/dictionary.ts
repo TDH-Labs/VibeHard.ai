@@ -35,6 +35,16 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "The table has security switched on, but its rule allows any signed-in caller to read all rows — so one customer could read another's records. We scope the rule to each user's own data.",
   },
+  "rls-missing": {
+    title: "This app reads a database table that has no security rules",
+    detail:
+      "The app queries a Supabase table, but no migration turns on access rules for it — so Supabase exposes that table through a public API to the whole internet. This is the exact pattern behind the well-known Supabase data leaks. We add owner-scoped access rules before this can ship.",
+  },
+  "rls-policy-authenticated": {
+    title: "Any logged-in user can read all of this table's data",
+    detail:
+      "Access is switched on, but the rule only checks that someone is signed in — it doesn't limit them to their own rows. If more than one customer or team uses the app, each could read the others' data. Confirm this table is meant to be fully shared; if not, scope the rule to the row's owner (e.g. only their own records).",
+  },
   // ── our verify gate ─────────────────────────────────────────────────────
   "health-check-failed": {
     title: "The app didn't start up reliably",

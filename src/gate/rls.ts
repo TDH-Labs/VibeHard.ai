@@ -90,6 +90,27 @@ function permissiveTables(sources: SqlSource[]): Set<string> {
   return out;
 }
 
+/**
+ * Tables whose `using` clause authorizes ANY authenticated user
+ * (`auth.uid() is not null` / `auth.role() = 'authenticated'`) instead of scoping
+ * rows to their owner. This is NOT the CVE pattern — anonymous callers are still
+ * blocked — so it's a WARN, not a block: legitimate for a single-tenant app, but
+ * in a multi-tenant one every logged-in user can read every row. We match only
+ * these two distinctive idioms (a clause with extra conditions, e.g.
+ * `... is not null and team_id = ...`, won't match — it's likely scoped). It's a
+ * judgment call, so we surface it for review rather than decide it.
+ */
+function broadAuthenticatedTables(sources: SqlSource[]): Set<string> {
+  const combined = sources.map((s) => s.sql).join("\n").toLowerCase();
+  const out = new Set<string>();
+  for (const m of combined.matchAll(
+    /create policy[^;]*?\bon\s+(?:public\.)?(\w+)[^;]*?using\s*\(\s*(?:auth\.uid\(\)\s+is\s+not\s+null|auth\.role\(\)\s*=\s*'authenticated'|'authenticated'\s*=\s*auth\.role\(\))\s*\)/gs,
+  )) {
+    if (m[1]) out.add(m[1]);
+  }
+  return out;
+}
+
 /** Tables a migration CREATEs (used to avoid double-reporting in the coverage check). */
 export function createdTables(sources: SqlSource[]): Set<string> {
   const out = new Set<string>();
@@ -111,6 +132,7 @@ export function createdTables(sources: SqlSource[]): Set<string> {
 export function parseRls(sources: SqlSource[]): Finding[] {
   const rlsOn = rlsEnabledTables(sources);
   const permissive = permissiveTables(sources);
+  const broadAuthed = broadAuthenticatedTables(sources);
 
   const findings: Finding[] = [];
   const seen = new Set<string>();
@@ -139,6 +161,15 @@ export function parseRls(sources: SqlSource[]): Finding[] {
           file: src.file,
           line,
           message: `RLS policy \`using (true)\` on public.${table} authorizes every caller — leaks all rows`,
+        });
+      } else if (broadAuthed.has(table)) {
+        findings.push({
+          tool: "rls",
+          ruleId: "rls-policy-authenticated",
+          severity: "medium", // WARN, not block — intended for single-tenant; a judgment call
+          file: src.file,
+          line,
+          message: `RLS policy on public.${table} authorizes any authenticated user (auth.uid() is not null / auth.role() = 'authenticated') — every logged-in user can read all rows; confirm this table is shared, not per-tenant`,
         });
       }
     }

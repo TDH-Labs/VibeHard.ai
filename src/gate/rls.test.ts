@@ -105,6 +105,48 @@ describe("rls disposition", () => {
   });
 });
 
+describe("rls-policy-authenticated (WARN — broad but not open to the world)", () => {
+  const ts = "2026-06-21T00:00:00.000Z";
+  const mk = (using: string) =>
+    [
+      "create table public.t (id uuid primary key, user_id uuid);",
+      "alter table public.t enable row level security;",
+      `create policy p on public.t for select using (${using});`,
+    ].join("\n");
+
+  test("`auth.uid() is not null` → one MEDIUM finding, verdict still PASS (does not block)", () => {
+    const f = parseRls([{ file: "m.sql", sql: mk("auth.uid() is not null") }]);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ tool: "rls", ruleId: "rls-policy-authenticated", severity: "medium" });
+    expect(verdictOf("rls", f, ts).status).toBe("pass"); // medium is a warning, not a block
+  });
+
+  test("`auth.role() = 'authenticated'` → MEDIUM warn", () => {
+    const f = parseRls([{ file: "m.sql", sql: mk("auth.role() = 'authenticated'") }]);
+    expect(f[0]).toMatchObject({ ruleId: "rls-policy-authenticated", severity: "medium" });
+  });
+
+  test("a caller-scoped policy (`auth.uid() = user_id`) → no warning", () => {
+    expect(parseRls([{ file: "m.sql", sql: mk("auth.uid() = user_id") }])).toEqual([]);
+  });
+
+  test("a clause that only MENTIONS the idiom but adds scoping → no warning (conservative)", () => {
+    const scoped = mk("auth.uid() is not null and team_id = current_team()");
+    expect(parseRls([{ file: "m.sql", sql: scoped }])).toEqual([]);
+  });
+
+  test("`using (true)` still wins as HIGH/block (precedence over the authenticated warn)", () => {
+    const sql = [
+      "create table public.t (id uuid);",
+      "alter table public.t enable row level security;",
+      "create policy p on public.t for select using (true);",
+    ].join("\n");
+    const f = parseRls([{ file: "m.sql", sql }]);
+    expect(f[0]).toMatchObject({ ruleId: "rls-policy-using-true", severity: "high" });
+    expect(verdictOf("rls", f, ts).status).toBe("block");
+  });
+});
+
 // ── The fail-closed coverage check (CVE-2025-48757: "RLS not found" ≠ "RLS fine") ──
 
 describe("detectSupabaseUsage (pure)", () => {

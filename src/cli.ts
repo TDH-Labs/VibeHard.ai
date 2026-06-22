@@ -95,6 +95,14 @@ export async function main(argv: string[]): Promise<number> {
       for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
       console.log("\n🛑 BLOCK — fix or escalate (drydock escalate <dir>)");
     } else {
+      // On PASS every finding is non-blocking (medium/low) — surface them as
+      // heads-up warnings (e.g. an RLS rule that's broader than per-user) so they
+      // don't vanish on the happy path; a reviewer should still eyeball them.
+      const warnings = result.verdicts.flatMap((v) => v.findings);
+      if (warnings.length) {
+        console.log("\n⚠️  Heads-up (not blocking — worth a reviewer's eye):");
+        for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
+      }
       console.log("\n✅ PASS — deploy allowed");
     }
     return result.passed ? 0 : 1;
