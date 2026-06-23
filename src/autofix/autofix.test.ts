@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { autoFix, type GateRunner } from "./autofix.ts";
 import type { Fixer } from "./fixer.ts";
-import type { GateVerdict } from "../types.ts";
+import type { GateVerdict, Severity } from "../types.ts";
 import type { PipelineResult } from "../gate/index.ts";
 
 const ts = "2026-06-21T00:00:00.000Z";
@@ -16,10 +16,31 @@ const passVerdict: GateVerdict = { gate: "verify", status: "pass", findings: [],
 const BLOCK: PipelineResult = { verdicts: [blockVerdict], passed: false };
 const PASS: PipelineResult = { verdicts: [passVerdict], passed: true };
 
-/** A gate that returns the given sequence of results, then repeats the last. */
+/** A BLOCK result with `n` DISTINCT blocking findings (ruleIds r0..r{n-1}). */
+function blockN(n: number, offset = 0): PipelineResult {
+  const findings = Array.from({ length: n }, (_, i) => ({
+    tool: "verify",
+    ruleId: `r${offset + i}`,
+    severity: "high" as Severity,
+    file: "f",
+    message: "x",
+  }));
+  return { verdicts: [{ gate: "verify", status: "block", findings, blocking: n, ranAt: ts }], passed: false };
+}
+
+/** A gate that returns the given sequence, then repeats the last. */
 function scriptedGate(seq: PipelineResult[]): GateRunner {
   let i = 0;
   return async () => seq[Math.min(i++, seq.length - 1)]!;
+}
+/** A gate that always blocks with 2 findings but NEVER the same pair (no cycle, no shrink). */
+function plateauGate(): GateRunner {
+  let i = 0;
+  return async () => {
+    const r = blockN(2, i);
+    i += 2;
+    return r;
+  };
 }
 function countingFixer(): { fixer: Fixer; calls: () => number } {
   let n = 0;
@@ -44,20 +65,50 @@ describe("autoFix loop", () => {
     expect(cf.calls()).toBe(1);
   });
 
-  test("never fixable → escalates after the budget; fixer ran exactly budget times", async () => {
+  test("keeps looping while the blocking set SHRINKS, then converges (no early escalation)", async () => {
     const cf = countingFixer();
-    const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: cf.fixer, budget: 3, now: ts });
-    expect(r.fixed).toBe(false);
-    expect(r.attempts).toBe(3);
-    expect(cf.calls()).toBe(3);
-    expect(r.escalation).not.toBeNull();
-    expect(r.escalation!.blocking).toBeGreaterThan(0);
+    const r = await autoFix("/ws", { gate: scriptedGate([blockN(3), blockN(2), blockN(1), PASS]), fixer: cf.fixer, budget: 5 });
+    expect(r.fixed).toBe(true);
+    expect(r.attempts).toBe(3); // 3 winning rounds, then green — progress overrides the 2-flat-round rule
+    expect(r.escalation).toBeNull();
   });
 
-  test("the GATE disposes, not the fixer — a fixer that does nothing still can't force green", async () => {
-    const cf = countingFixer(); // no-op fixer
+  test("no progress — the SAME findings recur → escalates EARLY (cycle), does NOT burn the budget", async () => {
+    const cf = countingFixer();
+    const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: cf.fixer, budget: 5, now: ts });
+    expect(r.fixed).toBe(false);
+    expect(r.attempts).toBe(1); // one fix, then the recurrence is caught — not 5
+    expect(cf.calls()).toBe(1);
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /recurred|no progress/.test(l))).toBe(true);
+  });
+
+  test("a plateau — 2 rounds without the blocking set shrinking → escalates EARLY (before NTE)", async () => {
+    const cf = countingFixer();
+    const r = await autoFix("/ws", { gate: plateauGate(), fixer: cf.fixer, budget: 5, now: ts });
+    expect(r.fixed).toBe(false);
+    expect(r.attempts).toBe(2); // escalated at the 2nd flat round, well before the 5 ceiling
+    expect(r.log.some((l) => /no progress for 2 rounds/.test(l))).toBe(true);
+  });
+
+  test("steady progress that doesn't converge in time stops at the NTE ceiling (hard cap)", async () => {
+    const cf = countingFixer();
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([blockN(9), blockN(8), blockN(7), blockN(6), blockN(5), blockN(4)]),
+      fixer: cf.fixer,
+      budget: 5,
+      now: ts,
+    });
+    expect(r.fixed).toBe(false);
+    expect(r.attempts).toBe(5); // used the full ceiling — it WAS winning each round, just not done
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /ceiling/.test(l))).toBe(true);
+  });
+
+  test("the GATE disposes, not the fixer — a no-op fixer can't force green", async () => {
+    const cf = countingFixer();
     const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: cf.fixer, budget: 2 });
-    expect(r.fixed).toBe(false); // gate still blocks → no false success
+    expect(r.fixed).toBe(false);
   });
 
   test("a fixer that throws stops the loop and escalates (no crash)", async () => {
@@ -66,7 +117,7 @@ describe("autoFix loop", () => {
     };
     const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: boom, budget: 5 });
     expect(r.fixed).toBe(false);
-    expect(r.log.some((l) => l.includes("fixer error"))).toBe(true);
+    expect(r.log.some((l) => l.includes("fixer errored"))).toBe(true);
     expect(r.escalation).not.toBeNull();
   });
 });
