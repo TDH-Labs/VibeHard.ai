@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
-import { buildEscalationPacket, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
+import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
@@ -20,7 +20,7 @@ import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
 import { deployApp } from "./substrate/index.ts";
-import { Platform, planFor } from "./platform/index.ts";
+import { LocalBuildRunner, Platform, planFor } from "./platform/index.ts";
 import {
   capabilitiesFromSpec,
   combinedCandidateSource,
@@ -246,7 +246,62 @@ export async function main(argv: string[]): Promise<number> {
       console.log(JSON.stringify({ ...t, projects: platform.projectCount(t.id), projectLimit: planFor(t).maxProjects }, null, 2));
       return 0;
     }
-    console.error("usage: drydock tenant <signup|list|show>");
+    if (sub === "deploy") {
+      const [, , tid, dir] = argv;
+      if (!tid || !dir) {
+        console.error("usage: drydock tenant deploy <tenant-id> <dir>   (quota-checked; provisions the tenant's OWN project + deploys)");
+        return 2;
+      }
+      try {
+        const outcome = await platform.deployForTenant(tid, resolve(dir), { onStep: (m) => console.log(`   · ${m}`) });
+        if (outcome.live) {
+          console.log(`\n✅ LIVE → ${outcome.url}`);
+          return 0;
+        }
+        console.log(`\n🛑 aborted at "${outcome.abortedAt}": ${outcome.reason}`);
+        return 1;
+      } catch (e) {
+        console.error(`🛑 ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    if (sub === "build") {
+      const [, , tid, app, dir] = argv;
+      if (!tid || !app || !dir) {
+        console.error("usage: drydock tenant build <tenant-id> <app> <dir>   (quota-checked; gate→fix→re-gate; holds escalate)");
+        return 2;
+      }
+      const repo = process.env.DRYDOCK_ESCALATION_REPO;
+      const sink = repo ? new GitHubEscalationSink({ repo }) : new LocalEscalationSink(join(homedir(), ".drydock", "escalations"));
+      const runner = new LocalBuildRunner({ sink, onStep: (m) => console.log(`   · ${m}`) });
+      try {
+        const job = await platform.build(tid, app, runner, resolve(dir));
+        console.log(`\n${job.status === "succeeded" ? "✅" : "🛑"} build ${job.id} → ${job.status}${job.error ? ` — ${job.error}` : ""}`);
+        return job.status === "succeeded" ? 0 : 1;
+      } catch (e) {
+        console.error(`🛑 ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    if (sub === "usage" && name) {
+      const events = platform.usage(name);
+      if (!events.length) {
+        console.log("no usage recorded");
+        return 0;
+      }
+      for (const e of events) console.log(`${e.at}  ${e.kind}${e.app ? `  ${e.app}` : ""}`);
+      return 0;
+    }
+    if (sub === "builds" && name) {
+      const builds = platform.listBuilds(name);
+      if (!builds.length) {
+        console.log("no builds");
+        return 0;
+      }
+      for (const b of builds) console.log(`${b.id}  ${b.status}  ${b.app}  ${b.queuedAt}${b.error ? `  — ${b.error}` : ""}`);
+      return 0;
+    }
+    console.error("usage: drydock tenant <signup|list|show|deploy|build|usage|builds>");
     return 2;
   }
 
