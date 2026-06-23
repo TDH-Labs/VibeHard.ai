@@ -25,6 +25,7 @@ import type {
   Migration,
   MigrationResult,
 } from "./types.ts";
+import { readManagementToken, SupabaseManagementClient } from "./supabase-management.ts";
 
 /** The Supabase creds the provider needs. Defaults are read from process.env. */
 export interface SupabaseEnv {
@@ -47,7 +48,14 @@ export interface SupabaseProviderOptions {
   env?: SupabaseEnv;
   fetchImpl?: typeof fetch; // for the live-RLS REST probe
   executorFactory?: () => DbExecutor; // defaults to a Bun-SQL executor over the resolved DB URL
+  /** Managed mode: auto-CREATE a project per app via the Management API (vs adopt-existing). */
+  managed?: boolean;
+  appName?: string; // the new project's name (managed mode)
+  management?: SupabaseManagementClient; // injectable (managed mode); defaults to a real client
+  orgId?: string; // SUPABASE_ORG_ID — optional; the sole org is auto-discovered otherwise
 }
+
+const EMPTY_ENV: SupabaseEnv = { url: "", anonKey: "", serviceKey: "" };
 
 const PLACEHOLDER = /your[-_ ]?password|\[|\]/i;
 
@@ -126,21 +134,49 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 export class SupabaseBackendProvider implements BackendProvider {
   readonly name = "supabase";
-  private readonly env: SupabaseEnv;
+  // env is mutable: in managed mode ensureProject points it at the freshly-created project
+  // so applyMigrations + verifyLiveRls (which read this.env lazily) operate on the new project.
+  private env: SupabaseEnv;
   private readonly fetchImpl: typeof fetch;
   private readonly executorFactory: () => DbExecutor;
+  private readonly managed: boolean;
+  private readonly appName?: string;
+  private readonly management?: SupabaseManagementClient;
+  private readonly orgId?: string;
 
   constructor(opts: SupabaseProviderOptions = {}) {
-    this.env = opts.env ?? envFromProcess();
+    this.managed = opts.managed ?? false;
+    this.appName = opts.appName;
+    this.management = opts.management;
+    this.orgId = opts.orgId;
+    // In managed mode the project doesn't exist yet → start with an empty env that
+    // ensureProject fills in. Adopt mode reads the existing project's creds from env now.
+    this.env = opts.env ?? (this.managed ? { ...EMPTY_ENV } : envFromProcess());
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.executorFactory = opts.executorFactory ?? (() => bunExecutor(resolveDbUrl(this.env)));
   }
 
-  /** v1: adopt the existing project from env (no Management-API creation). Idempotent. */
+  /**
+   * Reuse → managed-create → adopt-existing, in that order:
+   *  • a record with a projectRef → reuse it (idempotent redeploy);
+   *  • managed mode → CREATE a fresh Supabase project for this app via the Management API,
+   *    then point this provider at it (the rest of the deploy runs against the new project);
+   *  • otherwise → adopt the project named in the environment (v1 single-project behavior).
+   */
   async ensureProject(record: DeploymentRecord, _org: CustomerOrg): Promise<{ handle: BackendHandle; secrets: BackendSecrets }> {
-    const projectRef = record.projectRef ?? refFromUrl(this.env.url);
-    const secrets: BackendSecrets = { url: this.env.url, anonKey: this.env.anonKey, serviceKey: this.env.serviceKey };
-    return { handle: { projectRef }, secrets };
+    if (record.projectRef) {
+      const secrets: BackendSecrets = { url: this.env.url, anonKey: this.env.anonKey, serviceKey: this.env.serviceKey };
+      return { handle: { projectRef: record.projectRef }, secrets };
+    }
+    if (this.managed) {
+      const mgmt = this.management ?? new SupabaseManagementClient({ token: readManagementToken() });
+      const p = await mgmt.provisionProject({ name: this.appName ?? "drydock-app", orgId: this.orgId });
+      // operate the remainder of the deploy on the NEW project
+      this.env = { url: p.url, anonKey: p.anonKey, serviceKey: p.serviceKey, dbPassword: p.dbPassword, dbHost: p.dbHost };
+      return { handle: { projectRef: p.ref }, secrets: { url: p.url, anonKey: p.anonKey, serviceKey: p.serviceKey } };
+    }
+    const projectRef = refFromUrl(this.env.url);
+    return { handle: { projectRef }, secrets: { url: this.env.url, anonKey: this.env.anonKey, serviceKey: this.env.serviceKey } };
   }
 
   /** Apply only the not-yet-applied migrations over a direct Postgres connection. A SQL

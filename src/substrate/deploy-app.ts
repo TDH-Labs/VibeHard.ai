@@ -44,12 +44,14 @@ export function tablesFromMigrations(migrations: Migration[]): string[] {
  * consistently with the verify gate's launch detection and FlyHostProvider's own precondition.
  */
 export function defaultSubstrateDeps(
-  opts: { stateDir?: string; onStep?: (m: string) => void; workspacePath?: string } = {},
+  opts: { stateDir?: string; onStep?: (m: string) => void; workspacePath?: string; managed?: boolean; appName?: string } = {},
 ): SubstrateDeps {
   const stateDir = opts.stateDir ?? join(homedir(), ".drydock");
   const containerized = !!opts.workspacePath && existsSync(join(opts.workspacePath, "Dockerfile"));
   return {
-    backend: new SupabaseBackendProvider(),
+    // Managed mode → auto-CREATE a Supabase project per app (Management API); else adopt the
+    // project named in the environment (single-project v1). Managed needs no SUPABASE_URL/keys.
+    backend: opts.managed ? new SupabaseBackendProvider({ managed: true, appName: opts.appName }) : new SupabaseBackendProvider(),
     host: containerized ? new FlyHostProvider() : new VercelHostProvider(),
     secrets: new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY ?? ""),
     records: new FileRecordStore(join(stateDir, "deployments")),
@@ -66,10 +68,12 @@ export interface DeployAppOptions {
 
 /** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
 export async function deployApp(workspacePath: string, opts: DeployAppOptions = {}): Promise<DeployOutcome> {
-  const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath });
+  const app = opts.app ?? basename(workspacePath);
+  // Managed (auto-create a project per app) is opt-in via DRYDOCK_MANAGED=1; default = adopt.
+  const managed = process.env.DRYDOCK_MANAGED === "1";
+  const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
-  const app = opts.app ?? basename(workspacePath);
   const orgRef = process.env.SUPABASE_URL ? refFromUrl(process.env.SUPABASE_URL) : "default";
   return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables }, deps);
 }

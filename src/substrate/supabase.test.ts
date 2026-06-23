@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { refFromUrl, resolveDbUrl, SupabaseBackendProvider, type DbExecutor, type SupabaseEnv } from "./supabase.ts";
+import type { SupabaseManagementClient } from "./supabase-management.ts";
 import type { DeploymentRecord } from "./types.ts";
 
 const env: SupabaseEnv = { url: "https://abc123.supabase.co", anonKey: "anon-key", serviceKey: "svc-key", dbPassword: "p@ss/word" };
@@ -26,6 +27,53 @@ const fetchOf = (byTable: Record<string, { status: number; body: unknown }>) =>
     const r = byTable[table] ?? { status: 404, body: { message: "not found" } };
     return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.body };
   }) as unknown as typeof fetch;
+
+describe("SupabaseBackendProvider — managed mode (auto-create)", () => {
+  const provisioned = {
+    ref: "newref", url: "https://newref.supabase.co", region: "us-east-1",
+    anonKey: "new-anon", serviceKey: "new-svc",
+    dbHost: "aws-1-us-east-1.pooler.supabase.com", dbUser: "postgres.newref", dbPassword: "genpw",
+  };
+
+  test("ensureProject CREATES a project and points the provider at it", async () => {
+    const provisionCalls: Array<{ name: string; orgId?: string }> = [];
+    const fakeMgmt = {
+      provisionProject: async (req: { name: string; orgId?: string }) => {
+        provisionCalls.push(req);
+        return provisioned;
+      },
+    } as unknown as SupabaseManagementClient;
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      seen.push(url);
+      return { ok: true, status: 200, json: async () => [] };
+    }) as unknown as typeof fetch;
+
+    const provider = new SupabaseBackendProvider({ managed: true, appName: "my-app", management: fakeMgmt, fetchImpl });
+    const { handle, secrets } = await provider.ensureProject(record0, { orgRef: "org" });
+
+    expect(provisionCalls[0]?.name).toBe("my-app");
+    expect(handle.projectRef).toBe("newref");
+    expect(secrets).toEqual({ url: "https://newref.supabase.co", anonKey: "new-anon", serviceKey: "new-svc" });
+    // proof the provider REPOINTED: the live-RLS probe now hits the NEW project's REST endpoint
+    await provider.verifyLiveRls(handle, ["notes"]);
+    expect(seen[0]).toContain("https://newref.supabase.co/rest/v1/notes");
+  });
+
+  test("a record with an existing projectRef is reused (managed mode does NOT re-create)", async () => {
+    let created = false;
+    const fakeMgmt = {
+      provisionProject: async () => {
+        created = true;
+        throw new Error("should not create");
+      },
+    } as unknown as SupabaseManagementClient;
+    const provider = new SupabaseBackendProvider({ managed: true, appName: "x", management: fakeMgmt, env });
+    const { handle } = await provider.ensureProject({ ...record0, projectRef: "existing" }, { orgRef: "org" });
+    expect(handle.projectRef).toBe("existing");
+    expect(created).toBe(false);
+  });
+});
 
 describe("refFromUrl / resolveDbUrl", () => {
   test("ref is the first hostname label", () => {
