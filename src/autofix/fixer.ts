@@ -16,7 +16,7 @@ import { BoltEngine } from "../engine/bolt/engine.ts";
 import { liveBoltDriver, type ModelFactory } from "../engine/bolt/driver.ts";
 import { translateFinding } from "../translate/index.ts";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
-import { applyDepBumps } from "./depbump.ts";
+import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
 
 /** Applies fixes for a set of (blocked) verdicts to the workspace, in place. */
 export type Fixer = (workspacePath: string, verdicts: GateVerdict[]) => Promise<void>;
@@ -61,17 +61,27 @@ function readAuthoredFiles(root: string, cap: number): Array<{ rel: string; cont
   return out;
 }
 
-function buildFixPrompt(workspacePath: string, findings: Finding[], cap: number): string {
+function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped: DepBumpResult["majorBumped"], cap: number): string {
   const lines: string[] = [
-    "The app you generated FAILED the deploy gate. Fix ONLY the issues below and make the minimal changes needed to pass. Output the corrected and any new files as bolt file actions (<boltArtifact> with <boltAction type=\"file\" filePath=\"...\">). Do not regenerate unrelated files; do not explain.",
+    "The app you generated FAILED the deploy gate. Make the MINIMAL changes needed to pass. Output the corrected and any new files as bolt file actions (<boltArtifact> with <boltAction type=\"file\" filePath=\"...\">). Do not regenerate unrelated files; do not explain.",
     "",
-    "Issues to fix:",
   ];
-  for (const f of findings) {
-    const e = translateFinding(f);
-    lines.push(`- [${f.severity}] ${e.title} — ${f.message} (${f.tool}:${f.ruleId} @ ${f.file}:${f.line ?? "?"})`);
+  if (majorBumped.length) {
+    lines.push(
+      "These dependencies were just upgraded across a MAJOR version (already changed in package.json) to patch security vulnerabilities. Adapt the code to each new major's BREAKING changes — renamed/removed/relocated APIs, changed imports, newly-async APIs, config and peer-dependency changes. Keep all behavior and security (auth, RLS, ownership scoping) IDENTICAL:",
+    );
+    for (const m of majorBumped) lines.push(`- ${m.pkg}: ${m.from} → ${m.to}`);
+    lines.push("");
   }
-  lines.push("", "Current project files (authored source):");
+  if (findings.length) {
+    lines.push("Issues to fix:");
+    for (const f of findings) {
+      const e = translateFinding(f);
+      lines.push(`- [${f.severity}] ${e.title} — ${f.message} (${f.tool}:${f.ruleId} @ ${f.file}:${f.line ?? "?"})`);
+    }
+    lines.push("");
+  }
+  lines.push("Current project files (authored source):");
   for (const { rel, content } of readAuthoredFiles(workspacePath, cap)) {
     lines.push(`\n--- ${rel} ---\n${content}`);
   }
@@ -90,19 +100,22 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
   return async (workspacePath, verdicts) => {
     const blocking = verdicts.flatMap((v) => v.findings).filter(isBlocking);
 
-    // 1) Dependency CVEs → deterministic bump (version from the finding).
+    // 1) Dependency CVEs → deterministic version bump (same-major where possible; a
+    //    breaking MAJOR bump as the fallback — the version still comes from the finding, §11).
     const depFindings = blocking.filter((f) => f.tool === "trivy" && f.ruleId !== "scan-failed");
-    if (depFindings.length) applyDepBumps(workspacePath, depFindings);
+    const depResult = depFindings.length ? applyDepBumps(workspacePath, depFindings) : null;
+    const majorBumped = depResult?.majorBumped ?? [];
 
-    // 2) Everything else → LLM, given findings + build error + current source.
+    // 2) The LLM pass — for code findings AND to adapt the code to any breaking major
+    //    upgrade just applied. The gate (next re-gate) verifies whatever it produces (§11).
     const codeFindings = blocking.filter((f) => f.tool !== "trivy");
-    if (codeFindings.length) {
+    if (codeFindings.length || majorBumped.length) {
       const session = await new BoltEngine(liveBoltDriver({ modelFactory: opts.modelFactory })).startSession(
         workspacePath,
         config,
       );
       try {
-        for await (const _ of session.prompt(buildFixPrompt(workspacePath, codeFindings, cap))) void _;
+        for await (const _ of session.prompt(buildFixPrompt(workspacePath, codeFindings, majorBumped, cap))) void _;
       } finally {
         await session.dispose();
       }

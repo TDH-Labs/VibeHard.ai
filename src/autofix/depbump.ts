@@ -2,9 +2,12 @@
  * Deterministic dependency bumps for the auto-fix loop (PROJECT_BRIEF.md §15).
  * The fixed version comes from the GATE FINDING (trivy's "fixed in …"), NOT the
  * model — the model can't know post-cutoff versions; the gate-catch is the source
- * of truth. We bump to the highest SAME-MAJOR fix (a safe, non-breaking patch);
- * anything that only has a fix in a newer major is left for re-gate to surface and
- * the loop to escalate (we never auto-apply a breaking major upgrade).
+ * of truth. A same-major fix is a safe, non-breaking bump. When a CVE is only fixed
+ * in a NEWER major, we ALSO apply that major bump (still deterministic — version from
+ * the finding) and hand it to the fixer's LLM to adapt the code to the breaking
+ * changes; the GATE then verifies the result. §11 holds: deterministic picks the
+ * version, the LLM only adapts, the gate disposes. Escalation is for when that can't
+ * converge — not a reflex on every breaking change.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,13 +42,30 @@ function cmp(a: string, b: string): number {
  */
 export function pickBumpTarget(installed: string, fixed: string[]): string | null {
   const major = parts(installed)[0] ?? -1;
-  const safe = fixed.filter((v) => (parts(v)[0] ?? -2) === major && cmp(v, installed) > 0).sort(cmp);
+  const safe = fixed.filter((v) => !v.includes("-") && (parts(v)[0] ?? -2) === major && cmp(v, installed) > 0).sort(cmp);
   return safe.length ? safe[safe.length - 1]! : null;
 }
 
+/**
+ * The BREAKING fallback (used only when there's no same-major fix): the highest STABLE
+ * version in the LOWEST major above `installed`'s. Minimal jump — one major at a time, so
+ * a remaining higher-major CVE just re-surfaces next round and bumps again. null when no
+ * higher-major fix exists (pre-releases/canaries ignored).
+ */
+export function pickMajorTarget(installed: string, fixed: string[]): string | null {
+  const major = parts(installed)[0] ?? -1;
+  const higher = fixed.filter((v) => !v.includes("-") && (parts(v)[0] ?? -2) > major);
+  if (!higher.length) return null;
+  const lowestHigherMajor = Math.min(...higher.map((v) => parts(v)[0]!));
+  const inThatMajor = higher.filter((v) => parts(v)[0] === lowestHigherMajor).sort(cmp);
+  return inThatMajor[inThatMajor.length - 1]!;
+}
+
 export interface DepBumpResult {
-  bumped: Array<{ pkg: string; from: string; to: string }>;
-  /** packages whose only fix requires a major upgrade — left for the loop to escalate. */
+  bumped: Array<{ pkg: string; from: string; to: string }>; // safe same-major bumps
+  /** breaking MAJOR bumps applied — the fixer's LLM must adapt the code; the gate verifies. */
+  majorBumped: Array<{ pkg: string; from: string; to: string }>;
+  /** packages with no usable fix at all (rare) — nothing to bump to. */
   unfixable: string[];
   installExit: number | null;
 }
@@ -58,13 +78,13 @@ export interface DepBumpResult {
  */
 export function applyDepBumps(workspacePath: string, depFindings: Finding[]): DepBumpResult {
   const pkgPath = join(workspacePath, "package.json");
-  if (!existsSync(pkgPath)) return { bumped: [], unfixable: [], installExit: null };
+  if (!existsSync(pkgPath)) return { bumped: [], majorBumped: [], unfixable: [], installExit: null };
 
   let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   try {
     pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
   } catch {
-    return { bumped: [], unfixable: [], installExit: null };
+    return { bumped: [], majorBumped: [], unfixable: [], installExit: null };
   }
 
   // Group findings by package → union of all its fixed versions.
@@ -78,9 +98,12 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
   }
 
   const bumped: DepBumpResult["bumped"] = [];
+  const majorBumped: DepBumpResult["majorBumped"] = [];
   const unfixable: string[] = [];
   for (const [pkgName, { installed, fixed }] of byPkg) {
-    const target = pickBumpTarget(installed, [...fixed]);
+    const fixedArr = [...fixed];
+    const inMajor = pickBumpTarget(installed, fixedArr);
+    const target = inMajor ?? pickMajorTarget(installed, fixedArr); // breaking fallback when no same-major fix
     if (!target) {
       unfixable.push(pkgName);
       continue;
@@ -92,10 +115,10 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
         changed = true;
       }
     }
-    if (changed) bumped.push({ pkg: pkgName, from: installed, to: target });
+    if (changed) (inMajor ? bumped : majorBumped).push({ pkg: pkgName, from: installed, to: target });
   }
 
-  if (!bumped.length) return { bumped, unfixable, installExit: null };
+  if (!bumped.length && !majorBumped.length) return { bumped, majorBumped, unfixable, installExit: null };
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], {
@@ -103,5 +126,5 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
     stdout: "ignore",
     stderr: "ignore",
   });
-  return { bumped, unfixable, installExit: install.exitCode ?? 1 };
+  return { bumped, majorBumped, unfixable, installExit: install.exitCode ?? 1 };
 }
