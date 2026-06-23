@@ -32,9 +32,11 @@ export interface AutoFixResult {
 }
 
 /** NTE — the hard not-to-exceed on fix→re-gate cycles. A flat ceiling on purpose: every
- *  loop is real token spend, so this caps maximum exposure. Progress-based stopping
- *  (below) usually exits earlier — either converged, or escalated because it's stuck. */
-const DEFAULT_BUDGET = 5;
+ *  loop is real wall-clock + token spend, so this caps maximum exposure. Progress-based
+ *  stopping (below) usually exits earlier — converged, or escalated because it's stuck —
+ *  so this only bites a slow-but-converging cascade (e.g. a major framework upgrade),
+ *  where 10 is cheap insurance against clipping a fix that was still landing. */
+const DEFAULT_BUDGET = 10;
 
 /** Stable identity of a finding, for round-over-round progress + cycle detection. */
 function fingerprint(f: Finding): string {
