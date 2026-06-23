@@ -3,6 +3,7 @@ export type { Tenant, TenantStatus, Plan, TenantStore, BillingProvider, UsageEve
 export { PLANS, DEFAULT_PLAN, planFor } from "./plans.ts";
 export { FileTenantStore } from "./tenant-store.ts";
 export { LocalBillingProvider } from "./billing.ts";
+export { StripeClient, StripeBillingProvider, type StripeClientOptions, type StripeBillingOptions } from "./stripe.ts";
 export { FileUsageLedger, type UsageLedger } from "./usage.ts";
 export { FileBuildStore, dayAgo, type BuildJob, type BuildStatus, type BuildRunner, type BuildStore } from "./build.ts";
 export { LocalBuildRunner, type LocalBuildRunnerOptions } from "./build-runner.ts";
