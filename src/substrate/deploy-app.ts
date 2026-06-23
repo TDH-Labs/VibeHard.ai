@@ -48,12 +48,17 @@ export function defaultSubstrateDeps(
 ): SubstrateDeps {
   const stateDir = opts.stateDir ?? join(homedir(), ".drydock");
   const containerized = !!opts.workspacePath && existsSync(join(opts.workspacePath, "Dockerfile"));
+  const secrets = new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY ?? "");
   return {
     // Managed mode → auto-CREATE a Supabase project per app (Management API); else adopt the
     // project named in the environment (single-project v1). Managed needs no SUPABASE_URL/keys.
-    backend: opts.managed ? new SupabaseBackendProvider({ managed: true, appName: opts.appName }) : new SupabaseBackendProvider(),
+    // The SAME secrets store is shared so the provider can reload a created project's connection
+    // (incl. the generated db password) on a later redeploy.
+    backend: opts.managed
+      ? new SupabaseBackendProvider({ managed: true, appName: opts.appName, secretsStore: secrets })
+      : new SupabaseBackendProvider(),
     host: containerized ? new FlyHostProvider() : new VercelHostProvider(),
-    secrets: new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY ?? ""),
+    secrets,
     records: new FileRecordStore(join(stateDir, "deployments")),
     onStep: opts.onStep,
   };

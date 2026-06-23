@@ -24,6 +24,7 @@ import type {
   LiveRlsResult,
   Migration,
   MigrationResult,
+  SecretsStore,
 } from "./types.ts";
 import { readManagementToken, SupabaseManagementClient } from "./supabase-management.ts";
 
@@ -53,6 +54,7 @@ export interface SupabaseProviderOptions {
   appName?: string; // the new project's name (managed mode)
   management?: SupabaseManagementClient; // injectable (managed mode); defaults to a real client
   orgId?: string; // SUPABASE_ORG_ID — optional; the sole org is auto-discovered otherwise
+  secretsStore?: SecretsStore; // managed mode: persist a created project's connection so a redeploy can reload it
 }
 
 const EMPTY_ENV: SupabaseEnv = { url: "", anonKey: "", serviceKey: "" };
@@ -143,12 +145,14 @@ export class SupabaseBackendProvider implements BackendProvider {
   private readonly appName?: string;
   private readonly management?: SupabaseManagementClient;
   private readonly orgId?: string;
+  private readonly secretsStore?: SecretsStore;
 
   constructor(opts: SupabaseProviderOptions = {}) {
     this.managed = opts.managed ?? false;
     this.appName = opts.appName;
     this.management = opts.management;
     this.orgId = opts.orgId;
+    this.secretsStore = opts.secretsStore;
     // In managed mode the project doesn't exist yet → start with an empty env that
     // ensureProject fills in. Adopt mode reads the existing project's creds from env now.
     this.env = opts.env ?? (this.managed ? { ...EMPTY_ENV } : envFromProcess());
@@ -165,6 +169,16 @@ export class SupabaseBackendProvider implements BackendProvider {
    */
   async ensureProject(record: DeploymentRecord, _org: CustomerOrg): Promise<{ handle: BackendHandle; secrets: BackendSecrets }> {
     if (record.projectRef) {
+      // Managed reuse (redeploy): the project was auto-created on a prior deploy. Reload its FULL
+      // connection — including the generated db password, which the Management API can't re-issue —
+      // from the encrypted store, and repoint this provider so re-migration + the RLS probe hit it.
+      if (this.managed && this.secretsStore) {
+        const stored = await this.secretsStore.get(record.app);
+        if (stored) {
+          this.env = { url: stored.url, anonKey: stored.anonKey, serviceKey: stored.serviceKey, dbHost: stored.dbHost, dbPassword: stored.dbPassword };
+          return { handle: { projectRef: record.projectRef }, secrets: stored };
+        }
+      }
       const secrets: BackendSecrets = { url: this.env.url, anonKey: this.env.anonKey, serviceKey: this.env.serviceKey };
       return { handle: { projectRef: record.projectRef }, secrets };
     }
@@ -173,7 +187,11 @@ export class SupabaseBackendProvider implements BackendProvider {
       const p = await mgmt.provisionProject({ name: this.appName ?? "drydock-app", orgId: this.orgId });
       // operate the remainder of the deploy on the NEW project
       this.env = { url: p.url, anonKey: p.anonKey, serviceKey: p.serviceKey, dbPassword: p.dbPassword, dbHost: p.dbHost };
-      return { handle: { projectRef: p.ref }, secrets: { url: p.url, anonKey: p.anonKey, serviceKey: p.serviceKey } };
+      // Persist the FULL connection (incl. the unrecoverable db password) so a future redeploy can
+      // reload it — the fix for managed redeploys. Encrypted at rest; never injected into the host.
+      const secrets: BackendSecrets = { url: p.url, anonKey: p.anonKey, serviceKey: p.serviceKey, dbHost: p.dbHost, dbUser: p.dbUser, dbPassword: p.dbPassword };
+      if (this.secretsStore) await this.secretsStore.put(record.app, secrets);
+      return { handle: { projectRef: p.ref }, secrets };
     }
     const projectRef = refFromUrl(this.env.url);
     return { handle: { projectRef }, secrets: { url: this.env.url, anonKey: this.env.anonKey, serviceKey: this.env.serviceKey } };

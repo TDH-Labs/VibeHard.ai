@@ -1,7 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { refFromUrl, resolveDbUrl, SupabaseBackendProvider, type DbExecutor, type SupabaseEnv } from "./supabase.ts";
 import type { SupabaseManagementClient } from "./supabase-management.ts";
-import type { DeploymentRecord } from "./types.ts";
+import type { BackendSecrets, DeploymentRecord, SecretsStore } from "./types.ts";
+
+/** In-memory SecretsStore for tests (the real one is AES-256-GCM on disk). */
+function memStore() {
+  const m = new Map<string, BackendSecrets>();
+  const store: SecretsStore = {
+    name: "mem",
+    put: async (app, s) => {
+      m.set(app, s);
+      return `ref:${app}`;
+    },
+    get: async (app) => m.get(app) ?? null,
+    remove: async (app) => {
+      m.delete(app);
+    },
+  };
+  return store;
+}
 
 const env: SupabaseEnv = { url: "https://abc123.supabase.co", anonKey: "anon-key", serviceKey: "svc-key", dbPassword: "p@ss/word" };
 const record0: DeploymentRecord = { app: "a", customerOrgRef: "org", projectRef: null, hostRef: null, url: null, appliedMigrations: [], secretsRef: null, status: "provisioning", updatedAt: "t" };
@@ -54,9 +71,45 @@ describe("SupabaseBackendProvider — managed mode (auto-create)", () => {
 
     expect(provisionCalls[0]?.name).toBe("my-app");
     expect(handle.projectRef).toBe("newref");
-    expect(secrets).toEqual({ url: "https://newref.supabase.co", anonKey: "new-anon", serviceKey: "new-svc" });
+    // secrets now carry the DB connection (so a redeploy can reload the unrecoverable db password)
+    expect(secrets).toEqual({
+      url: "https://newref.supabase.co", anonKey: "new-anon", serviceKey: "new-svc",
+      dbHost: "aws-1-us-east-1.pooler.supabase.com", dbUser: "postgres.newref", dbPassword: "genpw",
+    });
     // proof the provider REPOINTED: the live-RLS probe now hits the NEW project's REST endpoint
     await provider.verifyLiveRls(handle, ["notes"]);
+    expect(seen[0]).toContain("https://newref.supabase.co/rest/v1/notes");
+  });
+
+  test("managed REDEPLOY reloads the created project's connection (incl. db password) from the store", async () => {
+    const store = memStore();
+    const okMgmt = { provisionProject: async () => provisioned } as unknown as SupabaseManagementClient;
+
+    // first deploy: create → persists the full connection to the shared store
+    const first = new SupabaseBackendProvider({ managed: true, appName: "app", management: okMgmt, secretsStore: store });
+    const r1 = await first.ensureProject(record0, { orgRef: "o" });
+    expect(r1.secrets.dbPassword).toBe("genpw");
+    expect(await store.get(record0.app)).not.toBeNull(); // persisted under the app key
+
+    // REDEPLOY: a fresh provider instance + the record now carrying the projectRef → reuse path.
+    // The Management client MUST NOT be called (no second create), and the db password is reloaded.
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      seen.push(url);
+      return { ok: true, status: 200, json: async () => [] };
+    }) as unknown as typeof fetch;
+    const failMgmt = {
+      provisionProject: async () => {
+        throw new Error("must not create on redeploy");
+      },
+    } as unknown as SupabaseManagementClient;
+    const second = new SupabaseBackendProvider({ managed: true, appName: "app", management: failMgmt, secretsStore: store, fetchImpl });
+    const r2 = await second.ensureProject({ ...record0, projectRef: "newref" }, { orgRef: "o" });
+
+    expect(r2.handle.projectRef).toBe("newref");
+    expect(r2.secrets.dbPassword).toBe("genpw"); // the unrecoverable bit survived the redeploy
+    // repointed at the created project: the RLS probe hits its URL (not the empty default)
+    await second.verifyLiveRls(r2.handle, ["notes"]);
     expect(seen[0]).toContain("https://newref.supabase.co/rest/v1/notes");
   });
 

@@ -52,7 +52,7 @@ describe("deployApp — derives input + runs the orchestrator", () => {
       const deps: SubstrateDeps = {
         backend: {
           name: "fake",
-          ensureProject: async () => ({ handle: { projectRef: "ref" }, secrets: { url: "u", anonKey: "a", serviceKey: "s" } }),
+          ensureProject: async () => ({ handle: { projectRef: "ref" }, secrets: { url: "u", anonKey: "a", serviceKey: "s", dbHost: "dbhost", dbUser: "dbuser", dbPassword: "dbpw" } }),
           applyMigrations: async (_h, migs) => {
             captured.migrations = migs.map((m) => m.id);
             return { ok: true, appliedNow: migs.map((m) => m.id) };
@@ -87,7 +87,8 @@ describe("deployApp — derives input + runs the orchestrator", () => {
       const vals = Object.values(captured.hostEnv ?? {});
       expect(vals.length).toBeGreaterThan(0);
       expect(vals.every((v) => v === "u" || v === "a")).toBe(true);
-      expect(vals).not.toContain("s");
+      expect(vals).not.toContain("s"); // service-role key never reaches the host
+      expect(vals).not.toContain("dbpw"); // …nor the managed-mode db password
       expect(captured.hostEnv?.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("a"); // Next reads the public name
     } finally {
       rmSync(ws, { recursive: true, force: true });

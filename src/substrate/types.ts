@@ -14,6 +14,12 @@ export interface BackendSecrets {
   url: string; // SUPABASE_URL — safe to expose
   anonKey: string; // safe for the browser (RLS protects the data)
   serviceKey: string; // SERVER-SIDE ONLY — must never reach a frontend bundle/env
+  // Managed mode (auto-created projects): the DB connection needed to RE-deploy. Server-side
+  // only, encrypted at rest, NEVER injected into the host (the orchestrator sends only url+anon).
+  // The db password is generated at creation and unrecoverable from the API → it MUST persist.
+  dbHost?: string; // the pooler host (from the Management API)
+  dbUser?: string; // postgres.<ref>
+  dbPassword?: string;
 }
 
 /** A provisioned project in the customer's org. */
