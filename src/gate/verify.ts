@@ -180,14 +180,56 @@ export function findEntry(projectPath: string): string | null {
   return null;
 }
 
-/** How to verify a project boots: launch a node server, build a static app, or nothing. */
-export type LaunchPlan = { kind: "node"; entry: string } | { kind: "build"; script: string } | null;
+/** How to verify a project boots: launch a node server, launch a python server, build a static app, or nothing. */
+export type LaunchPlan =
+  | { kind: "node"; entry: string }
+  | { kind: "python"; cmd: string[] }
+  | { kind: "build"; script: string }
+  | null;
 
-/** Pure-ish (reads package.json): pick the launch strategy. A node entry wins;
- *  otherwise a `build` script means a static/SPA app to build-verify. */
+/** A Python web entry module (the language-expansion path: any language on Supabase). */
+export function pythonEntry(projectPath: string): string | null {
+  for (const c of ["main.py", "app.py", "asgi.py", "wsgi.py", "server.py"]) {
+    if (existsSync(join(projectPath, c))) return c;
+  }
+  return null;
+}
+
+/**
+ * Pure: the launch command for a Python web app, with the port as the literal "$PORT"
+ * (substituted at spawn). Pick the server for the framework declared in `deps`
+ * (requirements.txt / pyproject text): uvicorn for FastAPI/ASGI; otherwise plain
+ * `python <entry>` (Flask/a script reads PORT from the environment). The uvicorn module
+ * is the entry minus its `.py`.
+ */
+export function pythonStartCommand(entry: string, deps: string): string[] {
+  const mod = entry.replace(/\.py$/, "");
+  if (/\b(uvicorn|fastapi)\b/i.test(deps)) return ["uvicorn", `${mod}:app`, "--host", "0.0.0.0", "--port", "$PORT"];
+  return ["python", entry];
+}
+
+function readPyDeps(projectPath: string): string {
+  return ["requirements.txt", "pyproject.toml"]
+    .map((f) => {
+      try {
+        const p = join(projectPath, f);
+        return existsSync(p) ? readFileSync(p, "utf8") : "";
+      } catch {
+        return "";
+      }
+    })
+    .join("\n");
+}
+
+/** Pure-ish (reads package.json / requirements): pick the launch strategy. A node entry
+ *  wins, then a Python web app, then a `build` script (static/SPA build-verify). */
 export function detectLaunch(projectPath: string): LaunchPlan {
   const entry = findEntry(projectPath);
   if (entry) return { kind: "node", entry };
+  if (existsSync(join(projectPath, "requirements.txt")) || existsSync(join(projectPath, "pyproject.toml"))) {
+    const pe = pythonEntry(projectPath);
+    if (pe) return { kind: "python", cmd: pythonStartCommand(pe, readPyDeps(projectPath)) };
+  }
   const pkg = readPkg(projectPath);
   if (pkg?.scripts?.build) return { kind: "build", script: "build" };
   return null;
@@ -245,6 +287,21 @@ function ensureInstalled(projectPath: string, env: Record<string, string | undef
     };
   }
   return null;
+}
+
+/** Install Python deps for a from-source app (pip). Returns a finding on failure, else null. */
+function ensurePythonInstalled(projectPath: string, env: Record<string, string | undefined>): Finding | null {
+  if (!existsSync(join(projectPath, "requirements.txt"))) return null; // pyproject-only → assume the runtime provides them (v1)
+  const install = Bun.spawnSync(["pip", "install", "-r", "requirements.txt"], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe" });
+  if ((install.exitCode ?? 1) === 0) return null;
+  const log = `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`.trim();
+  return {
+    tool: "verify",
+    ruleId: "install-failed",
+    severity: "high",
+    file: "requirements.txt",
+    message: `\`pip install -r requirements.txt\` exited ${install.exitCode} — the app's Python dependencies don't install, so it cannot run${log ? ` — error: ${log.slice(-600)}` : ""}`,
+  };
 }
 
 /** Install (if needed) then run the build script. Dummy env (from .env.example)
@@ -354,13 +411,14 @@ async function probePaths(port: number): Promise<number> {
  *  is visible — drained after teardown; a boot stack trace is far under the cap). */
 async function probeOnce(
   projectPath: string,
-  entry: string,
+  cmd: string[],
   port: number,
   env: Record<string, string | undefined>,
 ): Promise<{ status: number; log: string; cleanShutdown: boolean }> {
-  const proc = Bun.spawn(["node", entry], {
+  const resolved = cmd.map((a) => (a === "$PORT" ? String(port) : a)); // port templated for uvicorn etc.
+  const proc = Bun.spawn(resolved, {
     cwd: projectPath,
-    env: { ...env, PORT: String(port) },
+    env: { ...env, PORT: String(port) }, // node/Flask read PORT from env; uvicorn from --port
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -427,17 +485,26 @@ export async function runVerify(
     return verdictOf("verify", findings, ranAt);
   }
 
-  // A node app can't launch without its deps; a fresh generation has none yet.
-  const installFail = ensureInstalled(projectPath, env);
-  if (installFail) {
-    findings.push(...summarizeBuild(installFail));
-    return verdictOf("verify", findings, ranAt);
+  // A launched app (node or python) can't run without its deps; a fresh generation has none yet.
+  if (plan.kind === "python") {
+    const f = ensurePythonInstalled(projectPath, env);
+    if (f) {
+      findings.push(f);
+      return verdictOf("verify", findings, ranAt);
+    }
+  } else {
+    const installFail = ensureInstalled(projectPath, env);
+    if (installFail) {
+      findings.push(...summarizeBuild(installFail));
+      return verdictOf("verify", findings, ranAt);
+    }
   }
+  const launchCmd = plan.kind === "node" ? ["node", plan.entry] : plan.cmd;
   // §18 adaptive: ALL N runs must come up healthy (N scales with rigor).
   const required = verifyRuns(rigor);
   const runs: VerifyRun[] = [];
   for (let i = 1; i <= required; i++) {
-    const { status, log, cleanShutdown } = await probeOnce(projectPath, plan.entry, 4100 + i, env);
+    const { status, log, cleanShutdown } = await probeOnce(projectPath, launchCmd, 4100 + i, env);
     runs.push({ run: i, status, log, cleanShutdown });
   }
   findings.push(...summarizeVerify(runs, required), ...summarizeShutdown(runs));

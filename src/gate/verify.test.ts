@@ -6,6 +6,7 @@ import {
   detectLaunch,
   dummyEnvValue,
   findEntry,
+  pythonStartCommand,
   isUp,
   parseEnvKeys,
   summarizeBuild,
@@ -179,9 +180,33 @@ describe("detectLaunch", () => {
     expect(detectLaunch(dir)).toEqual({ kind: "build", script: "build" });
   });
 
+  test("a FastAPI app (requirements.txt + main.py) → python kind (uvicorn)", async () => {
+    const dir = await scratch({ "requirements.txt": "fastapi\nuvicorn\nsupabase", "main.py": "app = FastAPI()" });
+    expect(detectLaunch(dir)).toEqual({ kind: "python", cmd: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"] });
+  });
+
+  test("a Flask app (requirements.txt + app.py, no uvicorn) → python kind (python entry)", async () => {
+    const dir = await scratch({ "requirements.txt": "flask\nsupabase", "app.py": "app = Flask(__name__)" });
+    expect(detectLaunch(dir)).toEqual({ kind: "python", cmd: ["python", "app.py"] });
+  });
+
+  test("a node entry wins over a python app when both are present", async () => {
+    const dir = await scratch({ "server.js": "x", "requirements.txt": "fastapi", "main.py": "y" });
+    expect(detectLaunch(dir)).toEqual({ kind: "node", entry: "server.js" });
+  });
+
   test("nothing launchable → null", async () => {
     const dir = await scratch({ "README.md": "# hi" });
     expect(detectLaunch(dir)).toBeNull();
+  });
+});
+
+describe("pythonStartCommand (pure)", () => {
+  test("FastAPI/uvicorn deps → uvicorn <module>:app", () => {
+    expect(pythonStartCommand("main.py", "fastapi==0.110\nuvicorn[standard]")).toEqual(["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]);
+  });
+  test("Flask / plain deps → python entry (reads PORT from env)", () => {
+    expect(pythonStartCommand("app.py", "flask\nsupabase")).toEqual(["python", "app.py"]);
   });
 });
 
