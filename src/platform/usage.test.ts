@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileUsageLedger } from "./usage.ts";
@@ -37,12 +37,27 @@ describe("FileUsageLedger", () => {
     }
   });
 
+  test("rolls by month: events land in <YYYY-MM>.jsonl, countSince skips months before the window", () => {
+    const base = mkdtempSync(join(tmpdir(), "dd-usage-"));
+    try {
+      const ledger = new FileUsageLedger(base);
+      ledger.record("t1", ev("build", "2026-05-15T00:00:00Z"));
+      ledger.record("t1", ev("build", "2026-06-10T00:00:00Z"));
+      ledger.record("t1", ev("build", "2026-06-20T00:00:00Z"));
+      expect(readdirSync(join(base, "tenants", "t1", "usage")).sort()).toEqual(["2026-05.jsonl", "2026-06.jsonl"]); // one file per month
+      expect(ledger.list("t1").length).toBe(3); // list spans all months, chronological
+      expect(ledger.countSince("t1", "build", "2026-06-01T00:00:00Z")).toBe(2); // only June builds (May file skipped entirely)
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   test("a corrupt line is skipped, not fatal; tenants are isolated", () => {
     const base = mkdtempSync(join(tmpdir(), "dd-usage-"));
     try {
       const ledger = new FileUsageLedger(base);
       ledger.record("t1", ev("deploy", "2026-06-22T00:00:00Z", "a"));
-      appendFileSync(join(base, "tenants", "t1", "usage.jsonl"), "{ not json\n");
+      appendFileSync(join(base, "tenants", "t1", "usage", "2026-06.jsonl"), "{ not json\n");
       ledger.record("t1", ev("deploy", "2026-06-22T01:00:00Z", "b"));
       expect(ledger.list("t1").length).toBe(2); // corrupt middle line skipped
       expect(ledger.list("t2")).toEqual([]); // another tenant's ledger is separate
