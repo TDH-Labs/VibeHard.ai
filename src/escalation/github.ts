@@ -53,6 +53,7 @@ export class GitHubEscalationSink implements EscalationSink {
   private readonly fetchImpl: typeof fetch;
   private readonly apiBase: string;
   private readonly label: string;
+  private readonly cache = new Map<string, number>(); // ticketId → issue number (see locate())
 
   constructor(opts: GitHubEscalationSinkOptions) {
     this.repo = opts.repo;
@@ -98,34 +99,60 @@ export class GitHubEscalationSink implements EscalationSink {
   }
 
   private async issues(): Promise<GhIssue[]> {
-    const j = await this.api("GET", `/repos/${this.repo}/issues?state=all&labels=${encodeURIComponent(this.label)}&per_page=100`);
+    // Identify OUR issues by the embedded marker, NOT a ?labels= filter: GitHub's label filter
+    // lags for a just-created/just-labeled issue (eventual consistency), so the raw list is the
+    // correct source of truth. The label is still applied on create — for humans, not for lookup.
+    const j = await this.api("GET", `/repos/${this.repo}/issues?state=all&per_page=100`);
     return Array.isArray(j) ? (j as GhIssue[]) : [];
   }
 
   private async find(id: string): Promise<{ number: number; ticket: EscalationTicket } | null> {
     for (const issue of await this.issues()) {
       const t = this.parseTicket(issue.body);
-      if (t && t.id === id) return { number: issue.number, ticket: t };
+      if (!t) continue;
+      this.cache.set(t.id, issue.number); // remember every id→number we scan past
+      if (t.id === id) return { number: issue.number, ticket: t };
     }
     return null;
   }
 
+  /**
+   * Resolve a ticketId → its issue. Prefer the cached number + a DIRECT fetch
+   * (`GET /issues/{number}` is immediately consistent); fall back to scanning the list. This
+   * matters because the issues LIST lags for a just-created issue — so an open() followed
+   * immediately by get/claim/resolve (same process) must not depend on the list seeing it yet.
+   */
+  private async locate(id: string): Promise<{ number: number; ticket: EscalationTicket } | null> {
+    const n = this.cache.get(id);
+    if (n !== undefined) {
+      try {
+        const issue = (await this.api("GET", `/repos/${this.repo}/issues/${n}`)) as GhIssue;
+        const t = this.parseTicket(issue.body);
+        if (t && t.id === id) return { number: n, ticket: t };
+      } catch {
+        /* fall through to a list scan */
+      }
+    }
+    return this.find(id);
+  }
+
   private async require(id: string): Promise<{ number: number; ticket: EscalationTicket }> {
-    const f = await this.find(id);
+    const f = await this.locate(id);
     if (!f) throw new Error(`no such ticket: ${id}`);
     return f;
   }
 
   async open(packet: EscalationPacket, now: string = new Date().toISOString()): Promise<EscalationTicket> {
     const id = ticketId(packet);
-    const existing = await this.find(id);
+    const existing = await this.locate(id);
     if (existing) return existing.ticket; // idempotent on packet identity (same id → same issue)
     const ticket = openTicket(packet, now);
-    await this.api("POST", `/repos/${this.repo}/issues`, {
+    const created = (await this.api("POST", `/repos/${this.repo}/issues`, {
       title: `[drydock] needs-human: ${packet.reason} (${id})`,
       body: this.renderBody(ticket),
       labels: [this.label, "needs-human"],
-    });
+    })) as { number?: number };
+    if (created?.number !== undefined) this.cache.set(id, created.number); // so immediate lookups don't wait on list consistency
     return ticket;
   }
 
@@ -144,7 +171,7 @@ export class GitHubEscalationSink implements EscalationSink {
   }
 
   async get(id: string): Promise<EscalationTicket | null> {
-    return (await this.find(id))?.ticket ?? null;
+    return (await this.locate(id))?.ticket ?? null;
   }
 
   async list(state?: TicketState): Promise<EscalationTicket[]> {

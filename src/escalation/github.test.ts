@@ -19,8 +19,13 @@ function fakeGitHub() {
       issues.push(issue);
       return jsonRes(201, { number: issue.number, html_url: `https://github.com/r/issues/${issue.number}` });
     }
-    if (method === "GET" && /\/issues\?/.test(path)) {
-      return jsonRes(200, issues.map((i) => ({ number: i.number, body: i.body })));
+    if (method === "GET") {
+      const single = path.match(/\/issues\/(\d+)$/);
+      if (single) {
+        const i = issues.find((x) => x.number === Number(single[1]));
+        return i ? jsonRes(200, { number: i.number, body: i.body }) : jsonRes(404, { message: "not found" });
+      }
+      if (/\/issues\?/.test(path)) return jsonRes(200, issues.map((x) => ({ number: x.number, body: x.body })));
     }
     const pm = path.match(/\/issues\/(\d+)$/);
     if (method === "PATCH" && pm) {
