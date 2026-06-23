@@ -14,8 +14,9 @@ import { deployApp, type DeployAppOptions } from "../substrate/deploy-app.ts";
 import type { DeployOutcome } from "../substrate/orchestrator.ts";
 import { LocalBillingProvider } from "./billing.ts";
 import { FileTenantStore } from "./tenant-store.ts";
+import { FileUsageLedger, type UsageLedger } from "./usage.ts";
 import { DEFAULT_PLAN } from "./plans.ts";
-import type { BillingProvider, Tenant, TenantStore } from "./types.ts";
+import type { BillingProvider, Tenant, TenantStore, UsageEvent } from "./types.ts";
 
 const safeSeg = (s: string): string => s.replace(/[^a-zA-Z0-9_-]/g, "_");
 
@@ -26,6 +27,7 @@ export interface PlatformOptions {
   baseDir?: string; // default ~/.drydock
   tenants?: TenantStore;
   billing?: BillingProvider;
+  ledger?: UsageLedger; // durable usage record (default: FileUsageLedger under baseDir)
   deploy?: DeployFn; // default: the substrate deployApp
   now?: () => string; // injectable clock (testability)
   newId?: () => string; // injectable id generator (testability)
@@ -35,6 +37,7 @@ export class Platform {
   private readonly baseDir: string;
   private readonly tenants: TenantStore;
   private readonly billing: BillingProvider;
+  private readonly ledger: UsageLedger;
   private readonly deploy: DeployFn;
   private readonly now: () => string;
   private readonly newId: () => string;
@@ -43,9 +46,26 @@ export class Platform {
     this.baseDir = opts.baseDir ?? join(homedir(), ".drydock");
     this.tenants = opts.tenants ?? new FileTenantStore(join(this.baseDir, "tenants"));
     this.billing = opts.billing ?? new LocalBillingProvider();
+    this.ledger = opts.ledger ?? new FileUsageLedger(this.baseDir);
     this.deploy = opts.deploy ?? deployApp;
     this.now = opts.now ?? (() => new Date().toISOString());
     this.newId = opts.newId ?? (() => randomUUID());
+  }
+
+  /** Meter a usage event: persist it to the durable ledger AND push it to the billing seam. */
+  private async meter(tenantId: string, event: UsageEvent): Promise<void> {
+    this.ledger.record(tenantId, event);
+    await this.billing.recordUsage(tenantId, event);
+  }
+
+  /** A tenant's recorded usage (the durable ledger). */
+  usage(tenantId: string): UsageEvent[] {
+    return this.ledger.list(tenantId);
+  }
+
+  /** Count a tenant's usage of a kind since an ISO timestamp (e.g. builds in the last 24h). */
+  usageCountSince(tenantId: string, kind: UsageEvent["kind"], sinceIso: string): number {
+    return this.ledger.countSince(tenantId, kind, sinceIso);
   }
 
   /** A tenant's ISOLATED state directory — their deployments + secrets live here and nowhere else. */
@@ -125,7 +145,7 @@ export class Platform {
     const app = opts.app ?? basename(workspacePath);
     this.assertCanDeploy(tenantId, app);
     const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId) });
-    await this.billing.recordUsage(tenantId, { kind: "deploy", app, at: this.now() });
+    await this.meter(tenantId, { kind: "deploy", app, at: this.now() });
     return outcome;
   }
 }

@@ -134,7 +134,8 @@ describe("Platform — isolation + delegation", () => {
       await platform.deployForTenant(t.id, "/work/my-app");
       expect(captured?.app).toBe("my-app"); // derived from the path basename
       expect(captured?.stateDir).toBe(platform.stateDir(t.id)); // the tenant's isolated dir
-      expect(usage).toContainEqual({ tenantId: "t1", event: { kind: "deploy", app: "my-app", at: "2026-01-01T00:00:00Z" } });
+      expect(usage).toContainEqual({ tenantId: "t1", event: { kind: "deploy", app: "my-app", at: "2026-01-01T00:00:00Z" } }); // pushed to billing seam
+      expect(platform.usage("t1")).toEqual([{ kind: "deploy", app: "my-app", at: "2026-01-01T00:00:00Z" }]); // …AND persisted to the durable ledger
     } finally {
       cleanup();
     }
