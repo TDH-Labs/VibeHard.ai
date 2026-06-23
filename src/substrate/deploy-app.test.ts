@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deployApp, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
+import { defaultSubstrateDeps, deployApp, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
 import { SENTINEL_REL } from "../gate/index.ts";
 import type { SubstrateDeps } from "./orchestrator.ts";
 
@@ -101,6 +101,48 @@ describe("deployApp — derives input + runs the orchestrator", () => {
       await expect(deployApp(ws, { app: "x", deps })).rejects.toThrow(/sentinel|gate must pass/i);
     } finally {
       rmSync(ws, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("defaultSubstrateDeps — host is chosen by artifact (Dockerfile → Fly, else Vercel)", () => {
+  // The store fails closed without a passphrase; provide a dummy so construction succeeds
+  // regardless of whether an operator .env is loaded. This test only inspects host selection.
+  const prevKey = process.env.DRYDOCK_SECRETS_KEY;
+  beforeAll(() => {
+    if (!process.env.DRYDOCK_SECRETS_KEY) process.env.DRYDOCK_SECRETS_KEY = "test-passphrase-not-a-real-secret";
+  });
+  afterAll(() => {
+    if (prevKey === undefined) delete process.env.DRYDOCK_SECRETS_KEY;
+  });
+
+  test("a workspace WITH a Dockerfile → Fly (container deploy, any language)", () => {
+    const ws = mkdtempSync(join(tmpdir(), "dd-host-"));
+    try {
+      writeFileSync(join(ws, "Dockerfile"), "FROM python:3.12-slim\n");
+      const deps = defaultSubstrateDeps({ workspacePath: ws, stateDir: join(ws, ".state") });
+      expect(deps.host.name).toBe("fly");
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test("a workspace WITHOUT a Dockerfile → Vercel (JS/TS-native)", () => {
+    const ws = mkdtempSync(join(tmpdir(), "dd-host-"));
+    try {
+      const deps = defaultSubstrateDeps({ workspacePath: ws, stateDir: join(ws, ".state") });
+      expect(deps.host.name).toBe("vercel");
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test("no workspacePath given → defaults to Vercel (back-compat)", () => {
+    const state = mkdtempSync(join(tmpdir(), "dd-host-"));
+    try {
+      expect(defaultSubstrateDeps({ stateDir: state }).host.name).toBe("vercel");
+    } finally {
+      rmSync(state, { recursive: true, force: true });
     }
   });
 });

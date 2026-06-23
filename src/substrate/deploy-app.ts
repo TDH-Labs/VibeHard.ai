@@ -15,6 +15,7 @@ import { FileRecordStore } from "./record.ts";
 import { LocalEncryptedSecretsStore } from "./secrets.ts";
 import { refFromUrl, SupabaseBackendProvider } from "./supabase.ts";
 import { VercelHostProvider } from "./vercel.ts";
+import { FlyHostProvider } from "./fly.ts";
 import { provisionAndDeploy, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
 import type { Migration } from "./types.ts";
 
@@ -36,12 +37,20 @@ export function tablesFromMigrations(migrations: Migration[]): string[] {
   return [...tables];
 }
 
-/** Assemble the real providers from env. Records + secrets live under stateDir (default ~/.drydock). */
-export function defaultSubstrateDeps(opts: { stateDir?: string; onStep?: (m: string) => void } = {}): SubstrateDeps {
+/**
+ * Assemble the real providers from env. Records + secrets live under stateDir (default ~/.drydock).
+ * The HOST is chosen by artifact: a Dockerfile in the workspace → Fly (container deploy, any
+ * language); otherwise Vercel (JS/TS-native). One signal — the presence of a Dockerfile — used
+ * consistently with the verify gate's launch detection and FlyHostProvider's own precondition.
+ */
+export function defaultSubstrateDeps(
+  opts: { stateDir?: string; onStep?: (m: string) => void; workspacePath?: string } = {},
+): SubstrateDeps {
   const stateDir = opts.stateDir ?? join(homedir(), ".drydock");
+  const containerized = !!opts.workspacePath && existsSync(join(opts.workspacePath, "Dockerfile"));
   return {
     backend: new SupabaseBackendProvider(),
-    host: new VercelHostProvider(),
+    host: containerized ? new FlyHostProvider() : new VercelHostProvider(),
     secrets: new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY ?? ""),
     records: new FileRecordStore(join(stateDir, "deployments")),
     onStep: opts.onStep,
@@ -57,7 +66,7 @@ export interface DeployAppOptions {
 
 /** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
 export async function deployApp(workspacePath: string, opts: DeployAppOptions = {}): Promise<DeployOutcome> {
-  const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep });
+  const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
   const app = opts.app ?? basename(workspacePath);

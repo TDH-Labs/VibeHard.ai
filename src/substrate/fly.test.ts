@@ -1,15 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FlyHostProvider, renderFlyToml } from "./fly.ts";
 import type { CommandResult, CommandRunner } from "./vercel.ts";
 
+// Snapshot fly.toml AT each command call — the provider writes it for the duration of the deploy
+// and removes it after, so the only place to observe its contents is while a fly command runs.
 function capturingRunner(result: Partial<CommandResult> = {}) {
-  const calls: Array<{ cmd: string[]; cwd: string; env?: Record<string, string> }> = [];
+  const calls: Array<{ cmd: string[]; cwd: string; env?: Record<string, string>; flyToml?: string }> = [];
   const runner: CommandRunner = {
     run: async (cmd, opts) => {
-      calls.push({ cmd, cwd: opts.cwd, env: opts.env });
+      let flyToml: string | undefined;
+      try {
+        flyToml = readFileSync(join(opts.cwd, "fly.toml"), "utf8");
+      } catch {
+        /* fly.toml not present at this call */
+      }
+      calls.push({ cmd, cwd: opts.cwd, env: opts.env, flyToml });
       return { exitCode: 0, stdout: "", stderr: "", ...result };
     },
   };
@@ -42,7 +50,8 @@ describe("FlyHostProvider.deploy", () => {
 
       expect(out.url).toMatch(/^https:\/\/.+\.fly\.dev$/);
       expect(out.hostRef.length).toBeGreaterThan(0);
-      expect(readFileSync(join(dir, "fly.toml"), "utf8")).toContain('SUPABASE_ANON_KEY = "a"'); // env baked into config
+      expect(calls[1]!.flyToml).toContain('SUPABASE_ANON_KEY = "a"'); // env present in fly.toml AT deploy time
+      expect(existsSync(join(dir, "fly.toml"))).toBe(false); // …and removed after — no secret-bearing manifest left behind
       expect(calls[0]!.cmd).toContain("create"); // create first (idempotent)
       expect(calls[1]!.cmd.slice(0, 2)).toEqual(["fly", "deploy"]);
       expect(calls[1]!.cmd).toContain("--remote-only"); // builds on Fly — no local Docker
@@ -56,9 +65,24 @@ describe("FlyHostProvider.deploy", () => {
   test("only the orchestrator's env reaches the app (no service-role key by construction)", async () => {
     const dir = workspaceWithDockerfile();
     try {
-      await new FlyHostProvider({ token: "t", runner: capturingRunner().runner }).deploy(dir, { SUPABASE_URL: "u", SUPABASE_ANON_KEY: "a" }, null);
-      const toml = readFileSync(join(dir, "fly.toml"), "utf8");
+      const { runner, calls } = capturingRunner();
+      await new FlyHostProvider({ token: "t", runner }).deploy(dir, { SUPABASE_URL: "u", SUPABASE_ANON_KEY: "a" }, null);
+      const toml = calls.find((c) => c.cmd.includes("deploy"))!.flyToml ?? "";
+      expect(toml).toContain('SUPABASE_ANON_KEY = "a"');
       expect(toml).not.toMatch(/SERVICE_ROLE/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("removes fly.toml even when the deploy FAILS (no secret-bearing manifest lingers to trip the secrets gate)", async () => {
+    const dir = workspaceWithDockerfile();
+    try {
+      const { runner } = capturingRunner({ exitCode: 1, stderr: "boom" });
+      await expect(
+        new FlyHostProvider({ token: "t", runner }).deploy(dir, { SUPABASE_ANON_KEY: "a" }, null),
+      ).rejects.toThrow(/fly deploy failed/);
+      expect(existsSync(join(dir, "fly.toml"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

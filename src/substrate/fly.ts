@@ -9,7 +9,7 @@
  * Token via FLY_API_TOKEN env, NEVER argv. Only the orchestrator's url+anon land in the
  * app's env (the service-role key never reaches here — §16/R6.2).
  */
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { HostProvider } from "./types.ts";
 import { bunRunner, sanitizeProjectName, type CommandRunner } from "./vercel.ts";
@@ -71,13 +71,26 @@ export class FlyHostProvider implements HostProvider {
       throw new Error("FlyHostProvider: no Dockerfile in the workspace — a container deploy needs one (this is the per-language codegen's job)");
     }
     const app = hostRef ?? (sanitizeProjectName(basename(workspacePath)).slice(0, 30).replace(/-+$/, "") || "app");
-    writeFileSync(join(workspacePath, "fly.toml"), renderFlyToml(app, this.region, this.internalPort, env));
+    // fly.toml carries the [env] block (url + anon — NEVER the service key). Write it ONLY for the
+    // duration of the deploy and remove it after: a secret-bearing manifest must never linger in the
+    // gated workspace, or it trips the secrets gate on the next ship (a real recurrence, since we
+    // regenerate fly.toml every deploy and the app config lives on Fly's side once deployed).
+    const flyTomlPath = join(workspacePath, "fly.toml");
+    writeFileSync(flyTomlPath, renderFlyToml(app, this.region, this.internalPort, env));
     const flyEnv = { FLY_API_TOKEN: this.token };
-    // best-effort create (harmlessly non-zero if the app already exists → idempotent redeploy)
-    await this.runner.run([...this.flyBin, "apps", "create", app, "--org", this.org], { cwd: workspacePath, env: flyEnv });
-    const res = await this.runner.run([...this.flyBin, "deploy", "--app", app, "--remote-only", "--ha=false"], { cwd: workspacePath, env: flyEnv });
-    if (res.exitCode !== 0) throw new Error(`fly deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(0, 400)}`);
-    return { url: `https://${app}.fly.dev`, hostRef: app };
+    try {
+      // best-effort create (harmlessly non-zero if the app already exists → idempotent redeploy)
+      await this.runner.run([...this.flyBin, "apps", "create", app, "--org", this.org], { cwd: workspacePath, env: flyEnv });
+      const res = await this.runner.run([...this.flyBin, "deploy", "--app", app, "--remote-only", "--ha=false"], { cwd: workspacePath, env: flyEnv });
+      if (res.exitCode !== 0) throw new Error(`fly deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(0, 400)}`);
+      return { url: `https://${app}.fly.dev`, hostRef: app };
+    } finally {
+      try {
+        rmSync(flyTomlPath, { force: true });
+      } catch {
+        /* best-effort cleanup — never mask the deploy result */
+      }
+    }
   }
 
   async teardown(hostRef: string): Promise<void> {
