@@ -15,6 +15,7 @@ import type { DeployOutcome } from "../substrate/orchestrator.ts";
 import { LocalBillingProvider } from "./billing.ts";
 import { FileTenantStore } from "./tenant-store.ts";
 import { FileUsageLedger, type UsageLedger } from "./usage.ts";
+import { dayAgo, FileBuildStore, type BuildJob, type BuildRunner, type BuildStore } from "./build.ts";
 import { DEFAULT_PLAN } from "./plans.ts";
 import type { BillingProvider, Tenant, TenantStore, UsageEvent } from "./types.ts";
 
@@ -28,6 +29,7 @@ export interface PlatformOptions {
   tenants?: TenantStore;
   billing?: BillingProvider;
   ledger?: UsageLedger; // durable usage record (default: FileUsageLedger under baseDir)
+  builds?: BuildStore; // build-job records (default: FileBuildStore under baseDir)
   deploy?: DeployFn; // default: the substrate deployApp
   now?: () => string; // injectable clock (testability)
   newId?: () => string; // injectable id generator (testability)
@@ -38,6 +40,7 @@ export class Platform {
   private readonly tenants: TenantStore;
   private readonly billing: BillingProvider;
   private readonly ledger: UsageLedger;
+  private readonly builds: BuildStore;
   private readonly deploy: DeployFn;
   private readonly now: () => string;
   private readonly newId: () => string;
@@ -47,6 +50,7 @@ export class Platform {
     this.tenants = opts.tenants ?? new FileTenantStore(join(this.baseDir, "tenants"));
     this.billing = opts.billing ?? new LocalBillingProvider();
     this.ledger = opts.ledger ?? new FileUsageLedger(this.baseDir);
+    this.builds = opts.builds ?? new FileBuildStore(this.baseDir);
     this.deploy = opts.deploy ?? deployApp;
     this.now = opts.now ?? (() => new Date().toISOString());
     this.newId = opts.newId ?? (() => randomUUID());
@@ -147,5 +151,50 @@ export class Platform {
     const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId) });
     await this.meter(tenantId, { kind: "deploy", app, at: this.now() });
     return outcome;
+  }
+
+  /**
+   * Accept a build for a tenant: enforce status + the daily build-rate quota (counted off the
+   * usage ledger), queue a job, and meter a "build" event (which the window then counts). Throws
+   * on a suspended/unknown tenant or an exceeded rate — fail closed, BEFORE any work runs.
+   */
+  async submitBuild(tenantId: string, app: string): Promise<BuildJob> {
+    const t = this.tenants.get(tenantId);
+    if (!t) throw new Error(`unknown tenant ${tenantId}`);
+    if (t.status !== "active") throw new Error(`tenant ${tenantId} is ${t.status} — cannot build`);
+    const plan = this.billing.planFor(t);
+    const usedToday = this.ledger.countSince(tenantId, "build", dayAgo(this.now()));
+    if (usedToday >= plan.maxBuildsPerDay) {
+      throw new Error(`build rate limit: plan "${plan.name}" allows ${plan.maxBuildsPerDay} builds/day (used ${usedToday})`);
+    }
+    const job: BuildJob = { id: this.newId(), tenantId, app, status: "queued", queuedAt: this.now() };
+    this.builds.put(job);
+    await this.meter(tenantId, { kind: "build", app, at: this.now() });
+    return job;
+  }
+
+  /** Run a queued job through the (injected) runner — the real one executes in a sandbox. The
+   *  control plane only drives the state machine + persists the outcome (never throws on a failed
+   *  build; a thrown runner becomes a failed job). */
+  async runBuild(job: BuildJob, runner: BuildRunner): Promise<BuildJob> {
+    let j: BuildJob = { ...job, status: "running", startedAt: this.now() };
+    this.builds.put(j);
+    try {
+      const res = await runner.run(j);
+      j = { ...j, status: res.ok ? "succeeded" : "failed", finishedAt: this.now(), ...(res.error ? { error: res.error } : {}) };
+    } catch (e) {
+      j = { ...j, status: "failed", finishedAt: this.now(), error: e instanceof Error ? e.message : String(e) };
+    }
+    this.builds.put(j);
+    return j;
+  }
+
+  /** Submit (quota-checked) + run, in one call. */
+  async build(tenantId: string, app: string, runner: BuildRunner): Promise<BuildJob> {
+    return this.runBuild(await this.submitBuild(tenantId, app), runner);
+  }
+
+  listBuilds(tenantId: string): BuildJob[] {
+    return this.builds.list(tenantId);
   }
 }

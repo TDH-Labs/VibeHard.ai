@@ -122,6 +122,39 @@ describe("Platform — isolation + delegation", () => {
     }
   });
 
+  test("build runs a queued job through the runner and records the outcome (incl. failures)", async () => {
+    const { platform, cleanup } = makePlatform();
+    try {
+      platform.signUp("Acme"); // t1
+      const ok = await platform.build("t1", "myapp", { run: async () => ({ ok: true }) });
+      expect(ok.status).toBe("succeeded");
+      expect(ok.app).toBe("myapp");
+      const bad = await platform.build("t1", "myapp", { run: async () => ({ ok: false, error: "gate blocked" }) });
+      expect(bad.status).toBe("failed");
+      expect(bad.error).toBe("gate blocked");
+      const threw = await platform.build("t1", "myapp", { run: async () => { throw new Error("sandbox died"); } });
+      expect(threw.status).toBe("failed"); // a thrown runner becomes a failed job, not an exception
+      expect(threw.error).toBe("sandbox died");
+      expect(platform.listBuilds("t1").length).toBe(3);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("build-rate quota: the free plan allows N builds/day, then blocks (fail closed)", async () => {
+    const { platform, cleanup } = makePlatform();
+    try {
+      platform.signUp("Acme"); // free → maxBuildsPerDay 10
+      for (let i = 0; i < 10; i++) await platform.submitBuild("t1", "app");
+      await expect(platform.submitBuild("t1", "app")).rejects.toThrow(/build rate limit/);
+      expect(platform.usageCountSince("t1", "build", "2025-01-01T00:00:00Z")).toBe(10);
+      platform.suspend("t1");
+      await expect(platform.submitBuild("t1", "app")).rejects.toThrow(/suspended/);
+    } finally {
+      cleanup();
+    }
+  });
+
   test("deployForTenant deploys into the tenant's OWN state dir, derives the app name, and meters usage", async () => {
     let captured: { app?: string; stateDir?: string } | undefined;
     const deploy: DeployFn = async (_ws, opts) => {
