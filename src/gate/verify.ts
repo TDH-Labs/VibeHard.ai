@@ -32,6 +32,7 @@ import { DERIVED_DIRS } from "./scan-scope.ts";
 const RUNS = 3; // default when rigor is unknown; see verifyRuns
 const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
 const PROBE_INTERVAL_MS = 100;
+const CONTAINER_PORT = 8080; // our Dockerfile convention: the app reads PORT, default 8080
 const SHUTDOWN_GRACE_MS = 5000; // §18: a served app must exit on SIGTERM within this
 const CLEAN_TIMEOUT_MS = 120_000; // §18: clean-env install/build under a portable timeout
 /** Probe order: the conventional health route first, then root. The first to
@@ -133,7 +134,7 @@ function readEnvTemplates(projectPath: string): Array<string | null> {
  * Pure: launch outcomes → Finding[]. Blocking unless every required run was
  * healthy (200). A flaky or dead app must not ship. No I/O.
  */
-export function summarizeVerify(runs: VerifyRun[], required: number = RUNS): Finding[] {
+export function summarizeVerify(runs: VerifyRun[], required: number = RUNS, file = "server.js"): Finding[] {
   const healthy = runs.filter((r) => isUp(r.status)).length;
   if (healthy === required && runs.length >= required) return [];
   // Surface the boot error (the last run that logged one) so the failure is
@@ -147,7 +148,7 @@ export function summarizeVerify(runs: VerifyRun[], required: number = RUNS): Fin
       tool: "verify",
       ruleId: "health-check-failed",
       severity: "high",
-      file: "server.js",
+      file,
       message: `launch probe: ${healthy}/${required} runs came up on /health or / — app is not reliably healthy${tail}`,
     },
   ];
@@ -182,6 +183,7 @@ export function findEntry(projectPath: string): string | null {
 
 /** How to verify a project boots: launch a node server, launch a python server, build a static app, or nothing. */
 export type LaunchPlan =
+  | { kind: "container" } //                a Dockerfile → build + run the image (the real deploy artifact)
   | { kind: "node"; entry: string }
   | { kind: "python"; cmd: string[] }
   | { kind: "build"; script: string }
@@ -224,6 +226,10 @@ function readPyDeps(projectPath: string): string {
 /** Pure-ish (reads package.json / requirements): pick the launch strategy. A node entry
  *  wins, then a Python web app, then a `build` script (static/SPA build-verify). */
 export function detectLaunch(projectPath: string): LaunchPlan {
+  // A Dockerfile means the deploy artifact IS a container — verify THAT (its own runtime,
+  // isolated deps, parity with what the host runs), not a local interpreter. Wins over
+  // node/python so a containerized app of ANY language is verified the same correct way.
+  if (existsSync(join(projectPath, "Dockerfile"))) return { kind: "container" };
   const entry = findEntry(projectPath);
   if (entry) return { kind: "node", entry };
   if (existsSync(join(projectPath, "requirements.txt")) || existsSync(join(projectPath, "pyproject.toml"))) {
@@ -405,6 +411,60 @@ async function probePaths(port: number): Promise<number> {
   return 0;
 }
 
+/** A Docker image tag for a project's verify build — deterministic from the dir name. */
+export function dockerTag(projectPath: string): string {
+  const base =
+    (projectPath.split("/").filter(Boolean).pop() || "app")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]/g, "-")
+      .replace(/^[-._]+|[-._]+$/g, "") // docker names can't start/end with a separator
+      .slice(0, 40)
+      .replace(/[-._]+$/, "") || "app";
+  return `drydock-verify-${base}`;
+}
+
+/** Build the app's Docker image (the deploy artifact). Returns a finding on failure, else null. */
+function buildContainerImage(projectPath: string, tag: string): Finding | null {
+  const build = Bun.spawnSync(["docker", "build", "-t", tag, "."], { cwd: projectPath, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+  if ((build.exitCode ?? 1) === 0) return null;
+  const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`.trim();
+  return {
+    tool: "verify",
+    ruleId: "build-failed",
+    severity: "high",
+    file: "Dockerfile",
+    message: `\`docker build\` exited ${build.exitCode} — the container image doesn't build, so it cannot be deployed${log ? ` — error: ${log.slice(-600)}` : ""}`,
+  };
+}
+
+/** Run the built image once (dummy env — NEVER the host's real secrets), probe it, tear it
+ *  down. The container runs the app in its TARGET runtime, so we verify what actually ships. */
+async function probeContainerOnce(tag: string, hostPort: number, env: Record<string, string>): Promise<{ status: number; log: string; cleanShutdown: boolean }> {
+  const name = `${tag}-${hostPort}`;
+  Bun.spawnSync(["docker", "rm", "-f", name], { stdout: "ignore", stderr: "ignore" }); // clear any stale container
+  const args = ["docker", "run", "-d", "--name", name, "-p", `${hostPort}:${CONTAINER_PORT}`, "-e", `PORT=${CONTAINER_PORT}`];
+  for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
+  args.push(tag);
+  const run = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });
+  if ((run.exitCode ?? 1) !== 0) {
+    return { status: 0, log: `${run.stderr?.toString() ?? ""}`.trim(), cleanShutdown: true };
+  }
+  let status = 0;
+  let log = "";
+  try {
+    for (let i = 0; i < PROBE_ATTEMPTS; i++) {
+      await Bun.sleep(PROBE_INTERVAL_MS);
+      status = await probePaths(hostPort);
+      if (status) break;
+    }
+  } finally {
+    const logs = Bun.spawnSync(["docker", "logs", name], { stdout: "pipe", stderr: "pipe" }); // capture a boot crash before removal
+    log = `${logs.stdout?.toString() ?? ""}${logs.stderr?.toString() ?? ""}`.trim();
+    Bun.spawnSync(["docker", "rm", "-f", name], { stdout: "ignore", stderr: "ignore" });
+  }
+  return { status, log, cleanShutdown: true };
+}
+
 /** Launch `node <entry>` in `projectPath` on `port`, poll until it comes up on any
  *  probe path (or the budget is spent), tear down. `env` carries dummy app env.
  *  Returns the status and a tail of the process output (captured so a boot crash
@@ -479,6 +539,27 @@ export async function runVerify(
   // §18 clean-env verify (production rigor, heavy): prove a fresh machine can
   // install + build. Runs ONCE, before the path-specific check.
   if (rigor === "production") findings.push(...(await cleanEnvVerify(projectPath, env)));
+
+  // Containerized app: build the image (this IS the clean-env check) and run+probe it in
+  // its own runtime — the actual deploy artifact, the right language version + isolated
+  // deps. Dummy env only (never the host's real secrets).
+  if (plan.kind === "container") {
+    const tag = dockerTag(projectPath);
+    const buildFinding = buildContainerImage(projectPath, tag);
+    if (buildFinding) {
+      findings.push(buildFinding);
+      return verdictOf("verify", findings, ranAt);
+    }
+    const required = verifyRuns(rigor);
+    const containerEnv = synthEnv(readEnvTemplates(projectPath));
+    const runs: VerifyRun[] = [];
+    for (let i = 1; i <= required; i++) {
+      runs.push({ run: i, ...(await probeContainerOnce(tag, 4200 + i, containerEnv)) });
+    }
+    findings.push(...summarizeVerify(runs, required, "Dockerfile"));
+    Bun.spawnSync(["docker", "rmi", "-f", tag], { stdout: "ignore", stderr: "ignore" }); // best-effort image cleanup
+    return verdictOf("verify", findings, ranAt);
+  }
 
   if (plan.kind === "build") {
     findings.push(...summarizeBuild(await runBuild(projectPath, plan.script)));

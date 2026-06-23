@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   detectLaunch,
+  dockerTag,
   dummyEnvValue,
   findEntry,
   pythonStartCommand,
@@ -195,9 +196,26 @@ describe("detectLaunch", () => {
     expect(detectLaunch(dir)).toEqual({ kind: "node", entry: "server.js" });
   });
 
+  test("a Dockerfile → container kind (verify the deploy artifact)", async () => {
+    const dir = await scratch({ Dockerfile: "FROM python:3.12-slim", "main.py": "x", "requirements.txt": "fastapi" });
+    expect(detectLaunch(dir)).toEqual({ kind: "container" });
+  });
+
+  test("a Dockerfile wins over node/python (it's what actually ships)", async () => {
+    const dir = await scratch({ Dockerfile: "FROM node:20", "server.js": "x", "package.json": "{}" });
+    expect(detectLaunch(dir)).toEqual({ kind: "container" });
+  });
+
   test("nothing launchable → null", async () => {
     const dir = await scratch({ "README.md": "# hi" });
     expect(detectLaunch(dir)).toBeNull();
+  });
+});
+
+describe("dockerTag (pure)", () => {
+  test("a deterministic, docker-safe tag from the dir name", () => {
+    expect(dockerTag("/tmp/My App!")).toBe("drydock-verify-my-app");
+    expect(dockerTag("/work/notes-api")).toBe("drydock-verify-notes-api");
   });
 });
 
