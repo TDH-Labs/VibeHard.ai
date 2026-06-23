@@ -243,6 +243,50 @@ export function parseRlsCoverage(
   return findings;
 }
 
+// ── Check 3: RLS-RELIANCE — the app must rely on RLS, not bypass it ───────────
+// The whole guarantee is "the data is protected by RLS, verified live." That only
+// holds if the APP actually goes THROUGH RLS. The service-role key BYPASSES it, so:
+//   • a service-role key under a CLIENT env prefix ships it to the browser → CRITICAL;
+//   • any service-role data path means RLS isn't the boundary there → WARN to review.
+// This is what keeps the gate honest for ANY language on Supabase (Go/Swift/Python):
+// without it, "we support that stack" is theater the moment an app grabs the service key.
+
+/** A service-role key under a CLIENT-bundled env prefix (Next/Vite/CRA/Svelte/Expo/…) — shipped to the browser. */
+const PUBLIC_ENV_SERVICE_KEY = /\b(?:NEXT_PUBLIC|VITE|PUBLIC|REACT_APP|EXPO_PUBLIC|GATSBY|NUXT_PUBLIC)_[A-Z0-9_]*SERVICE_ROLE/;
+/** A reference to the service-role key — the env name, or the `sb_secret_` key format. */
+const SERVICE_KEY_REF = /\bSUPABASE_SERVICE_ROLE_KEY\b|\bsb_secret_[A-Za-z0-9]{6,}/;
+
+/** Pure: app source → RLS-reliance findings (service-key exposure / bypass). */
+export function parseServiceKeyUsage(sources: CodeSource[]): Finding[] {
+  const findings: Finding[] = [];
+  for (const { file, code } of sources) {
+    const exposed = PUBLIC_ENV_SERVICE_KEY.exec(code);
+    if (exposed) {
+      findings.push({
+        tool: "rls",
+        ruleId: "rls-service-key-exposed",
+        severity: "critical",
+        file,
+        line: lineAt(code, exposed.index),
+        message: `the Supabase service-role key is exposed to the browser here (a public/client env prefix) — that key BYPASSES Row-Level Security, handing full database access to every visitor`,
+      });
+      continue; // the exposure is the real problem; don't also warn on the same file
+    }
+    const ref = SERVICE_KEY_REF.exec(code);
+    if (ref) {
+      findings.push({
+        tool: "rls",
+        ruleId: "rls-service-key-bypass",
+        severity: "medium", // WARN: a legitimate admin path can use it, but the RLS guarantee does NOT cover it
+        file,
+        line: lineAt(code, ref.index),
+        message: `the service-role key is used here — it BYPASSES Row-Level Security, so the per-tenant RLS guarantee does NOT cover this data path; keep it admin-only (server-side), or access user data with the user's own token through RLS, never the service key`,
+      });
+    }
+  }
+  return findings;
+}
+
 // ── I/O ──────────────────────────────────────────────────────────────────────
 
 /** Read `<projectPath>/supabase/migrations/*.sql` into typed sources. */
@@ -304,6 +348,7 @@ export async function runRls(
   const findings = [
     ...parseRls(sources),
     ...parseRlsCoverage(usage, rlsEnabledTables(sources), createdTables(sources)),
+    ...(usage.usesSupabase ? parseServiceKeyUsage(appSources) : []),
   ];
   return verdictOf("rls", findings, ranAt);
 }

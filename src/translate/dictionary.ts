@@ -45,6 +45,16 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "Access is switched on, but the rule only checks that someone is signed in — it doesn't limit them to their own rows. If more than one customer or team uses the app, each could read the others' data. Confirm this table is meant to be fully shared; if not, scope the rule to the row's owner (e.g. only their own records).",
   },
+  "rls-service-key-exposed": {
+    title: "A master key to your whole database is exposed to visitors",
+    detail:
+      "The app ships its all-access database key (the \"service role\" key) to the browser. That key ignores every access rule — anyone who opens the app can read and change all of your data. It must live only on the server and never be sent to the browser. Remove it from any client/public setting.",
+  },
+  "rls-service-key-bypass": {
+    title: "This code uses a key that skips your access rules",
+    detail:
+      "The app reaches the database with the all-access \"service role\" key, which bypasses the per-user protection the rest of the checks rely on. That's fine for a behind-the-scenes admin task, but it means this particular path isn't covered by the access-rule guarantee — so make sure it isn't serving one user another user's data. For normal user features, go through the signed-in user's own access instead.",
+  },
   // ── front-half: PRD spec-readiness (§22) ─────────────────────────────────
   "no-features": {
     title: "The plan doesn't say what to build yet",

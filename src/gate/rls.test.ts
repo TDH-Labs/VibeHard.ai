@@ -7,6 +7,7 @@ import {
   detectSupabaseUsage,
   parseRls,
   parseRlsCoverage,
+  parseServiceKeyUsage,
   pkgUsesSupabase,
   readMigrations,
   rlsEnabledTables,
@@ -229,6 +230,38 @@ describe("parseRlsCoverage (pure, fail-closed)", () => {
 
   test("no Supabase usage → nothing required", () => {
     expect(parseRlsCoverage(detectSupabaseUsage([]), new Set(), new Set())).toEqual([]);
+  });
+});
+
+describe("parseServiceKeyUsage (RLS-reliance — the gate stays honest)", () => {
+  const C = (file: string, code: string) => [{ file, code }];
+
+  test("service-role key under a PUBLIC/client env prefix → CRITICAL exposed", () => {
+    for (const env of ["NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY", "VITE_SUPABASE_SERVICE_ROLE_KEY", "REACT_APP_SUPABASE_SERVICE_ROLE_KEY"]) {
+      const f = parseServiceKeyUsage(C("src/client.ts", `const k = import.meta.env.${env};`));
+      expect(f).toHaveLength(1);
+      expect(f[0]).toMatchObject({ ruleId: "rls-service-key-exposed", severity: "critical" });
+    }
+  });
+
+  test("server-side service-role key (no public prefix) → MEDIUM bypass warn", () => {
+    const f = parseServiceKeyUsage(C("server/db.ts", "const admin = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY);"));
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ ruleId: "rls-service-key-bypass", severity: "medium" });
+  });
+
+  test("a hardcoded sb_secret_ key → bypass", () => {
+    expect(parseServiceKeyUsage(C("server/db.ts", 'const k = "sb_secret_9a8Nr5zhncwy39";'))[0]?.ruleId).toBe("rls-service-key-bypass");
+  });
+
+  test("an RLS-respecting app (only the anon/publishable key) → no findings", () => {
+    expect(parseServiceKeyUsage(C("lib/supabase.ts", "createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);"))).toEqual([]);
+  });
+
+  test("exposure outranks bypass in the same file (no double-report)", () => {
+    const f = parseServiceKeyUsage(C("x.ts", "const a = NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY; const b = SUPABASE_SERVICE_ROLE_KEY;"));
+    expect(f).toHaveLength(1);
+    expect(f[0]?.ruleId).toBe("rls-service-key-exposed");
   });
 });
 

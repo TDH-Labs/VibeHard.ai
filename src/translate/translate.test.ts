@@ -18,6 +18,8 @@ describe("translateFinding — every ruleId our gates emit is covered (no generi
     ["rls", "rls-policy-using-true"],
     ["rls", "rls-missing"],
     ["rls", "rls-policy-authenticated"],
+    ["rls", "rls-service-key-exposed"],
+    ["rls", "rls-service-key-bypass"],
     ["spec", "no-features"],
     ["spec", "no-data-model"],
     ["spec", "no-auth-for-sensitive"],
