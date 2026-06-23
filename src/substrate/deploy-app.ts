@@ -69,13 +69,15 @@ export interface DeployAppOptions {
   deps?: SubstrateDeps; // defaults to defaultSubstrateDeps (the real providers)
   stateDir?: string;
   onStep?: (message: string) => void;
+  managed?: boolean; // force managed (auto-create a project); defaults to the DRYDOCK_MANAGED env flag
 }
 
 /** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
 export async function deployApp(workspacePath: string, opts: DeployAppOptions = {}): Promise<DeployOutcome> {
   const app = opts.app ?? basename(workspacePath);
-  // Managed (auto-create a project per app) is opt-in via DRYDOCK_MANAGED=1; default = adopt.
-  const managed = process.env.DRYDOCK_MANAGED === "1";
+  // Managed (auto-create a project per app): forced by the caller (e.g. deployForTenant) or,
+  // failing that, opt-in via DRYDOCK_MANAGED=1. Default = adopt the env project.
+  const managed = opts.managed ?? process.env.DRYDOCK_MANAGED === "1";
   const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);

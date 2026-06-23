@@ -6,7 +6,7 @@
  * usage metering on top. The deploy fn is injectable so this logic unit-tests without a live
  * provision (the substrate is already proven separately).
  */
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -111,15 +111,28 @@ export class Platform {
     return this.mutate(tenantId, (t) => ({ ...t, plan }));
   }
 
-  /** Count a tenant's existing projects = deployment records in their isolated dir. */
+  /** Count a tenant's ACTIVE projects (deployment records, excluding failed/destroyed). A failed
+   *  deploy doesn't occupy a quota slot — provisioning already best-effort-cleans its resources,
+   *  so a transient failure shouldn't permanently block a free-tier tenant. */
   projectCount(tenantId: string): number {
     const dir = join(this.stateDir(tenantId), "deployments");
     if (!existsSync(dir)) return 0;
+    let n = 0;
     try {
-      return readdirSync(dir).filter((f) => f.endsWith(".json")).length;
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith(".json")) continue;
+        let status: string | undefined;
+        try {
+          status = (JSON.parse(readFileSync(join(dir, f), "utf8")) as { status?: string }).status;
+        } catch {
+          /* unreadable record → count it (conservative) */
+        }
+        if (status !== "failed" && status !== "destroyed") n++;
+      }
     } catch {
       return 0;
     }
+    return n;
   }
 
   /**
@@ -148,7 +161,9 @@ export class Platform {
   ): Promise<DeployOutcome> {
     const app = opts.app ?? basename(workspacePath);
     this.assertCanDeploy(tenantId, app);
-    const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId) });
+    // FORCE managed: every tenant app gets its OWN auto-provisioned project in its OWN isolated
+    // dir — never the operator's shared project (which a global DRYDOCK_MANAGED flag couldn't guarantee).
+    const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId), managed: true });
     await this.meter(tenantId, { kind: "deploy", app, at: this.now() });
     return outcome;
   }

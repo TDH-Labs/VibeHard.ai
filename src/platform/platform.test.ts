@@ -72,6 +72,21 @@ describe("Platform — quota enforcement", () => {
     }
   });
 
+  test("a failed deploy does NOT occupy a quota slot (transient failures don't block a free-tier tenant)", async () => {
+    const { platform, cleanup } = makePlatform({ deploy: seedingDeploy });
+    try {
+      platform.signUp("Acme"); // free → maxProjects 1
+      const dir = join(platform.stateDir("t1"), "deployments");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "broken.json"), JSON.stringify({ ...REC, app: "broken", status: "failed" }));
+      expect(platform.projectCount("t1")).toBe(0); // the failed record is not counted
+      await platform.deployForTenant("t1", "/ws/good", { app: "good" }); // still allowed despite the failed one
+      expect(platform.projectCount("t1")).toBe(1); // only the live one counts
+    } finally {
+      cleanup();
+    }
+  });
+
   test("upgrading the plan raises the quota", async () => {
     const { platform, cleanup } = makePlatform({ deploy: seedingDeploy });
     try {
@@ -156,9 +171,9 @@ describe("Platform — isolation + delegation", () => {
   });
 
   test("deployForTenant deploys into the tenant's OWN state dir, derives the app name, and meters usage", async () => {
-    let captured: { app?: string; stateDir?: string } | undefined;
+    let captured: { app?: string; stateDir?: string; managed?: boolean } | undefined;
     const deploy: DeployFn = async (_ws, opts) => {
-      captured = { app: opts?.app, stateDir: opts?.stateDir };
+      captured = { app: opts?.app, stateDir: opts?.stateDir, managed: opts?.managed };
       return OUTCOME;
     };
     const { platform, usage, cleanup } = makePlatform({ deploy });
@@ -167,6 +182,7 @@ describe("Platform — isolation + delegation", () => {
       await platform.deployForTenant(t.id, "/work/my-app");
       expect(captured?.app).toBe("my-app"); // derived from the path basename
       expect(captured?.stateDir).toBe(platform.stateDir(t.id)); // the tenant's isolated dir
+      expect(captured?.managed).toBe(true); // FORCED: tenant apps always get their own provisioned project
       expect(usage).toContainEqual({ tenantId: "t1", event: { kind: "deploy", app: "my-app", at: "2026-01-01T00:00:00Z" } }); // pushed to billing seam
       expect(platform.usage("t1")).toEqual([{ kind: "deploy", app: "my-app", at: "2026-01-01T00:00:00Z" }]); // …AND persisted to the durable ledger
     } finally {
