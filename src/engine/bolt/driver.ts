@@ -54,6 +54,9 @@ export const defaultModelFactory: ModelFactory = (config) => {
 export interface LiveBoltDriverOptions {
   /** Override model construction (tests inject a mock LLM). */
   modelFactory?: ModelFactory;
+  /** The codegen system prompt (defaults to the TypeScript/Supabase one). Set this to
+   *  PYTHON_SYSTEM_PROMPT for a Python target — see selectSystemPrompt(stack). */
+  systemPrompt?: string;
 }
 
 /**
@@ -62,12 +65,13 @@ export interface LiveBoltDriverOptions {
  */
 export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
+  const systemPrompt = opts.systemPrompt ?? DRYDOCK_SYSTEM_PROMPT;
   return {
     name: "bolt.diy",
     async *run(prompt: string, config: EngineConfig): AsyncIterable<string> {
       const result = streamText({
         model: modelFactory(config),
-        system: DRYDOCK_SYSTEM_PROMPT,
+        system: systemPrompt,
         prompt,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       });

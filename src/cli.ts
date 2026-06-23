@@ -10,6 +10,7 @@ import { deployGate, runGate } from "./gate/index.ts";
 import { buildEscalationPacket, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
+import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
@@ -109,8 +110,8 @@ function printSpec(spec: Spec): void {
 /** Run the engine over `target` with `prompt`; stream events. Returns false on a
  *  generation error (so the caller skips gating a half-built app). Shared by
  *  `generate` (raw prompt) and `build` (PRD brief). */
-async function streamGeneration(target: string, prompt: string, provider: string, model: string): Promise<boolean> {
-  const session = await new BoltEngine(liveBoltDriver()).startSession(target, { provider, model });
+async function streamGeneration(target: string, prompt: string, provider: string, model: string, systemPrompt?: string): Promise<boolean> {
+  const session = await new BoltEngine(liveBoltDriver({ systemPrompt })).startSession(target, { provider, model });
   let ok = true;
   try {
     for await (const ev of session.prompt(prompt)) {
@@ -151,12 +152,16 @@ async function gateAndReport(target: string): Promise<boolean> {
  *  order (sequential within a tier for now; tiers are parallel-eligible — §22). Each
  *  workstream is a scoped engine pass that accumulates files into `target`. */
 async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
+  // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
+  // prompt; else the TS/Supabase one). DRYDOCK_LANG=python forces it, for deliberately
+  // building/validating a Python app.
+  const systemPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack);
   const tiers = buildOrder(arch);
   const built: string[] = [];
   for (const tier of tiers) {
     for (const ws of tier) {
       console.log(`\n  ▸ workstream: ${ws.name} — ${ws.files.length} file(s)`);
-      if (!(await streamGeneration(target, workstreamBrief(arch, ws, built), provider, model))) return false;
+      if (!(await streamGeneration(target, workstreamBrief(arch, ws, built), provider, model, systemPrompt))) return false;
       built.push(ws.name);
     }
   }
@@ -350,7 +355,9 @@ export async function main(argv: string[]): Promise<number> {
     const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
     const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     console.log(`generating with ${provider}/${model} → ${target}`);
-    if (!(await streamGeneration(target, promptText, provider, model))) return 1; // don't gate a half-built app
+    // DRYDOCK_LANG=python → the Python (FastAPI + Supabase + Dockerfile) codegen prompt.
+    const sysPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : undefined;
+    if (!(await streamGeneration(target, promptText, provider, model, sysPrompt))) return 1; // don't gate a half-built app
     console.log(`\n── gating generated app at ${target} ──`);
     return (await gateAndReport(target)) ? 0 : 1;
   }
