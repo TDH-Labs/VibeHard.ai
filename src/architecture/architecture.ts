@@ -82,6 +82,47 @@ const gap = (ruleId: string, severity: Finding["severity"], message: string): Fi
   message,
 });
 
+// ── Substrate-fit (architect-steering) ──────────────────────────────────────────
+// Drydock deploys on Supabase (the data layer the gate verifies RLS on, LIVE) + a
+// Vercel app or a single Dockerfile container (Fly). The architect must pick a stack
+// the platform can actually ship AND verify; these flag an off-substrate stack so the
+// existing architect retry loop re-proposes — a build can never reach codegen with an
+// unshippable stack (the "Express + pg + React" problem that bit a prior build).
+const SUPABASE_RE = /\bsupabase\b/i;
+const INCOMPATIBLE_BACKEND_RE = /\b(mongo(?:db)?|firebase|firestore|dynamo(?:db)?|planetscale|cockroach(?:db)?|fauna(?:db)?|mysql|mariadb|sqlite|neon)\b/i;
+const RAW_DB_CLIENT_RE = /\b(pg|node-postgres|prisma|typeorm|sequelize|knex|drizzle)\b/i;
+
+/** Deterministic architect-steering: the stack must be deployable on the substrate
+ *  (Supabase data layer + Vercel/Fly host). Off-substrate → blocking gaps the loop fixes. */
+export function assessSubstrateFit(arch: Architecture): Finding[] {
+  const out: Finding[] = [];
+  const stack = arch.stack || "";
+  const incompatible = stack.match(INCOMPATIBLE_BACKEND_RE);
+  if (incompatible) {
+    out.push(
+      gap(
+        "stack-incompatible-backend",
+        "high",
+        `Stack names "${incompatible[0]}", which Drydock can't provision or verify RLS on. The data layer must be Supabase (Postgres + Row-Level Security).`,
+      ),
+    );
+  }
+  const hasSupabase = SUPABASE_RE.test(stack);
+  const storesData = Boolean(arch.prd?.spec?.storesData);
+  if (storesData && !hasSupabase && !incompatible) {
+    const rawDb = stack.match(RAW_DB_CLIENT_RE);
+    const why = rawDb ? `uses "${rawDb[0]}" against a self-managed database` : "doesn't use Supabase";
+    out.push(
+      gap(
+        "stack-not-supabase",
+        "high",
+        `This app stores data but its stack ${why}. Use Supabase as the data layer so the security gate can verify tenant isolation (RLS) live before deploy.`,
+      ),
+    );
+  }
+  return out;
+}
+
 /** Deterministic validation: the design must be buildable before codegen. */
 export function reviewArchitecture(arch: Architecture): Finding[] {
   const out: Finding[] = [];
@@ -100,6 +141,7 @@ export function reviewArchitecture(arch: Architecture): Finding[] {
   if (ordered < arch.workstreams.length) {
     out.push(gap("dependency-cycle", "high", "The workstream dependency graph has a cycle — it can't be built in a valid order."));
   }
+  out.push(...assessSubstrateFit(arch)); // architect-steering: keep the stack on-substrate (Supabase + Vercel/Fly)
   return out;
 }
 

@@ -4,6 +4,7 @@
  */
 export {
   architectureVerdict,
+  assessSubstrateFit,
   buildOrder,
   coerceArchitecture,
   reviewArchitecture,

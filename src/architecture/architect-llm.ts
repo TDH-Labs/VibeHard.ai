@@ -23,7 +23,8 @@ Rules:
 - Every workstream MUST own at least one file in "files".
 - "dependsOn" may only name other workstreams in the list.
 - Cover the PRD's requirements and data model with workstreams. If the PRD's NFRs require RLS, the data/schema workstream owns the migration with the policies.
-- If given previous gaps, FIX every one (e.g. break a cycle, add files, remove an unknown dependency).`;
+- DEPLOYMENT CONSTRAINT (hard): if the app stores data, the data layer MUST be Supabase (Postgres + Row-Level Security) — it's the security boundary the platform verifies live before deploy. Do NOT choose MongoDB, Firebase, MySQL, DynamoDB, PlanetScale, or a self-managed Postgres (pg/Prisma/TypeORM/Knex/Drizzle against your own database). The app must deploy as EITHER a Vercel app (Next.js / Vite / static) OR a single Dockerfile container (e.g. FastAPI on Fly) — nothing that needs other managed infrastructure.
+- If given previous gaps, FIX every one (e.g. break a cycle, add files, remove an unknown dependency, or move the data layer to Supabase).`;
 
 export interface LlmArchitectOptions {
   modelFactory?: ModelFactory;

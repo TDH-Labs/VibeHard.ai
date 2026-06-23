@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { architectureVerdict, buildOrder, coerceArchitecture, reviewArchitecture, type Architecture } from "./architecture.ts";
+import { architectureVerdict, assessSubstrateFit, buildOrder, coerceArchitecture, reviewArchitecture, type Architecture } from "./architecture.ts";
 import type { Prd } from "../prd/index.ts";
 
 // A minimal PRD stand-in (architecture only carries it for traceability).
@@ -26,6 +26,33 @@ describe("buildOrder — topological tiers (deterministic from the graph)", () =
   test("a cycle leaves nodes unordered (buildOrder stops)", () => {
     const a = arch([ws("x", ["y"]), ws("y", ["x"])]);
     expect(buildOrder(a).flat()).toEqual([]); // neither can start
+  });
+});
+
+describe("assessSubstrateFit — architect-steering (stack must be substrate-deployable)", () => {
+  const archWith = (stack: string, storesData: boolean): Architecture => ({
+    prd: { spec: { name: "app", storesData }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd,
+    stack,
+    workstreams: [ws("db"), ws("api", ["db"])], // clean DAG → only substrate-fit findings, if any
+  });
+
+  test("Supabase + stores data → on-substrate, no findings", () => {
+    expect(reviewArchitecture(archWith("Next.js + Supabase + TypeScript + Tailwind", true))).toEqual([]);
+  });
+
+  test('the "Express + pg + React" problem → blocking stack-not-supabase', () => {
+    const findings = reviewArchitecture(archWith("Express + pg + React", true));
+    const f = findings.find((x) => x.ruleId === "stack-not-supabase");
+    expect(f?.severity).toBe("high"); // blocks → the architect loop re-proposes on Supabase
+  });
+
+  test("an incompatible managed backend (MongoDB / Firebase) → blocking stack-incompatible-backend", () => {
+    expect(assessSubstrateFit(archWith("Express + MongoDB + React", true)).map((f) => f.ruleId)).toContain("stack-incompatible-backend");
+    expect(assessSubstrateFit(archWith("Next.js + Firebase", true)).map((f) => f.ruleId)).toContain("stack-incompatible-backend");
+  });
+
+  test("a static app that stores no data needs no Supabase (not flagged)", () => {
+    expect(assessSubstrateFit(archWith("Vite + React static marketing site", false))).toEqual([]);
   });
 });
 
