@@ -31,3 +31,4 @@ export {
   type EscalationTicket,
   type TicketState,
 } from "./queue.ts";
+export { GitHubEscalationSink, type GitHubEscalationSinkOptions } from "./github.ts";
