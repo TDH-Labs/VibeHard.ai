@@ -86,6 +86,23 @@ describe("SupabaseManagementClient", () => {
     await expect(client.waitHealthy("r", { tries: 3, delayMs: 1 })).rejects.toThrow(/ACTIVE_HEALTHY/);
   });
 
+  test("provisionProject DELETES the orphan when a post-create step fails (no leaked billable project)", async () => {
+    const deleted: string[] = [];
+    const { impl } = fakeFetch((method, path) => {
+      if (method === "GET" && path === "/v1/organizations") return { json: [{ id: "org", name: "O" }] };
+      if (method === "POST" && path === "/v1/projects") return { json: { id: "leakref", status: "COMING_UP" } };
+      if (method === "GET" && path === "/v1/projects/leakref") return { json: { status: "COMING_UP" } }; // never healthy → fails
+      if (method === "DELETE" && path === "/v1/projects/leakref") {
+        deleted.push("leakref");
+        return { status: 200, text: "" };
+      }
+      return { status: 404, text: "unhandled" };
+    });
+    const client = new SupabaseManagementClient({ token: "t", fetchImpl: impl, sleep: noSleep });
+    await expect(client.provisionProject({ name: "app" }, { tries: 2, delayMs: 1 })).rejects.toThrow(/deleted the orphaned project leakref/);
+    expect(deleted).toEqual(["leakref"]); // the half-provisioned project was cleaned up, not leaked
+  });
+
   test("a non-2xx API response surfaces status + body", async () => {
     const { impl } = fakeFetch(() => ({ status: 402, text: "payment required" }));
     const client = new SupabaseManagementClient({ token: "t", fetchImpl: impl });

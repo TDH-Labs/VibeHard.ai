@@ -140,15 +140,32 @@ export class SupabaseManagementClient {
     return { dbHost: e.db_host, dbUser: e.db_user ?? `postgres.${ref}` };
   }
 
-  /** create → wait healthy → fetch keys + pooler host. Everything needed to migrate + deploy. */
+  async deleteProject(ref: string): Promise<void> {
+    await this.req("DELETE", `/v1/projects/${ref}`);
+  }
+
+  /** create → wait healthy → fetch keys + pooler host. Everything needed to migrate + deploy.
+   *  If ANY step after creation fails, the project is half-provisioned (useless + billable) → we
+   *  best-effort DELETE it so nothing leaks; if even that fails, the error names the ref so it's
+   *  recoverable by hand. A provisioning hiccup must never silently leave a paid project behind. */
   async provisionProject(req: ProvisionRequest, waitOpts?: { tries?: number; delayMs?: number }): Promise<ProvisionedProject> {
     const orgId = await this.resolveOrgId(req.orgId ?? process.env.SUPABASE_ORG_ID);
     const region = req.region ?? DEFAULT_REGION;
     const dbPassword = req.dbPassword ?? generateDbPassword();
     const { ref } = await this.createProject({ orgId, name: req.name, region, dbPassword });
-    await this.waitHealthy(ref, waitOpts);
-    const { anonKey, serviceKey } = await this.getApiKeys(ref);
-    const { dbHost, dbUser } = await this.getPoolerHost(ref);
-    return { ref, url: `https://${ref}.supabase.co`, region, anonKey, serviceKey, dbHost, dbUser, dbPassword };
+    try {
+      await this.waitHealthy(ref, waitOpts);
+      const { anonKey, serviceKey } = await this.getApiKeys(ref);
+      const { dbHost, dbUser } = await this.getPoolerHost(ref);
+      return { ref, url: `https://${ref}.supabase.co`, region, anonKey, serviceKey, dbHost, dbUser, dbPassword };
+    } catch (e) {
+      let cleanup = `deleted the orphaned project ${ref}`;
+      try {
+        await this.deleteProject(ref);
+      } catch {
+        cleanup = `COULD NOT delete orphaned project ${ref} — delete it manually to stop billing`;
+      }
+      throw new Error(`provisioning failed after creating ${ref}; ${cleanup}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 }
