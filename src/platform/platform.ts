@@ -1,0 +1,131 @@
+/**
+ * Platform — the multi-tenant entry point. Sign up tenants, and deploy apps FOR a tenant:
+ * quota-checked and isolated in the tenant's own state directory (so one tenant's deployment
+ * records + encrypted secrets are physically separate from every other tenant's). The deploy
+ * itself is delegated to the substrate's deployApp; the platform only adds tenancy + quotas +
+ * usage metering on top. The deploy fn is injectable so this logic unit-tests without a live
+ * provision (the substrate is already proven separately).
+ */
+import { existsSync, readdirSync } from "node:fs";
+import { basename, join } from "node:path";
+import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { deployApp, type DeployAppOptions } from "../substrate/deploy-app.ts";
+import type { DeployOutcome } from "../substrate/orchestrator.ts";
+import { LocalBillingProvider } from "./billing.ts";
+import { FileTenantStore } from "./tenant-store.ts";
+import { DEFAULT_PLAN } from "./plans.ts";
+import type { BillingProvider, Tenant, TenantStore } from "./types.ts";
+
+const safeSeg = (s: string): string => s.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+/** The deploy seam — the real one is the substrate's deployApp; tests inject a fake. */
+export type DeployFn = (workspacePath: string, opts?: DeployAppOptions) => Promise<DeployOutcome>;
+
+export interface PlatformOptions {
+  baseDir?: string; // default ~/.drydock
+  tenants?: TenantStore;
+  billing?: BillingProvider;
+  deploy?: DeployFn; // default: the substrate deployApp
+  now?: () => string; // injectable clock (testability)
+  newId?: () => string; // injectable id generator (testability)
+}
+
+export class Platform {
+  private readonly baseDir: string;
+  private readonly tenants: TenantStore;
+  private readonly billing: BillingProvider;
+  private readonly deploy: DeployFn;
+  private readonly now: () => string;
+  private readonly newId: () => string;
+
+  constructor(opts: PlatformOptions = {}) {
+    this.baseDir = opts.baseDir ?? join(homedir(), ".drydock");
+    this.tenants = opts.tenants ?? new FileTenantStore(join(this.baseDir, "tenants"));
+    this.billing = opts.billing ?? new LocalBillingProvider();
+    this.deploy = opts.deploy ?? deployApp;
+    this.now = opts.now ?? (() => new Date().toISOString());
+    this.newId = opts.newId ?? (() => randomUUID());
+  }
+
+  /** A tenant's ISOLATED state directory — their deployments + secrets live here and nowhere else. */
+  stateDir(tenantId: string): string {
+    return join(this.baseDir, "tenants", safeSeg(tenantId));
+  }
+
+  /** Sign up a new tenant (the builder). Returns the created record. */
+  signUp(name: string, plan: string = DEFAULT_PLAN): Tenant {
+    const tenant: Tenant = { id: this.newId(), name, plan, status: "active", createdAt: this.now() };
+    this.tenants.create(tenant);
+    return tenant;
+  }
+
+  getTenant(id: string): Tenant | null {
+    return this.tenants.get(id);
+  }
+
+  listTenants(): Tenant[] {
+    return this.tenants.list();
+  }
+
+  private mutate(id: string, fn: (t: Tenant) => Tenant): Tenant {
+    const t = this.tenants.get(id);
+    if (!t) throw new Error(`unknown tenant ${id}`);
+    const next = fn(t);
+    this.tenants.update(next);
+    return next;
+  }
+
+  /** Tenant lifecycle: suspend (blocks deploys), resume, or change plan (changes the quota). */
+  suspend(tenantId: string): Tenant {
+    return this.mutate(tenantId, (t) => ({ ...t, status: "suspended" }));
+  }
+  resume(tenantId: string): Tenant {
+    return this.mutate(tenantId, (t) => ({ ...t, status: "active" }));
+  }
+  setPlan(tenantId: string, plan: string): Tenant {
+    return this.mutate(tenantId, (t) => ({ ...t, plan }));
+  }
+
+  /** Count a tenant's existing projects = deployment records in their isolated dir. */
+  projectCount(tenantId: string): number {
+    const dir = join(this.stateDir(tenantId), "deployments");
+    if (!existsSync(dir)) return 0;
+    try {
+      return readdirSync(dir).filter((f) => f.endsWith(".json")).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Enforce tenant status + plan quota. A REDEPLOY of an existing app is always allowed; only a
+   * NEW app counts against maxProjects. Throws (not returns) on violation — fail closed.
+   */
+  assertCanDeploy(tenantId: string, app: string): void {
+    const t = this.tenants.get(tenantId);
+    if (!t) throw new Error(`unknown tenant ${tenantId}`);
+    if (t.status !== "active") throw new Error(`tenant ${tenantId} is ${t.status} — cannot deploy`);
+    const plan = this.billing.planFor(t);
+    const isExisting = existsSync(join(this.stateDir(tenantId), "deployments", `${safeSeg(app)}.json`));
+    if (!isExisting && this.projectCount(tenantId) >= plan.maxProjects) {
+      throw new Error(`quota exceeded: plan "${plan.name}" allows ${plan.maxProjects} project(s) — upgrade to add more`);
+    }
+  }
+
+  /**
+   * Deploy an app FOR a tenant: quota-checked, in the tenant's isolated state dir, with a usage
+   * event recorded. Everything the substrate needs (managed vs adopt, host selection) still applies.
+   */
+  async deployForTenant(
+    tenantId: string,
+    workspacePath: string,
+    opts: Omit<DeployAppOptions, "stateDir" | "deps"> = {},
+  ): Promise<DeployOutcome> {
+    const app = opts.app ?? basename(workspacePath);
+    this.assertCanDeploy(tenantId, app);
+    const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId) });
+    await this.billing.recordUsage(tenantId, { kind: "deploy", app, at: this.now() });
+    return outcome;
+  }
+}

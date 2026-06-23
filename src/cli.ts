@@ -20,6 +20,7 @@ import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
 import { deployApp } from "./substrate/index.ts";
+import { Platform, planFor } from "./platform/index.ts";
 import {
   capabilitiesFromSpec,
   combinedCandidateSource,
@@ -210,6 +211,43 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "--version") {
     console.log(VERSION);
     return 0;
+  }
+
+  if (cmd === "tenant") {
+    const [, sub, name] = argv;
+    const platform = new Platform();
+    if (sub === "signup") {
+      if (!name) {
+        console.error('usage: drydock tenant signup "<name>" [plan]');
+        return 2;
+      }
+      const t = platform.signUp(name, argv[3] ?? "free");
+      console.log(`✅ tenant ${t.id} created — ${t.name} [${t.plan}], ${t.status}`);
+      console.log(`   isolated state dir: ${platform.stateDir(t.id)}`);
+      return 0;
+    }
+    if (sub === "list") {
+      const tenants = platform.listTenants();
+      if (!tenants.length) {
+        console.log('no tenants yet — `drydock tenant signup "<name>"`');
+        return 0;
+      }
+      for (const t of tenants) {
+        console.log(`${t.id}  ${t.name}  [${t.plan}]  ${t.status}  ${platform.projectCount(t.id)}/${planFor(t).maxProjects} projects`);
+      }
+      return 0;
+    }
+    if (sub === "show" && name) {
+      const t = platform.getTenant(name);
+      if (!t) {
+        console.error(`no tenant "${name}"`);
+        return 1;
+      }
+      console.log(JSON.stringify({ ...t, projects: platform.projectCount(t.id), projectLimit: planFor(t).maxProjects }, null, 2));
+      return 0;
+    }
+    console.error("usage: drydock tenant <signup|list|show>");
+    return 2;
   }
 
   if (cmd === "gate" || cmd === "deploy") {
