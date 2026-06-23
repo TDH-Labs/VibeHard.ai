@@ -18,6 +18,12 @@ export interface AutoFixOptions {
   fixer?: Fixer;
   /** Max fix→re-gate cycles before escalating (§18 retry budget). */
   budget?: number;
+  /** Whether a human can take an escalation right now. When provided and it returns
+   *  false, the loop runs `extraBudgetNoHuman` MORE raw attempts before holding — so a
+   *  build never just HANGS in the queue waiting for an absent reviewer. */
+  humanAvailable?: () => boolean | Promise<boolean>;
+  /** Extra fix attempts when no human is available (default 5). */
+  extraBudgetNoHuman?: number;
   now?: string;
   onStep?: (msg: string) => void;
 }
@@ -103,11 +109,38 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   }
 
   // Final disposition (a fix may have landed in the last iteration → re-gate to be sure).
-  const final = await gate(workspacePath);
+  let final = await gate(workspacePath);
   if (final.passed) {
     note(`gate green after ${attempts} fix attempt(s)`);
     return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
   }
+
+  // Would hand off to a human — but if NONE is available, keep trying rather than leave
+  // the build hanging in the queue. Up to `extraBudgetNoHuman` more raw attempts (no
+  // early-stuck-exit; the LLM is stochastic, so a retry can land what a stuck round
+  // couldn't). If those also fail, hold anyway — fail-closed, just with more effort spent.
+  const extra = opts.extraBudgetNoHuman ?? 5;
+  if (extra > 0 && opts.humanAvailable && !(await opts.humanAvailable())) {
+    note(`no human available — continuing up to ${extra} more attempt(s) to self-resolve`);
+    for (let i = 0; i < extra; i++) {
+      attempts++;
+      const blocked = final.verdicts.filter((v) => v.status === "block").map((v) => `${v.gate}(${v.blocking})`).join(", ");
+      note(`extra attempt ${i + 1}/${extra} (no human): blocked by ${blocked} — applying fixes`);
+      try {
+        await fixer(workspacePath, final.verdicts);
+      } catch (e) {
+        note(`fixer errored: ${e instanceof Error ? e.message : String(e)} — stopping extra attempts`);
+        break;
+      }
+      final = await gate(workspacePath);
+      if (final.passed) {
+        note(`gate green after ${attempts} fix attempt(s) (no-human extension)`);
+        return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
+      }
+    }
+    stopReason = `${stopReason}; ${extra} extra no-human attempt(s) also failed`;
+  }
+
   note(`escalating residual findings — ${stopReason}`);
   const escalation = await buildEscalationPacket(final.verdicts, workspacePath, {
     reason: `auto-fix escalated: ${stopReason}`,

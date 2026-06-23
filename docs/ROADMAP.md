@@ -71,3 +71,21 @@ there's a reason (an account layer, automatic triggers, a traction signal):
 - **Auto-run inside `build` at production rigor** — intentionally NOT done; a senior
   refactors when it pays off (a human's in the slice / it's earned it), not speculatively
   on every build.
+
+---
+
+## Product storefront — marketing site + copy (TODO), and the hosted app UI
+
+**TODO — marketing site (design + copy).** A public site that sells the product to the
+non-technical, sensitive-data segment (clinics / legal / accounting): visual/brand design,
+positioning, and website copy. Lead with the value prop — "build a real app for your
+business, with the security built in and an expert on call" — not the engineering.
+Translate the moat (enforced gates + on-demand human engineer) into operator language.
+§16-BINDING on every word: never "HIPAA/SOC 2 compliant / certified" — "helps toward,
+never certifies." Needs a design/brand pass + landing / pricing / trust-&-security pages.
+
+**The hosted app UI (bigger, same "storefront" theme).** The product itself: a web app
+where a non-technical user types a prompt and watches build → gate → ship, with the gates
+HIDDEN (enforced FOR them, not shown TO them — §1/§16) and holds/escalations surfaced in
+plain language. Today Drydock is a CLI the target user can't operate; this UI is what
+stands between the proven engine and a real customer.

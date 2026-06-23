@@ -120,4 +120,47 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => l.includes("fixer errored"))).toBe(true);
     expect(r.escalation).not.toBeNull();
   });
+
+  test("no human available → keeps trying (extra loops) and can still converge", async () => {
+    const cf = countingFixer();
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([BLOCK, BLOCK, BLOCK, BLOCK, PASS]),
+      fixer: cf.fixer,
+      budget: 10,
+      humanAvailable: async () => false,
+      extraBudgetNoHuman: 5,
+      now: ts,
+    });
+    expect(r.fixed).toBe(true);
+    expect(r.escalation).toBeNull();
+    expect(r.log.some((l) => /no human available/.test(l))).toBe(true);
+    expect(r.log.some((l) => /no-human extension/.test(l))).toBe(true);
+  });
+
+  test("no human available → exhausts the extra loops, then holds anyway (fail-closed)", async () => {
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([BLOCK]),
+      fixer: countingFixer().fixer,
+      budget: 10,
+      humanAvailable: async () => false,
+      extraBudgetNoHuman: 5,
+      now: ts,
+    });
+    expect(r.fixed).toBe(false);
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /extra attempt 5\/5/.test(l))).toBe(true);
+  });
+
+  test("a human IS available → holds immediately, no extra loops", async () => {
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([BLOCK]),
+      fixer: countingFixer().fixer,
+      budget: 10,
+      humanAvailable: async () => true,
+      now: ts,
+    });
+    expect(r.fixed).toBe(false);
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /no human/.test(l))).toBe(false);
+  });
 });

@@ -166,7 +166,14 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
 /** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human
  *  review on exhaustion (§24). Returns the exit code. Shared by `fix` and `build`. */
 async function runAutoFixAndReport(target: string): Promise<number> {
-  const result = await autoFix(target, { onStep: (m) => console.log(`  … ${m}`) });
+  // No live human layer is wired yet (only the async local queue — no synchronous
+  // reviewer), so no human is "available" → the loop runs its extra no-human attempts
+  // before holding, rather than parking a stuck build for an absent human. When the
+  // GitHub/Slack adapter lands (§24), this becomes a real availability check.
+  const result = await autoFix(target, {
+    onStep: (m) => console.log(`  … ${m}`),
+    humanAvailable: async () => false,
+  });
   if (result.fixed) {
     console.log(`\n✅ gate green after ${result.attempts} auto-fix attempt(s) — deploy-ready.`);
     return 0;
