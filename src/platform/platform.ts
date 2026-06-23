@@ -173,7 +173,7 @@ export class Platform {
    * usage ledger), queue a job, and meter a "build" event (which the window then counts). Throws
    * on a suspended/unknown tenant or an exceeded rate — fail closed, BEFORE any work runs.
    */
-  async submitBuild(tenantId: string, app: string): Promise<BuildJob> {
+  async submitBuild(tenantId: string, app: string, workspacePath?: string): Promise<BuildJob> {
     const t = this.tenants.get(tenantId);
     if (!t) throw new Error(`unknown tenant ${tenantId}`);
     if (t.status !== "active") throw new Error(`tenant ${tenantId} is ${t.status} — cannot build`);
@@ -182,7 +182,7 @@ export class Platform {
     if (usedToday >= plan.maxBuildsPerDay) {
       throw new Error(`build rate limit: plan "${plan.name}" allows ${plan.maxBuildsPerDay} builds/day (used ${usedToday})`);
     }
-    const job: BuildJob = { id: this.newId(), tenantId, app, status: "queued", queuedAt: this.now() };
+    const job: BuildJob = { id: this.newId(), tenantId, app, status: "queued", queuedAt: this.now(), ...(workspacePath ? { workspacePath } : {}) };
     this.builds.put(job);
     await this.meter(tenantId, { kind: "build", app, at: this.now() });
     return job;
@@ -205,8 +205,8 @@ export class Platform {
   }
 
   /** Submit (quota-checked) + run, in one call. */
-  async build(tenantId: string, app: string, runner: BuildRunner): Promise<BuildJob> {
-    return this.runBuild(await this.submitBuild(tenantId, app), runner);
+  async build(tenantId: string, app: string, runner: BuildRunner, workspacePath?: string): Promise<BuildJob> {
+    return this.runBuild(await this.submitBuild(tenantId, app, workspacePath), runner);
   }
 
   listBuilds(tenantId: string): BuildJob[] {

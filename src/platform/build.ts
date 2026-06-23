@@ -16,6 +16,7 @@ export interface BuildJob {
   app: string;
   status: BuildStatus;
   queuedAt: string;
+  workspacePath?: string; // the code the runner builds/verifies
   startedAt?: string;
   finishedAt?: string;
   error?: string;
