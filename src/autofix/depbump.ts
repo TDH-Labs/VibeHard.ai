@@ -62,31 +62,27 @@ export function pickMajorTarget(installed: string, fixed: string[]): string | nu
 }
 
 export interface DepBumpResult {
-  bumped: Array<{ pkg: string; from: string; to: string }>; // safe same-major bumps
+  bumped: Array<{ pkg: string; from: string; to: string }>; // safe same-major bumps (direct deps)
   /** breaking MAJOR bumps applied — the fixer's LLM must adapt the code; the gate verifies. */
   majorBumped: Array<{ pkg: string; from: string; to: string }>;
+  /** TRANSITIVE deps (nested inside another package, not on the dependency list) forced to a
+   *  patched version via an npm `overrides` entry — the only way to patch a CVE deep in the tree. */
+  overridden: Array<{ pkg: string; from: string; to: string }>;
   /** packages with no usable fix at all (rare) — nothing to bump to. */
   unfixable: string[];
   installExit: number | null;
 }
 
+type PkgManifest = { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; overrides?: Record<string, string> };
+
 /**
- * Bump vulnerable deps in package.json to safe same-major fixes (versions from the
- * trivy findings), then refresh the lockfile via `npm install` so the next trivy
- * scan (which reads the lock) sees the new versions. Pure-ish: the only I/O is the
- * package.json write + npm install.
+ * Pure: decide + apply the package.json mutations for a set of dep findings (mutates `pkg` in
+ * place; the caller owns the read/write). A DIRECT dependency (in dependencies/devDependencies) is
+ * bumped in its entry; a TRANSITIVE one (nested inside another package, so not on the list) is
+ * forced via an npm `overrides` entry — the only way to patch a CVE deep in the tree without
+ * waiting on the parent to update. No I/O → unit-testable. The version comes from the gate finding.
  */
-export function applyDepBumps(workspacePath: string, depFindings: Finding[]): DepBumpResult {
-  const pkgPath = join(workspacePath, "package.json");
-  if (!existsSync(pkgPath)) return { bumped: [], majorBumped: [], unfixable: [], installExit: null };
-
-  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-  try {
-    pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-  } catch {
-    return { bumped: [], majorBumped: [], unfixable: [], installExit: null };
-  }
-
+export function planDepBumps(pkg: PkgManifest, depFindings: Finding[]): Omit<DepBumpResult, "installExit"> {
   // Group findings by package → union of all its fixed versions.
   const byPkg = new Map<string, { installed: string; fixed: Set<string> }>();
   for (const f of depFindings) {
@@ -99,6 +95,7 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
 
   const bumped: DepBumpResult["bumped"] = [];
   const majorBumped: DepBumpResult["majorBumped"] = [];
+  const overridden: DepBumpResult["overridden"] = [];
   const unfixable: string[] = [];
   for (const [pkgName, { installed, fixed }] of byPkg) {
     const fixedArr = [...fixed];
@@ -108,17 +105,46 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
       unfixable.push(pkgName);
       continue;
     }
-    let changed = false;
+    let direct = false;
     for (const dep of [pkg.dependencies, pkg.devDependencies]) {
       if (dep && pkgName in dep) {
         dep[pkgName] = target;
-        changed = true;
+        direct = true;
       }
     }
-    if (changed) (inMajor ? bumped : majorBumped).push({ pkg: pkgName, from: installed, to: target });
+    if (direct) {
+      (inMajor ? bumped : majorBumped).push({ pkg: pkgName, from: installed, to: target });
+    } else {
+      // Transitive: force the patched version via an npm override (prefer the same-major fix so
+      // the parent keeps working; the gate re-verifies regardless).
+      pkg.overrides = pkg.overrides ?? {};
+      pkg.overrides[pkgName] = target;
+      overridden.push({ pkg: pkgName, from: installed, to: target });
+    }
+  }
+  return { bumped, majorBumped, overridden, unfixable };
+}
+
+/**
+ * Apply the dep bumps to package.json, then refresh the lockfile via `npm install` so the next
+ * trivy scan (which reads the lock) sees the new versions. Direct deps are bumped in place;
+ * transitive ones are forced via `overrides`. §11: the version comes from the gate finding, and
+ * the gate re-verifies. The only I/O is the package.json write + npm install.
+ */
+export function applyDepBumps(workspacePath: string, depFindings: Finding[]): DepBumpResult {
+  const empty: DepBumpResult = { bumped: [], majorBumped: [], overridden: [], unfixable: [], installExit: null };
+  const pkgPath = join(workspacePath, "package.json");
+  if (!existsSync(pkgPath)) return empty;
+
+  let pkg: PkgManifest;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  } catch {
+    return empty;
   }
 
-  if (!bumped.length && !majorBumped.length) return { bumped, majorBumped, unfixable, installExit: null };
+  const plan = planDepBumps(pkg, depFindings);
+  if (!plan.bumped.length && !plan.majorBumped.length && !plan.overridden.length) return { ...plan, installExit: null };
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], {
@@ -126,5 +152,5 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
     stdout: "ignore",
     stderr: "ignore",
   });
-  return { bumped, majorBumped, unfixable, installExit: install.exitCode ?? 1 };
+  return { ...plan, installExit: install.exitCode ?? 1 };
 }

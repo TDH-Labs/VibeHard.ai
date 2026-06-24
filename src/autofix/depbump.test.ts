@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { parseDepFinding, pickBumpTarget, pickMajorTarget } from "./depbump.ts";
+import { parseDepFinding, pickBumpTarget, pickMajorTarget, planDepBumps } from "./depbump.ts";
 import type { Finding } from "../types.ts";
+
+type Manifest = { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; overrides?: Record<string, string> };
 
 const dep = (message: string): Finding => ({ tool: "trivy", ruleId: "CVE-x", severity: "high", file: "package-lock.json", message });
 
@@ -45,5 +47,45 @@ describe("pickMajorTarget (breaking fallback)", () => {
   });
   test("null when there is no higher-major fix", () => {
     expect(pickMajorTarget("14.2.5", ["14.2.25", "13.0.0"])).toBeNull();
+  });
+});
+
+describe("planDepBumps — direct bump vs transitive override (mutates the manifest in place)", () => {
+  test("a DIRECT vulnerable dep is bumped in place (same-major)", () => {
+    const pkg: Manifest = { dependencies: { next: "14.2.5" } };
+    const plan = planDepBumps(pkg, [dep("next@14.2.5: bypass (fixed in 14.2.25, 15.2.3)")]);
+    expect(pkg.dependencies?.next).toBe("14.2.25");
+    expect(plan.bumped).toEqual([{ pkg: "next", from: "14.2.5", to: "14.2.25" }]);
+    expect(plan.overridden).toEqual([]);
+    expect(pkg.overrides).toBeUndefined();
+  });
+
+  test("a DIRECT dep with only a higher-major fix → majorBumped (breaking fallback)", () => {
+    const pkg: Manifest = { dependencies: { next: "14.2.5" } };
+    const plan = planDepBumps(pkg, [dep("next@14.2.5: bypass (fixed in 15.2.3)")]);
+    expect(pkg.dependencies?.next).toBe("15.2.3");
+    expect(plan.majorBumped).toEqual([{ pkg: "next", from: "14.2.5", to: "15.2.3" }]);
+  });
+
+  test("a TRANSITIVE dep (not on the dependency list) is forced via an npm override; direct deps untouched", () => {
+    const pkg: Manifest = { dependencies: { "@clerk/nextjs": "^5.0.0" } }; // js-cookie is nested inside, not listed
+    const plan = planDepBumps(pkg, [dep("js-cookie@3.0.5: XSS (fixed in 3.0.7)")]);
+    expect(pkg.overrides).toEqual({ "js-cookie": "3.0.7" });
+    expect(plan.overridden).toEqual([{ pkg: "js-cookie", from: "3.0.5", to: "3.0.7" }]);
+    expect(plan.bumped).toEqual([]);
+    expect(pkg.dependencies?.["@clerk/nextjs"]).toBe("^5.0.0");
+  });
+
+  test("the dashboard-build case: direct Clerk bumped + transitive js-cookie/postcss overridden", () => {
+    const pkg: Manifest = { dependencies: { "@clerk/clerk-react": "5.12.0" }, devDependencies: { tailwindcss: "^3.4.0" } };
+    const plan = planDepBumps(pkg, [
+      dep("@clerk/clerk-react@5.12.0: authz bypass (fixed in 5.61.6)"),
+      dep("js-cookie@3.0.5: XSS (fixed in 3.0.7)"),
+      dep("postcss@8.4.31: XSS (fixed in 8.5.10)"),
+    ]);
+    expect(pkg.dependencies?.["@clerk/clerk-react"]).toBe("5.61.6"); // direct → bumped in place
+    expect(pkg.overrides).toEqual({ "js-cookie": "3.0.7", postcss: "8.5.10" }); // transitive → overrides
+    expect(plan.bumped.map((b) => b.pkg)).toEqual(["@clerk/clerk-react"]);
+    expect(plan.overridden.map((o) => o.pkg).sort()).toEqual(["js-cookie", "postcss"]);
   });
 });
