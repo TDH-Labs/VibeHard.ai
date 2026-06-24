@@ -13,7 +13,7 @@ import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
+import { decideRigor, llmIntake, llmQuestioner, planIntake, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
 import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/index.ts";
 import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
@@ -364,6 +364,26 @@ export async function main(argv: string[]): Promise<number> {
       if ("sentinel" in result) console.log("   no sentinel written");
     }
     return result.passed ? 0 : 1;
+  }
+
+  if (cmd === "intake") {
+    const [, promptText] = argv;
+    if (!promptText) {
+      console.error('usage: drydock intake "<prompt>"');
+      return 2;
+    }
+    // grill-me (backlog #1): the few clarifying questions a non-technical prompt needs before a
+    // build. Questions are OPTIONAL — the questioner never throws, so this is purely advisory.
+    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const questions = await llmQuestioner({ config: { provider, model } })(promptText);
+    if (!questions.length) {
+      console.log("No clarifying questions — the request is clear enough to build.");
+      return 0;
+    }
+    console.log("A few clarifying questions before building:");
+    for (const q of questions) console.log(`  • ${q}`);
+    return 0;
   }
 
   if (cmd === "plan") {
@@ -727,6 +747,7 @@ export async function main(argv: string[]): Promise<number> {
     [
       "drydock — safe vibe coding.",
       "",
+      '  drydock intake "<prompt>"           grill-me: the few clarifying questions a prompt needs first (advisory)',
       '  drydock plan "<prompt>"             draft + grill a spec before building (front-half §22)',
       '  drydock build "<prompt>" <dir>      full pipeline: spec → PRD → architecture → build → gate → fix → hold',
       '  drydock generate "<prompt>" <dir>   generate an app from a raw prompt (engine only) + auto-gate it',

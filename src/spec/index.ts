@@ -18,4 +18,5 @@ export {
 export { coerceSpec, extractJsonObject, parseSpec, tryExtractJsonObject } from "./coerce.ts";
 export { planIntake, type Intake, type PlanOptions, type PlanResult } from "./intake.ts";
 export { llmIntake, type LlmIntakeOptions } from "./intake-llm.ts";
+export { coerceQuestions, foldClarifications, llmQuestioner, type Clarification, type LlmQuestionerOptions, type Questioner } from "./questions.ts";
 export { buildGenerationBrief, securityRequirements } from "./brief.ts";
