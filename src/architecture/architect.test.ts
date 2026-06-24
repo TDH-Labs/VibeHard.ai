@@ -4,8 +4,17 @@ import type { Architecture } from "./architecture.ts";
 import type { Prd } from "../prd/index.ts";
 
 const prd = { spec: { name: "app" }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd;
-const ws = (name: string, dependsOn: string[] = []) => ({ name, responsibility: name, files: [`${name}.ts`], dependsOn });
-const arch = (workstreams: Architecture["workstreams"]): Architecture => ({ prd, stack: "Next.js", workstreams });
+const ws = (name: string, dependsOn: string[] = []) => ({ name, responsibility: name, files: [`${name}.ts`], dependsOn, covers: [] });
+const arch = (workstreams: Architecture["workstreams"]): Architecture => ({
+  prd,
+  stack: "Next.js",
+  workstreams,
+  systemOverview: "an app",
+  architecturalGoals: [],
+  pattern: { name: "modular monolith", rationale: "small team + substrate fit", tradeoffs: "less ultimate scalability" },
+  dataFlow: "REST",
+  dataArchitecture: { storageRationale: "", schema: "", stateManagement: "" },
+});
 
 const cyclic = arch([ws("x", ["y"]), ws("y", ["x"])]);
 const sound = arch([ws("api", ["db"]), ws("db")]);

@@ -16,8 +16,17 @@ function prd(over: Partial<Prd> = {}): Prd {
     outOfScope: [], successMetrics: [], risks: [], openQuestions: [], nfrs: ["secure"], buyVsBuild: [], ...over,
   };
 }
-const ws = (name: string, files: string[], responsibility = name): Workstream => ({ name, responsibility, files, dependsOn: [] });
-const arch: Architecture = { prd: prd(), stack: "Next.js", workstreams: [ws("db", ["supabase/migrations/001.sql"], "schema + RLS"), ws("ui", ["ui.tsx"], "frontend")] };
+const ws = (name: string, files: string[], responsibility = name): Workstream => ({ name, responsibility, files, dependsOn: [], covers: [] });
+const arch: Architecture = {
+  prd: prd(),
+  stack: "Next.js",
+  workstreams: [ws("db", ["supabase/migrations/001.sql"], "schema + RLS"), ws("ui", ["ui.tsx"], "frontend")],
+  systemOverview: "app",
+  architecturalGoals: [],
+  pattern: { name: "m", rationale: "r", tradeoffs: "t" },
+  dataFlow: "REST",
+  dataArchitecture: { storageRationale: "", schema: "", stateManagement: "" },
+};
 const bundle: FrontHalfBundle = { spec: spec(), prd: prd(), architecture: arch };
 
 describe("reviewFrontHalf — deterministic disposes, the adversary surfaces", () => {

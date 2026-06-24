@@ -28,12 +28,17 @@ function prd(over: Partial<Prd> = {}): Prd {
     outOfScope: [], successMetrics: [], risks: [], openQuestions: [], nfrs: ["secure"], buyVsBuild: [], ...over,
   };
 }
-const ws = (name: string, files: string[], responsibility = name): Workstream => ({ name, responsibility, files, dependsOn: [] });
+const ws = (name: string, files: string[], responsibility = name): Workstream => ({ name, responsibility, files, dependsOn: [], covers: [] });
 function arch(over: Partial<Architecture> = {}): Architecture {
   return {
     prd: prd(),
     stack: "Next.js + Supabase",
     workstreams: [ws("db", ["supabase/migrations/001.sql"], "schema + RLS"), ws("api", ["api.ts"], "REST"), ws("ui", ["ui.tsx"], "frontend")],
+    systemOverview: "app",
+    architecturalGoals: [],
+    pattern: { name: "m", rationale: "r", tradeoffs: "t" },
+    dataFlow: "REST",
+    dataArchitecture: { storageRationale: "", schema: "", stateManagement: "" },
     ...over,
   };
 }

@@ -16,7 +16,7 @@ import { autoFix } from "./autofix/index.ts";
 import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
 import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/index.ts";
-import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
+import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
@@ -72,6 +72,16 @@ function persistSrs(target: string, srs: Srs): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "srs.json"), JSON.stringify(srs, null, 2));
   writeFileSync(join(target, "SRS.md"), renderSrsMarkdown(srs));
+}
+
+/** Persist the SAD: SAD.md (the Software Architecture Document for engineers + reviewers) +
+ *  .drydock/architecture.json (the design without the nested prd/srs — those persist separately). */
+function persistSad(target: string, arch: Architecture): void {
+  const dir = join(target, ".drydock");
+  mkdirSync(dir, { recursive: true });
+  const { prd: _p, srs: _s, ...design } = arch;
+  writeFileSync(join(dir, "architecture.json"), JSON.stringify(design, null, 2));
+  writeFileSync(join(target, "SAD.md"), renderSadMarkdown(arch));
 }
 
 const DISPOSITION_LABEL: Record<Advisory["disposition"], string> = {
@@ -453,6 +463,8 @@ export async function main(argv: string[]): Promise<number> {
     }
     const tiers = buildOrder(archRes.arch);
     console.log(`   ${archRes.arch.stack} · ${archRes.arch.workstreams.length} workstream(s) in ${tiers.length} tier(s): ${tiers.map((t) => t.map((w) => w.name).join("+")).join(" → ")}`);
+    persistSad(target, archRes.arch);
+    console.log(`   📄 SAD written → ${join(target, "SAD.md")}`);
 
     // 3b. Adversarial review of the PLAN before codegen: deterministic spec↔PRD↔arch
     //     cross-checks (can block) + an LLM red-team (advisory; serious findings flagged

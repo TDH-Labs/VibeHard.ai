@@ -9,9 +9,14 @@ const arch: Architecture = {
   } as unknown as Architecture["prd"],
   stack: "Next.js + Supabase",
   workstreams: [
-    { name: "db", responsibility: "schema + RLS", files: ["supabase/migrations/001.sql"], dependsOn: [] },
-    { name: "api", responsibility: "REST routes", files: ["app/api/route.ts"], dependsOn: ["db"] },
+    { name: "db", responsibility: "schema + RLS", files: ["supabase/migrations/001.sql"], dependsOn: [], covers: [] },
+    { name: "api", responsibility: "REST routes", files: ["app/api/route.ts"], dependsOn: ["db"], covers: [] },
   ],
+  systemOverview: "a CRM",
+  architecturalGoals: [],
+  pattern: { name: "modular monolith", rationale: "fits the substrate", tradeoffs: "less ultimate scalability" },
+  dataFlow: "REST",
+  dataArchitecture: { storageRationale: "", schema: "", stateManagement: "" },
 };
 
 describe("workstreamBrief", () => {

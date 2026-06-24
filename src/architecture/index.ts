@@ -7,8 +7,11 @@ export {
   assessSubstrateFit,
   buildOrder,
   coerceArchitecture,
+  renderSadMarkdown,
   reviewArchitecture,
+  type ArchPattern,
   type Architecture,
+  type DataArchitecture,
   type Workstream,
 } from "./architecture.ts";
 export { architectApp, type Architect, type ArchitectOptions, type ArchitectResult } from "./architect.ts";
