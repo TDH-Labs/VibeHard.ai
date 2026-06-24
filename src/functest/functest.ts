@@ -14,6 +14,7 @@
  * the LLM proposes, a human disposes.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import { readAppSources } from "../gate/rls.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
@@ -92,7 +93,7 @@ export interface FunctionalReviewOptions {
 /** The live functional reviewer — one model call over the features + the app's code. */
 export function llmFunctionalReviewer(opts: FunctionalReviewOptions = {}): FunctionalReviewer {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
-  const config = opts.config ?? (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+  const config = opts.config ?? configForStage("functest");
   return async (features, workspace) => {
     const cleaned = features.map((f) => f.trim()).filter(Boolean);
     if (!cleaned.length) return [];

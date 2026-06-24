@@ -6,6 +6,7 @@
  * single source of truth (§13). The I/O half — the loop in intake.ts stays pure.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
@@ -50,7 +51,7 @@ export function llmIntake(opts: LlmIntakeOptions = {}): Intake {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   const config: EngineConfig =
     opts.config ??
-    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+    configForStage("spec");
 
   return async (prompt, prior) => {
     const user = prior

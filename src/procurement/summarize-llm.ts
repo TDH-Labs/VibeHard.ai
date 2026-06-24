@@ -6,6 +6,7 @@
  * cannot change a disposition. Reuses the engine ModelFactory; advisory output only.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
 import type { Summarizer } from "./types.ts";
@@ -21,7 +22,7 @@ export function llmSummarizer(opts: LlmSummarizerOptions = {}): Summarizer {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   const config: EngineConfig =
     opts.config ??
-    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+    configForStage("procurement");
 
   return async (cap, ranked) => {
     const shortlist = ranked.slice(0, 5).map((c) => ({

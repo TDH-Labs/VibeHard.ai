@@ -6,6 +6,7 @@
  * (like the auto-fixer), so provider/model selection stays single-sourced.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { readAppSources } from "../gate/rls.ts";
 import type { EngineConfig } from "../types.ts";
@@ -41,7 +42,7 @@ export interface RefactorLlmOptions {
 function resolveConfig(opts: RefactorLlmOptions): EngineConfig {
   return (
     opts.config ??
-    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" })
+    configForStage("refactor")
   );
 }
 

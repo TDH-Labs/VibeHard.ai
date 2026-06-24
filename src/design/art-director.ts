@@ -10,6 +10,7 @@
  * refactor + auto-fix passes.
  */
 import { readAppSources } from "../gate/rls.ts";
+import { configForStage } from "../config/models.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, liveBoltDriver, type ModelFactory } from "../engine/bolt/driver.ts";
 import { BoltEngine } from "../engine/bolt/engine.ts";
@@ -63,7 +64,7 @@ export interface ArtDirectorOptions {
 /** The live art-director — one engine pass that restyles the UI files for the chosen preset. */
 export function artDirectorRefactorer(opts: ArtDirectorOptions = {}): Refactorer {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
-  const config = opts.config ?? (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+  const config = opts.config ?? configForStage("polish");
   return async (workspace) => {
     const ui = (await readAppSources(workspace)).filter((s) => isUi(s.file));
     if (!ui.length) return;

@@ -17,6 +17,7 @@ import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.t
 import { designBlock } from "./design/presets.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
+import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -464,8 +465,8 @@ export async function main(argv: string[]): Promise<number> {
     }
     // Front-half (§22): the LLM drafts a PRD, the deterministic readiness check grills
     // it, and it re-drafts to resolve blocking gaps — bounded. Spec proposed, gate disposes.
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = providerOf();
+    const model = modelForStage("spec");
     console.log(`drafting a spec with ${provider}/${model} …`);
     const result = await planIntake(promptText, {
       intake: llmIntake({ config: { provider, model } }),
@@ -495,10 +496,12 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(dir);
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
-    const config = { provider, model };
+    const provider = providerOf();
     const onStep = (m: string) => console.log(`  … ${m}`);
+    // Per-stage, right-fit models (codegen + fix get the strong code model; planning a reasoning
+    // model; advisory a light one). Visible up front so it's clear which LLM runs at which stage.
+    console.log("models per stage:");
+    for (const { stage, model } of modelPlan()) console.log(`  ${stage.padEnd(10)} ${provider}/${model}`);
 
     // The full pipeline (§22 front-half → back-half). RESUMABLE: every finished stage's artifact
     // is loaded from .vibehard/ on a re-run, so a stopped/paused build continues where it left off
@@ -512,8 +515,8 @@ export async function main(argv: string[]): Promise<number> {
     if (spec) {
       console.log(`✓ spec — restored from saved work (${spec.features.length} feature(s))`);
     } else {
-      console.log(`planning with ${provider}/${model} …`);
-      const plan = await planIntake(promptText, { intake: llmIntake({ config }), onStep });
+      console.log(`drafting the spec with ${provider}/${modelForStage("spec")} …`);
+      const plan = await planIntake(promptText, { intake: llmIntake({ config: configForStage("spec") }), onStep });
       printSpec(plan.spec);
       console.log(`   rigor: ${decideRigor(plan.spec)} (§16 adaptive)`);
       for (const f of plan.gaps.filter((g) => !isBlocking(g))) explainFinding(f);
@@ -533,7 +536,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`✓ product requirements (PRD) — restored from saved work (${prd.requirements.length} feature(s))`);
     } else {
       console.log("\n── writing the product requirements (PRD) … ──");
-      const prdRes = await elaboratePrd(spec, { elaborator: llmElaborator({ config }), onStep });
+      const prdRes = await elaboratePrd(spec, { elaborator: llmElaborator({ config: configForStage("prd") }), onStep });
       prd = prdRes.prd;
       console.log(
         `   ${prd.requirements.length} feature(s) (${prd.requirements.filter((r) => r.priority === "MVP").length} MVP) · ${prd.objectives.length} objective(s) · ${prd.personas.length} persona(s) · ${prd.scenarios.length} scenario(s) · ${prd.successMetrics.length} metric(s) · ${prd.nfrs.length} security NFR(s)`,
@@ -556,7 +559,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`✓ technical spec (SRS) — restored from saved work (${srs.functionalRequirements.length} requirement(s))`);
     } else {
       console.log("\n── detailing the technical spec (SRS) … ──");
-      const srsRes = await elaborateSrs(prd, { specifier: llmSpecifier({ config }), onStep });
+      const srsRes = await elaborateSrs(prd, { specifier: llmSpecifier({ config: configForStage("srs") }), onStep });
       srs = srsRes.srs;
       console.log(
         `   ${srs.functionalRequirements.length} functional requirement(s) · ${srs.apiInterfaces.length} interface(s) · ${srs.openIssues.length} open issue(s) flagged`,
@@ -578,7 +581,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`✓ architecture (SAD) — restored from saved work (${arch.workstreams.length} component(s))`);
     } else {
       console.log("\n── designing the architecture (SAD) … ──");
-      const archRes = await architectApp(prd, { architect: llmArchitect({ config }), srs, onStep });
+      const archRes = await architectApp(prd, { architect: llmArchitect({ config: configForStage("sad") }), srs, onStep });
       if (!archRes.ready) {
         console.log("\n🛑 architecture not buildable:");
         for (const f of archRes.gaps.filter(isBlocking)) explainFinding(f);
@@ -601,7 +604,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log("\n── reviewing the plan for risks (adversarial) … ──");
       const review = await reviewFrontHalf(
         { spec, prd, architecture: arch },
-        { adversary: decideRigor(spec) === "production" ? llmAdversary({ config }) : undefined },
+        { adversary: decideRigor(spec) === "production" ? llmAdversary({ config: configForStage("review") }) : undefined },
       );
       for (const fdg of [...review.crossChecks, ...review.adversarial]) explainFinding(fdg);
       if (review.blocked) {
@@ -613,8 +616,8 @@ export async function main(argv: string[]): Promise<number> {
       }
 
       // Build each component from the plan, in dependency order.
-      console.log(`\n── writing the code → ${target} ──`);
-      if (!(await buildFromArchitecture(target, arch, provider, model))) return 1;
+      console.log(`\n── writing the code with ${provider}/${modelForStage("codegen")} → ${target} ──`);
+      if (!(await buildFromArchitecture(target, arch, provider, modelForStage("codegen")))) return 1;
       normalizeLayout(target); // deterministic safety net: make the @/* alias match where files live
       writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
     }
@@ -634,8 +637,8 @@ export async function main(argv: string[]): Promise<number> {
     const target = resolve(dir);
     // Provider/model selection: explicit override wins; else opencode when its key is
     // present, otherwise anthropic. Logged so the choice is never silent.
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = providerOf();
+    const model = modelForStage("codegen");
     console.log(`generating with ${provider}/${model} → ${target}`);
     // VIBEHARD_LANG=python → the Python (FastAPI + Supabase + Dockerfile) codegen prompt.
     const sysPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : undefined;
@@ -661,8 +664,8 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(dir);
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = providerOf();
+    const model = modelForStage("codegen");
     // Reuse the built app's codegen system prompt (stack-correct bolt protocol); the "only change
     // X, here's the current app" framing lives in the refine brief (src/refine/refine.ts).
     const arch = loadStage<Architecture>(target, "architecture.json");
@@ -718,8 +721,8 @@ export async function main(argv: string[]): Promise<number> {
       console.log("🛑 refactor runs only on a PASSING build — gate it (and fix/escalate) first.");
       return 1;
     }
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = providerOf();
+    const model = modelForStage("refactor");
     const config = { provider, model };
     console.log("refactor-phase: score quality → refactor (behavior-preserving) → re-verify, revert on break …");
     const result = await refactorPhase(target, {
@@ -746,8 +749,8 @@ export async function main(argv: string[]): Promise<number> {
       console.log("🛑 polish runs only on a PASSING build — gate it (and fix/escalate) first.");
       return 1;
     }
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = providerOf();
+    const model = modelForStage("polish");
     console.log("art-director: polishing the visual design → re-verify, revert if it breaks the build …");
     const result = await refactorPhase(target, {
       scorer: artDirectorScorer(),
@@ -955,8 +958,8 @@ export async function main(argv: string[]): Promise<number> {
       console.error("no feature list in .vibehard/spec.json — build the app first.");
       return 2;
     }
-    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = providerOf();
+    const model = modelForStage("functest");
     console.log(`functional review: checking the app implements ${features.length} feature(s) …`);
     const checks = await llmFunctionalReviewer({ config: { provider, model } })(features, target);
     if (!checks.length) {
