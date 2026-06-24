@@ -15,6 +15,7 @@ import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { designBlock } from "./design/presets.ts";
+import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -705,6 +706,34 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (cmd === "polish") {
+    if (!arg) {
+      console.error("usage: vibehard polish <dir>   (art-director pass: improve the visual design, revert if it breaks)");
+      return 2;
+    }
+    const target = resolve(arg);
+    // Polish a PASSING build only — restyling presupposes a correct, shippable starting point (§22).
+    const pre = await runGate(target);
+    if (!pre.passed) {
+      console.log("🛑 polish runs only on a PASSING build — gate it (and fix/escalate) first.");
+      return 1;
+    }
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    console.log("art-director: polishing the visual design → re-verify, revert if it breaks the build …");
+    const result = await refactorPhase(target, {
+      scorer: artDirectorScorer(),
+      refactorer: artDirectorRefactorer({ config: { provider, model } }),
+      verify: (ws) => runGate(ws).then((r) => r.passed), // the deterministic disposer: must still pass ALL gates
+      checkpoint: fileCheckpointer,
+      budget: 1, // one focused pass
+      onStep: (m) => console.log(`  … ${m}`),
+    });
+    for (const l of result.log) console.log(`  ${l}`);
+    console.log(result.accepted ? "\n✨ design polished — and it still passes every gate." : "\n↩️  polish reverted — it would have broken the build; your app is unchanged.");
+    return 0;
+  }
+
   if (cmd === "queue") {
     const state = arg as TicketState | undefined; // optional filter: needs-human | claimed | resolved
     const tickets = await localSink().list(state);
@@ -1017,6 +1046,7 @@ export async function main(argv: string[]): Promise<number> {
       "  vibehard fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
       '  vibehard refine <dir> "<change>"   iterate: apply a change, re-gate, revert if it breaks a passing build (§22)',
       "  vibehard refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
+      "  vibehard polish <dir>               art-director pass: improve the visual design on a passing build; revert if it breaks (#12)",
       "  vibehard research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
       "  vibehard escalate <dir>             localize blocking findings into a routed review packet + queue it",
       "  vibehard queue [state]              list held escalations (needs-human | claimed | resolved)",
