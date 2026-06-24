@@ -11,6 +11,7 @@
  * OPTIONAL + fail-safe: any error → done, so a build never blocks on the interview.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import type { EngineConfig } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
 import { tryExtractJsonObject } from "./coerce.ts";
@@ -105,11 +106,9 @@ function renderHistory(prompt: string, history: InterviewTurn[]): string {
 /** The live interviewer — one model call per question. */
 export function llmInterviewer(opts: InterviewerOptions = {}): Interviewer {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
-  const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-  // The interview is user-facing and short — default to the CAPABLE model (not the fast build model)
-  // for reliable, well-branched questions. Override with VIBEHARD_INTAKE_MODEL.
-  const model = process.env.VIBEHARD_INTAKE_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
-  const config: EngineConfig = opts.config ?? { provider, model };
+  // The interview is user-facing and short — uses the "intake" stage model (a capable reasoning
+  // model by default, not the fast build model). Override with VIBEHARD_MODEL_INTAKE.
+  const config: EngineConfig = opts.config ?? configForStage("intake");
   return async (prompt: string, history: InterviewTurn[]) => {
     try {
       const { text } = await generateText({ model: modelFactory(config), system: INTERVIEW_SYSTEM_PROMPT, prompt: renderHistory(prompt, history), maxOutputTokens: 4000, abortSignal: AbortSignal.timeout(20_000) });

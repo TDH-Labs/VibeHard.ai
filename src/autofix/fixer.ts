@@ -13,6 +13,7 @@ import { join, relative } from "node:path";
 import { VIBEHARD_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT } from "../engine/bolt/prompt.ts";
 import type { EngineConfig, Finding, GateVerdict } from "../types.ts";
 import { isBlocking } from "../types.ts";
+import { configForStage } from "../config/models.ts";
 import { BoltEngine } from "../engine/bolt/engine.ts";
 import { liveBoltDriver, type ModelFactory } from "../engine/bolt/driver.ts";
 import { translateFinding } from "../translate/index.ts";
@@ -91,11 +92,7 @@ function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped:
 
 /** The production fixer: deterministic dep-bumps + an LLM pass for the rest. */
 export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
-  const config: EngineConfig =
-    opts.config ??
-    (process.env.OPENCODE_API_KEY
-      ? { provider: "opencode", model: "deepseek-v4-pro" }
-      : { provider: "anthropic", model: "claude-opus-4-8" });
+  const config: EngineConfig = opts.config ?? configForStage("fix"); // strong CODE model — fixing is code-critical
   const cap = opts.sourceCap ?? 60_000;
 
   return async (workspacePath, verdicts) => {

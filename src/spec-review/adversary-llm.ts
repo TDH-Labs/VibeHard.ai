@@ -10,6 +10,7 @@
  * reduces risk, it doesn't eliminate it. The human stays the ultimate front-half judge.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import type { EngineConfig, Finding } from "../types.ts";
 import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
@@ -51,7 +52,7 @@ export function llmAdversary(opts: LlmAdversaryOptions = {}): Adversary {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   const config: EngineConfig =
     opts.config ??
-    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+    configForStage("review");
 
   return async (bundle: FrontHalfBundle) => {
     const summary = {

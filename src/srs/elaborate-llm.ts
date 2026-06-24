@@ -7,6 +7,7 @@
  * invents platform facts). The deterministic `reviewSrs` decides "ready", not the model.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
@@ -65,7 +66,7 @@ export function llmSpecifier(opts: LlmSpecifierOptions = {}): Specifier {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   const config: EngineConfig =
     opts.config ??
-    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+    configForStage("srs");
 
   return async (prd, prior) => {
     const prdView = {

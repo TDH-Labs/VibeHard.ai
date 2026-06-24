@@ -9,6 +9,7 @@
  * + topological build order are ours.
  */
 import { generateText } from "ai";
+import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
@@ -54,7 +55,7 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   const config: EngineConfig =
     opts.config ??
-    (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
+    configForStage("sad");
 
   return async (prd: Prd, prior, srs?: Srs) => {
     const summary = {
