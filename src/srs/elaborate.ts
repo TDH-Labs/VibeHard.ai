@@ -33,7 +33,7 @@ export async function elaborateSrs(prd: Prd, opts: SpecifyOptions): Promise<Spec
   let gaps = reviewSrs(srs);
   let rounds = 1;
   while (gaps.some(isBlocking) && rounds < budget) {
-    opts.onStep?.(`round ${rounds}: ${gaps.filter(isBlocking).length} SRS gap(s) — re-specifying`);
+    opts.onStep?.(`refining the technical spec — ${gaps.filter(isBlocking).length} detail(s) the reviewer wants firmed up; rewriting (pass ${rounds} of up to ${budget})`);
     srs = assembleSrs(prd, await opts.specifier(prd, { srs, gaps }));
     gaps = reviewSrs(srs);
     rounds++;

@@ -35,7 +35,7 @@ export async function architectApp(prd: Prd, opts: ArchitectOptions): Promise<Ar
   let gaps = reviewArchitecture(arch);
   let rounds = 1;
   while (gaps.some(isBlocking) && rounds < budget) {
-    opts.onStep?.(`round ${rounds}: ${gaps.filter(isBlocking).length} architecture gap(s) — redesigning`);
+    opts.onStep?.(`refining the design — ${gaps.filter(isBlocking).length} thing(s) the checks want resolved; redrawing (pass ${rounds} of up to ${budget})`);
     arch = await opts.architect(prd, { arch, gaps }, opts.srs);
     gaps = reviewArchitecture(arch);
     rounds++;

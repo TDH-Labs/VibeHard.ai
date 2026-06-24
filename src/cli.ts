@@ -84,6 +84,18 @@ function persistSad(target: string, arch: Architecture): void {
   writeFileSync(join(target, "SAD.md"), renderSadMarkdown(arch));
 }
 
+/** Resume support: load a stage's saved artifact (.drydock/<file>) so a re-run skips work it
+ *  already finished. A stopped/paused build continues where it left off — no re-spend. */
+function loadStage<T>(target: string, file: string): T | null {
+  const p = join(target, ".drydock", file);
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
 const DISPOSITION_LABEL: Record<Advisory["disposition"], string> = {
   "adopt-oss": "✅ ADOPT open-source",
   "buy-service": "💳 BUY a service",
@@ -398,98 +410,126 @@ export async function main(argv: string[]): Promise<number> {
     const config = { provider, model };
     const onStep = (m: string) => console.log(`  … ${m}`);
 
-    // The full pipeline (§22 front-half → back-half). Each front-half stage's
-    // deterministic review must pass before the next; a blocking gap refuses to
-    // proceed — we never build (or fix) an underspecified app.
+    // The full pipeline (§22 front-half → back-half). RESUMABLE: every finished stage's artifact
+    // is loaded from .drydock/ on a re-run, so a stopped/paused build continues where it left off
+    // (no re-spend). Each front-half stage's deterministic review must still pass before the next.
+    if (existsSync(join(target, ".drydock", "spec.json"))) {
+      console.log("↻ resuming this build — finished stages load from saved work instead of re-running.\n");
+    }
 
     // 1. intake → spec
-    console.log(`planning with ${provider}/${model} …`);
-    const plan = await planIntake(promptText, { intake: llmIntake({ config }), onStep });
-    printSpec(plan.spec);
-    console.log(`   rigor: ${decideRigor(plan.spec)} (§16 adaptive)`);
-    for (const f of plan.gaps.filter((g) => !isBlocking(g))) explainFinding(f);
-    if (!plan.ready) {
-      console.log("\n🛑 spec not ready — clarify and retry:");
-      for (const f of plan.gaps.filter(isBlocking)) explainFinding(f);
-      return 1;
-    }
-    persistSpec(target, plan.spec); // durable classification for the compliance gate (§21)
-
-    // 2. spec → PRD — a Principal-PM document (one-pager, personas, scenarios, scoped +
-    //    prioritised features with acceptance criteria, success metrics, risks). NFRs +
-    //    buy-vs-build are DERIVED (§11). Persisted as PRD.md for the operator + reviewer.
-    console.log("\n── elaborating the PRD … ──");
-    const prdRes = await elaboratePrd(plan.spec, { elaborator: llmElaborator({ config }), onStep });
-    const prd = prdRes.prd;
-    console.log(
-      `   ${prd.requirements.length} feature(s) (${prd.requirements.filter((r) => r.priority === "MVP").length} MVP) · ${prd.objectives.length} objective(s) · ${prd.personas.length} persona(s) · ${prd.scenarios.length} scenario(s) · ${prd.successMetrics.length} metric(s) · ${prd.nfrs.length} security NFR(s)`,
-    );
-    for (const b of prd.buyVsBuild) console.log(`   💡 buy-vs-build: ${b.category} → consider ${b.service} (advisory)`);
-    for (const f of prdRes.gaps.filter((g) => !isBlocking(g))) explainFinding(f); // advisory PM-quality nudges
-    if (!prdRes.ready) {
-      console.log("\n🛑 PRD not complete:");
-      for (const f of prdRes.gaps.filter(isBlocking)) explainFinding(f);
-      return 1;
-    }
-    persistPrd(target, prd);
-    console.log(`   📄 PRD written → ${join(target, "PRD.md")}`);
-
-    // 3. PRD → SRS — a Principal-Systems-Architect document (strict per-module I/O specs,
-    //    quantified NFRs, flagged unknowns). The operating environment, security posture, and
-    //    compliance are DERIVED from the substrate (§11 — platform facts, not model guesses).
-    //    Gated, persisted as SRS.md, and fed into architecture.
-    console.log("\n── specifying (SRS) … ──");
-    const srsRes = await elaborateSrs(prd, { specifier: llmSpecifier({ config }), onStep });
-    const srs = srsRes.srs;
-    console.log(
-      `   ${srs.functionalRequirements.length} functional requirement(s) · ${srs.apiInterfaces.length} interface(s) · ${srs.openIssues.length} open issue(s) flagged`,
-    );
-    for (const f of srsRes.gaps.filter((g) => !isBlocking(g))) explainFinding(f); // advisory rigor nudges
-    if (!srsRes.ready) {
-      console.log("\n🛑 SRS not complete:");
-      for (const f of srsRes.gaps.filter(isBlocking)) explainFinding(f);
-      return 1;
-    }
-    persistSrs(target, srs);
-    console.log(`   📄 SRS written → ${join(target, "SRS.md")}`);
-
-    // 4. SRS → architecture (workstream dependency graph, designed against the SRS)
-    console.log("\n── architecting … ──");
-    const archRes = await architectApp(prd, { architect: llmArchitect({ config }), srs, onStep });
-    if (!archRes.ready) {
-      console.log("\n🛑 architecture not buildable:");
-      for (const f of archRes.gaps.filter(isBlocking)) explainFinding(f);
-      return 1;
-    }
-    const tiers = buildOrder(archRes.arch);
-    console.log(`   ${archRes.arch.stack} · ${archRes.arch.workstreams.length} workstream(s) in ${tiers.length} tier(s): ${tiers.map((t) => t.map((w) => w.name).join("+")).join(" → ")}`);
-    persistSad(target, archRes.arch);
-    console.log(`   📄 SAD written → ${join(target, "SAD.md")}`);
-
-    // 3b. Adversarial review of the PLAN before codegen: deterministic spec↔PRD↔arch
-    //     cross-checks (can block) + an LLM red-team (advisory; serious findings flagged
-    //     for a human). The red-team runs at production rigor only (§16). §11: only the
-    //     deterministic cross-checks block — the LLM never auto-blocks the plan.
-    console.log("\n── reviewing the plan (adversarial) … ──");
-    const review = await reviewFrontHalf(
-      { spec: plan.spec, prd: prdRes.prd, architecture: archRes.arch },
-      { adversary: decideRigor(plan.spec) === "production" ? llmAdversary({ config }) : undefined },
-    );
-    for (const fdg of [...review.crossChecks, ...review.adversarial]) explainFinding(fdg);
-    if (review.blocked) {
-      console.log("\n🛑 the plan is internally inconsistent — fix the spec / PRD / architecture before building.");
-      return 1;
-    }
-    if (review.needsHuman.length) {
-      console.log(`\n⚠️  ${review.needsHuman.length} risk(s) a reviewer should weigh (advisory — not blocking the build).`);
+    let spec = loadStage<Spec>(target, "spec.json");
+    if (spec) {
+      console.log(`✓ spec — restored from saved work (${spec.features.length} feature(s))`);
+    } else {
+      console.log(`planning with ${provider}/${model} …`);
+      const plan = await planIntake(promptText, { intake: llmIntake({ config }), onStep });
+      printSpec(plan.spec);
+      console.log(`   rigor: ${decideRigor(plan.spec)} (§16 adaptive)`);
+      for (const f of plan.gaps.filter((g) => !isBlocking(g))) explainFinding(f);
+      if (!plan.ready) {
+        console.log("\n🛑 spec not ready — clarify and retry:");
+        for (const f of plan.gaps.filter(isBlocking)) explainFinding(f);
+        return 1;
+      }
+      persistSpec(target, plan.spec); // durable classification for the compliance gate (§21)
+      spec = plan.spec;
     }
 
-    // 4. build each workstream from the plan, in dependency order
-    console.log(`\n── building → ${target} ──`);
-    if (!(await buildFromArchitecture(target, archRes.arch, provider, model))) return 1;
+    // 2. spec → PRD — a Principal-PM document (one-pager, personas, scenarios, scoped + prioritised
+    //    features with acceptance criteria, metrics, risks). NFRs + buy-vs-build are DERIVED (§11).
+    let prd = loadStage<Prd>(target, "prd.json");
+    if (prd) {
+      console.log(`✓ product requirements (PRD) — restored from saved work (${prd.requirements.length} feature(s))`);
+    } else {
+      console.log("\n── writing the product requirements (PRD) … ──");
+      const prdRes = await elaboratePrd(spec, { elaborator: llmElaborator({ config }), onStep });
+      prd = prdRes.prd;
+      console.log(
+        `   ${prd.requirements.length} feature(s) (${prd.requirements.filter((r) => r.priority === "MVP").length} MVP) · ${prd.objectives.length} objective(s) · ${prd.personas.length} persona(s) · ${prd.scenarios.length} scenario(s) · ${prd.successMetrics.length} metric(s) · ${prd.nfrs.length} security NFR(s)`,
+      );
+      for (const b of prd.buyVsBuild) console.log(`   💡 buy-vs-build: ${b.category} → consider ${b.service} (advisory)`);
+      for (const f of prdRes.gaps.filter((g) => !isBlocking(g))) explainFinding(f); // advisory PM-quality nudges
+      if (!prdRes.ready) {
+        console.log("\n🛑 PRD not complete:");
+        for (const f of prdRes.gaps.filter(isBlocking)) explainFinding(f);
+        return 1;
+      }
+      persistPrd(target, prd);
+      console.log(`   📄 PRD written → ${join(target, "PRD.md")}`);
+    }
 
-    // 5. back-half: gate → auto-fix → hold-for-review
-    console.log("\n── gating + auto-fixing ──");
+    // 3. PRD → SRS — a Principal-Systems-Architect document (strict per-module I/O specs, quantified
+    //    NFRs, flagged unknowns). Operating env / security / compliance are DERIVED (§11).
+    let srs = loadStage<Srs>(target, "srs.json");
+    if (srs) {
+      console.log(`✓ technical spec (SRS) — restored from saved work (${srs.functionalRequirements.length} requirement(s))`);
+    } else {
+      console.log("\n── detailing the technical spec (SRS) … ──");
+      const srsRes = await elaborateSrs(prd, { specifier: llmSpecifier({ config }), onStep });
+      srs = srsRes.srs;
+      console.log(
+        `   ${srs.functionalRequirements.length} functional requirement(s) · ${srs.apiInterfaces.length} interface(s) · ${srs.openIssues.length} open issue(s) flagged`,
+      );
+      for (const f of srsRes.gaps.filter((g) => !isBlocking(g))) explainFinding(f); // advisory rigor nudges
+      if (!srsRes.ready) {
+        console.log("\n🛑 SRS not complete:");
+        for (const f of srsRes.gaps.filter(isBlocking)) explainFinding(f);
+        return 1;
+      }
+      persistSrs(target, srs);
+      console.log(`   📄 SRS written → ${join(target, "SRS.md")}`);
+    }
+
+    // 4. SRS → architecture / SAD (workstream dependency graph, designed against the SRS)
+    let arch = loadStage<Architecture>(target, "architecture.json");
+    if (arch) {
+      arch = { ...arch, prd, srs }; // re-attach the prd/srs stripped on persist
+      console.log(`✓ architecture (SAD) — restored from saved work (${arch.workstreams.length} component(s))`);
+    } else {
+      console.log("\n── designing the architecture (SAD) … ──");
+      const archRes = await architectApp(prd, { architect: llmArchitect({ config }), srs, onStep });
+      if (!archRes.ready) {
+        console.log("\n🛑 architecture not buildable:");
+        for (const f of archRes.gaps.filter(isBlocking)) explainFinding(f);
+        return 1;
+      }
+      arch = archRes.arch;
+      const tiers = buildOrder(arch);
+      console.log(`   ${arch.stack} · ${arch.workstreams.length} workstream(s) in ${tiers.length} tier(s): ${tiers.map((t) => t.map((w) => w.name).join("+")).join(" → ")}`);
+      persistSad(target, arch);
+      console.log(`   📄 SAD written → ${join(target, "SAD.md")}`);
+    }
+
+    // 5. adversarial plan review + codegen — skipped together once the code has been generated.
+    const builtMarker = join(target, ".drydock", "built.json");
+    if (existsSync(builtMarker)) {
+      console.log("✓ generated code — restored from saved work");
+    } else {
+      // Adversarial review of the PLAN before codegen: deterministic cross-checks (can block) +
+      // an LLM red-team (advisory; serious findings flagged for a human; production rigor only).
+      console.log("\n── reviewing the plan for risks (adversarial) … ──");
+      const review = await reviewFrontHalf(
+        { spec, prd, architecture: arch },
+        { adversary: decideRigor(spec) === "production" ? llmAdversary({ config }) : undefined },
+      );
+      for (const fdg of [...review.crossChecks, ...review.adversarial]) explainFinding(fdg);
+      if (review.blocked) {
+        console.log("\n🛑 the plan is internally inconsistent — fix the spec / PRD / architecture before building.");
+        return 1;
+      }
+      if (review.needsHuman.length) {
+        console.log(`\n⚠️  ${review.needsHuman.length} risk(s) a reviewer should weigh (advisory — not blocking the build).`);
+      }
+
+      // Build each component from the plan, in dependency order.
+      console.log(`\n── writing the code → ${target} ──`);
+      if (!(await buildFromArchitecture(target, arch, provider, model))) return 1;
+      writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
+    }
+
+    // 6. back-half: security checks (gates) → auto-fix → hold-for-review (always run — the verifier)
+    console.log("\n── running the security checks (gates) + auto-fixing … ──");
     return runAutoFixAndReport(target);
   }
 

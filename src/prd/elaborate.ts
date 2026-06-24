@@ -34,7 +34,7 @@ export async function elaboratePrd(spec: Spec, opts: ElaborateOptions): Promise<
   let gaps = reviewPrd(prd);
   let rounds = 1;
   while (gaps.some(isBlocking) && rounds < budget) {
-    opts.onStep?.(`round ${rounds}: ${gaps.filter(isBlocking).length} PRD gap(s) — elaborating`);
+    opts.onStep?.(`refining the requirements — ${gaps.filter(isBlocking).length} detail(s) the reviewer wants firmed up; rewriting (pass ${rounds} of up to ${budget})`);
     prd = assemblePrd(spec, await opts.elaborator(spec, { prd, gaps }));
     gaps = reviewPrd(prd);
     rounds++;
