@@ -214,6 +214,32 @@ async function gateAndReport(target: string): Promise<boolean> {
  *  tier are independent (buildOrder guarantees it), so they run concurrently, capped by
  *  VIBEHARD_CODEGEN_CONCURRENCY (default 4) so the fan-out never overruns provider limits. Each
  *  workstream is a scoped engine pass that accumulates files into `target`. */
+/** Deterministic layout safety net: codegen sometimes points the `@/*` import alias at `./src/*`
+ *  while placing files at the root (or vice versa), which makes every `@/...` import fail to
+ *  resolve and BLOCKS the build. Correct the alias to wherever the source actually lives. */
+function normalizeLayout(target: string): void {
+  const tscPath = join(target, "tsconfig.json");
+  if (!existsSync(tscPath)) return;
+  try {
+    const j = JSON.parse(readFileSync(tscPath, "utf8")) as { compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> } };
+    const rootHasSrc = ["components", "app", "lib"].some((d) => existsSync(join(target, d)));
+    const underSrc = ["components", "app", "lib"].some((d) => existsSync(join(target, "src", d)));
+    let want: string | null = null;
+    if (rootHasSrc && !underSrc) want = "./*";
+    else if (underSrc && !rootHasSrc) want = "./src/*";
+    if (!want) return; // mixed/unknown → leave it for the gate to flag
+    const opts = (j.compilerOptions ??= {});
+    const paths = (opts.paths ??= {});
+    if ((Array.isArray(paths["@/*"]) ? paths["@/*"][0] : undefined) === want) return;
+    paths["@/*"] = [want];
+    opts.baseUrl ??= ".";
+    writeFileSync(tscPath, JSON.stringify(j, null, 2));
+    console.log(`  ▸ layout: fixed the @/* import alias → ${want} (matches where the files are)`);
+  } catch {
+    /* unparseable tsconfig → leave it; the verify gate will still catch a real break */
+  }
+}
+
 async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
   // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
   // prompt; else the TS/Supabase one). VIBEHARD_LANG=python forces it, for deliberately
@@ -589,6 +615,7 @@ export async function main(argv: string[]): Promise<number> {
       // Build each component from the plan, in dependency order.
       console.log(`\n── writing the code → ${target} ──`);
       if (!(await buildFromArchitecture(target, arch, provider, model))) return 1;
+      normalizeLayout(target); // deterministic safety net: make the @/* alias match where files live
       writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
     }
 
