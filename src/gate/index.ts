@@ -13,6 +13,7 @@ import { secretsGate } from "./secrets.ts";
 import { depvulnGate } from "./depvuln.ts";
 import { rlsGate } from "./rls.ts";
 import { complianceGate } from "./compliance.ts";
+import { piiGate } from "./pii.ts";
 import { prodReadinessGate } from "./prod-readiness.ts";
 import { verifyGate } from "./verify.ts";
 
@@ -21,7 +22,7 @@ import { verifyGate } from "./verify.ts";
  *  of the source scans (§11, §19). compliance and prod-readiness are
  *  classification/rigor-driven: a no-op unless the app's spec was persisted by the
  *  front-half, so they never fire on a project that didn't go through it. */
-export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, prodReadinessGate, verifyGate];
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, piiGate, prodReadinessGate, verifyGate];
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";

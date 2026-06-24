@@ -24,6 +24,17 @@ export interface Entry {
 
 /** Exact matches — keyed by the ruleId (or a distinctive substring of it). */
 export const EXACT: Record<string, Entry> = {
+  // ── our pii gate ────────────────────────────────────────────────────────
+  "pii-in-logs": {
+    title: "Personal data is being written to the logs",
+    detail:
+      "The app logs a personal detail (like an email, phone, or SSN). Logs are routinely copied to other systems and kept unprotected, so this can leak that data. We log an identifier instead of the value, or redact it, before this can ship.",
+  },
+  "pii-in-url": {
+    title: "Personal data is travelling in the web address",
+    detail:
+      "The app reads a personal detail out of the URL / query string. Web addresses are recorded by servers, proxies, and browser history, so sensitive data there can leak. We move it into the request body instead.",
+  },
   // ── our rls gate ────────────────────────────────────────────────────────
   "rls-disabled": {
     title: "Anyone on the internet could read this table's data",

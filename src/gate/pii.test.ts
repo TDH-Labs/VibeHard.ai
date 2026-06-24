@@ -1,0 +1,63 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runPii, scanPii } from "./pii.ts";
+
+const ids = (code: string): string[] => scanPii([{ rel: "app.ts", code }]).map((f) => f.ruleId);
+
+describe("scanPii — flags real PII leaks", () => {
+  test("PII written to logs via property access or interpolation", () => {
+    expect(ids("console.log(user.email)")).toContain("pii-in-logs");
+    expect(ids("logger.info(`reset link for ${user.ssn}`)")).toContain("pii-in-logs");
+    expect(ids("console.error('save failed', patient.diagnosis)")).toContain("pii-in-logs");
+    expect(ids('print(f"sending to {customer.phone}")')).toContain("pii-in-logs");
+  });
+  test("PII read from a URL / query string", () => {
+    expect(ids("const e = req.query.email;")).toContain("pii-in-url");
+    expect(ids('const s = url.searchParams.get("ssn");')).toContain("pii-in-url");
+    expect(ids('phone = request.args.get("phone")')).toContain("pii-in-url");
+  });
+  test("every finding is high severity (→ blocking)", () => {
+    expect(scanPii([{ rel: "a.ts", code: "console.log(user.email)" }]).every((f) => f.severity === "high")).toBe(true);
+  });
+});
+
+describe("scanPii — precision (does NOT flag labels / non-PII)", () => {
+  test("quoted labels and non-PII logs are ignored", () => {
+    expect(ids('console.log("email sent to the user")')).toEqual([]);
+    expect(ids('console.log("password reset requested")')).toEqual([]);
+    expect(ids("console.log(order.total, items.length)")).toEqual([]);
+    expect(ids("const emailSent = true; // not logged")).toEqual([]);
+    expect(ids("// remember to email the user")).toEqual([]);
+  });
+});
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+function appDir(sensitive: boolean, code: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "pii-gate-"));
+  dirs.push(dir);
+  mkdirSync(join(dir, ".vibehard"), { recursive: true });
+  writeFileSync(join(dir, ".vibehard", "spec.json"), JSON.stringify({ name: "x", sensitiveData: sensitive ? ["pii"] : ["none"], dataEntities: [] }));
+  writeFileSync(join(dir, "app.ts"), code);
+  return dir;
+}
+
+describe("runPii — classification-driven", () => {
+  test("a SENSITIVE app that logs PII → BLOCK", async () => {
+    const v = await runPii(appDir(true, "console.log(user.email)"), "t");
+    expect(v.status).toBe("block");
+    expect(v.blocking).toBeGreaterThan(0);
+  });
+  test("a NON-sensitive app → PASS (no-op even with a PII log)", async () => {
+    const v = await runPii(appDir(false, "console.log(user.email)"), "t");
+    expect(v.status).toBe("pass");
+  });
+  test("a sensitive app with no PII leak → PASS", async () => {
+    const v = await runPii(appDir(true, "console.log('app started'); const id = req.query.id;"), "t");
+    expect(v.status).toBe("pass");
+  });
+});
