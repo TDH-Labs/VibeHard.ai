@@ -20,9 +20,13 @@ function spec(over: Partial<Spec> = {}): Spec {
     ...over,
   };
 }
-const req = (feature: string): Requirement => ({ feature, detail: "d", acceptance: ["x"] });
+const req = (feature: string): Requirement => ({ id: feature, feature, detail: "d", acceptance: ["x"], priority: "MVP", scenarioRefs: [] });
 function prd(over: Partial<Prd> = {}): Prd {
-  return { spec: spec(), requirements: [req("sign in"), req("create note")], nfrs: ["secure"], buyVsBuild: [], ...over };
+  return {
+    spec: spec(), status: "in-review", title: "PRD", overview: "", problemStatement: "", objectives: [],
+    constraints: [], personas: [], scenarios: [], requirements: [req("sign in"), req("create note")],
+    outOfScope: [], successMetrics: [], risks: [], openQuestions: [], nfrs: ["secure"], buyVsBuild: [], ...over,
+  };
 }
 const ws = (name: string, files: string[], responsibility = name): Workstream => ({ name, responsibility, files, dependsOn: [] });
 function arch(over: Partial<Architecture> = {}): Architecture {

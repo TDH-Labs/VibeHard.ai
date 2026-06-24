@@ -8,9 +8,13 @@ import type { Architecture, Workstream } from "../architecture/index.ts";
 function spec(over: Partial<Spec> = {}): Spec {
   return { name: "app", summary: "", features: ["sign in", "create note"], users: "", tenancy: "multi-tenant", auth: "email-password", storesData: true, dataEntities: [{ name: "notes", fields: ["id"], sensitive: true }], sensitiveData: ["pii"], realUsers: true, maintained: true, ...over };
 }
-const req = (feature: string): Requirement => ({ feature, detail: "d", acceptance: ["x"] });
+const req = (feature: string): Requirement => ({ id: feature, feature, detail: "d", acceptance: ["x"], priority: "MVP", scenarioRefs: [] });
 function prd(over: Partial<Prd> = {}): Prd {
-  return { spec: spec(), requirements: [req("sign in"), req("create note")], nfrs: ["secure"], buyVsBuild: [], ...over };
+  return {
+    spec: spec(), status: "in-review", title: "PRD", overview: "", problemStatement: "", objectives: [],
+    constraints: [], personas: [], scenarios: [], requirements: [req("sign in"), req("create note")],
+    outOfScope: [], successMetrics: [], risks: [], openQuestions: [], nfrs: ["secure"], buyVsBuild: [], ...over,
+  };
 }
 const ws = (name: string, files: string[], responsibility = name): Workstream => ({ name, responsibility, files, dependsOn: [] });
 const arch: Architecture = { prd: prd(), stack: "Next.js", workstreams: [ws("db", ["supabase/migrations/001.sql"], "schema + RLS"), ws("ui", ["ui.tsx"], "frontend")] };

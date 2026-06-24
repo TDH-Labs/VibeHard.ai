@@ -9,9 +9,11 @@
 import type { Finding } from "../types.ts";
 import { isBlocking } from "../types.ts";
 import type { Spec } from "../spec/index.ts";
-import { assemblePrd, reviewPrd, type Prd, type Requirement } from "./prd.ts";
+import { assemblePrd, reviewPrd, type Prd, type PrdDraft } from "./prd.ts";
 
-export type Elaborator = (spec: Spec, prior: { prd: Prd; gaps: Finding[] } | null) => Promise<Requirement[]>;
+/** An Elaborator PROPOSES the full PRD draft (strategic + functional content); the loop
+ *  assembles it with the DERIVED security/procurement halves and grills it via reviewPrd. */
+export type Elaborator = (spec: Spec, prior: { prd: Prd; gaps: Finding[] } | null) => Promise<PrdDraft>;
 
 export interface ElaborateResult {
   prd: Prd;

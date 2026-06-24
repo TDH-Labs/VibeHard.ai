@@ -14,7 +14,7 @@ import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.t
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
-import { elaboratePrd, llmElaborator } from "./prd/index.ts";
+import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
 import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
@@ -53,6 +53,15 @@ function persistSpec(target: string, spec: Spec): void {
   const dir = join(target, ".drydock");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "spec.json"), JSON.stringify(spec, null, 2));
+}
+
+/** Persist the PRD: PRD.md (the readable Principal-PM document the operator + reviewer read)
+ *  + .drydock/prd.json (structured, for tooling). The front-half's richest durable output. */
+function persistPrd(target: string, prd: Prd): void {
+  const dir = join(target, ".drydock");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "prd.json"), JSON.stringify(prd, null, 2));
+  writeFileSync(join(target, "PRD.md"), renderPrdMarkdown(prd));
 }
 
 const DISPOSITION_LABEL: Record<Advisory["disposition"], string> = {
@@ -386,16 +395,24 @@ export async function main(argv: string[]): Promise<number> {
     }
     persistSpec(target, plan.spec); // durable classification for the compliance gate (§21)
 
-    // 2. spec → PRD (requirements + acceptance criteria + NFRs + buy-vs-build)
+    // 2. spec → PRD — a Principal-PM document (one-pager, personas, scenarios, scoped +
+    //    prioritised features with acceptance criteria, success metrics, risks). NFRs +
+    //    buy-vs-build are DERIVED (§11). Persisted as PRD.md for the operator + reviewer.
     console.log("\n── elaborating the PRD … ──");
     const prdRes = await elaboratePrd(plan.spec, { elaborator: llmElaborator({ config }), onStep });
-    console.log(`   ${prdRes.prd.requirements.length} requirement(s), ${prdRes.prd.nfrs.length} security NFR(s)`);
-    for (const b of prdRes.prd.buyVsBuild) console.log(`   💡 buy-vs-build: ${b.category} → consider ${b.service} (advisory)`);
+    const prd = prdRes.prd;
+    console.log(
+      `   ${prd.requirements.length} feature(s) (${prd.requirements.filter((r) => r.priority === "MVP").length} MVP) · ${prd.objectives.length} objective(s) · ${prd.personas.length} persona(s) · ${prd.scenarios.length} scenario(s) · ${prd.successMetrics.length} metric(s) · ${prd.nfrs.length} security NFR(s)`,
+    );
+    for (const b of prd.buyVsBuild) console.log(`   💡 buy-vs-build: ${b.category} → consider ${b.service} (advisory)`);
+    for (const f of prdRes.gaps.filter((g) => !isBlocking(g))) explainFinding(f); // advisory PM-quality nudges
     if (!prdRes.ready) {
       console.log("\n🛑 PRD not complete:");
       for (const f of prdRes.gaps.filter(isBlocking)) explainFinding(f);
       return 1;
     }
+    persistPrd(target, prd);
+    console.log(`   📄 PRD written → ${join(target, "PRD.md")}`);
 
     // 3. PRD → architecture (workstream dependency graph)
     console.log("\n── architecting … ──");
