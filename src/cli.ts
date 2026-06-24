@@ -16,6 +16,7 @@ import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { designBlock } from "./design/presets.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
+import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -915,6 +916,36 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (cmd === "functest") {
+    if (!arg) {
+      console.error("usage: vibehard functest <dir>   (LLM QA: does the app implement the features you asked for?)");
+      return 2;
+    }
+    const target = resolve(arg);
+    const spec = loadStage<Spec>(target, "spec.json");
+    const features = spec?.features ?? [];
+    if (!features.length) {
+      console.error("no feature list in .vibehard/spec.json — build the app first.");
+      return 2;
+    }
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    console.log(`functional review: checking the app implements ${features.length} feature(s) …`);
+    const checks = await llmFunctionalReviewer({ config: { provider, model } })(features, target);
+    if (!checks.length) {
+      console.log("couldn't review (no readable app code).");
+      return 1;
+    }
+    const ICON: Record<string, string> = { works: "✅", partial: "🟠", missing: "🔴" };
+    for (const c of checks) {
+      console.log(`  ${ICON[c.status]} ${c.feature}`);
+      if (c.note) console.log(`     ${c.note}`);
+    }
+    const s = summarize(checks);
+    console.log(`\n${s.works}/${s.total} working · ${s.partial} partial · ${s.missing} missing  (advisory — not a gate)`);
+    return 0;
+  }
+
   if (cmd === "prod-scan") {
     if (!arg) {
       console.error("usage: vibehard prod-scan <path-to-app.jsonl>");
@@ -1047,6 +1078,7 @@ export async function main(argv: string[]): Promise<number> {
       '  vibehard refine <dir> "<change>"   iterate: apply a change, re-gate, revert if it breaks a passing build (§22)',
       "  vibehard refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
       "  vibehard polish <dir>               art-director pass: improve the visual design on a passing build; revert if it breaks (#12)",
+      "  vibehard functest <dir>             QA: does the built app implement the features you asked for? (works/partial/missing — advisory)",
       "  vibehard research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
       "  vibehard escalate <dir>             localize blocking findings into a routed review packet + queue it",
       "  vibehard queue [state]              list held escalations (needs-human | claimed | resolved)",
