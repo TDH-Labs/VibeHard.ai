@@ -7,7 +7,10 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
-import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type TicketState } from "./escalation/index.ts";
+import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
+import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
+import { SPECIALTIES } from "./escalation/routing.ts";
+import { FileReviewerStore, makeReviewer, matchesPacket, parseSpecialties } from "./reviewer/reviewer.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
@@ -47,6 +50,15 @@ function queuePath(): string {
 }
 function localSink(): LocalEscalationSink {
   return new LocalEscalationSink(queuePath());
+}
+function reviewerStore(): FileReviewerStore {
+  return new FileReviewerStore(process.env.DRYDOCK_REVIEWERS_DIR ?? join(homedir(), ".drydock", "reviewers"));
+}
+/** Slack ping when a packet is queued, iff a webhook is configured; else a silent no-op.
+ *  Best-effort by contract (notifyOpened never throws) — a Slack outage never loses a ticket. */
+function notifier(): Notifier {
+  const url = process.env.DRYDOCK_SLACK_WEBHOOK;
+  return url ? slackNotifier(url) : nullNotifier;
 }
 
 /** Persist the spec into the project (.drydock/spec.json) so the compliance gate
@@ -229,6 +241,7 @@ async function runAutoFixAndReport(target: string): Promise<number> {
   console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
   if (result.escalation) {
     const ticket = await localSink().open(result.escalation);
+    await notifier().notifyOpened(ticket); // best-effort reviewer ping
     console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
     console.log(`   queued at ${queuePath()} — list with: drydock queue`);
   }
@@ -680,6 +693,150 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (cmd === "reviewer") {
+    const [, sub, ...rest] = argv;
+    const store = reviewerStore();
+    if (sub === "signup") {
+      const name = rest[0];
+      if (!name) {
+        console.error(`usage: drydock reviewer signup "<name>" [${SPECIALTIES.join("|")} …]`);
+        return 2;
+      }
+      const { specialties, invalid } = parseSpecialties(rest.slice(1));
+      if (invalid.length) {
+        console.error(`unknown specialt${invalid.length > 1 ? "ies" : "y"}: ${invalid.join(", ")} — choose from ${SPECIALTIES.join(", ")}`);
+        return 2;
+      }
+      const reviewer = makeReviewer(name, specialties, new Date().toISOString());
+      try {
+        store.create(reviewer);
+      } catch (e) {
+        console.error(`${e instanceof Error ? e.message : e}`);
+        return 1;
+      }
+      console.log(`✅ reviewer registered: ${reviewer.id} — specialties: ${reviewer.specialties.join(", ")}`);
+      console.log("   they'll be pinged when a packet routes to them (set DRYDOCK_SLACK_WEBHOOK to enable Slack).");
+      return 0;
+    }
+    if (sub === "list" || sub === undefined) {
+      const all = store.list();
+      if (!all.length) {
+        console.log('no reviewers yet — drydock reviewer signup "<name>" <specialty…>');
+        return 0;
+      }
+      console.log(`${all.length} reviewer(s):`);
+      for (const r of all) console.log(`  ${r.id}  [${r.status}] — ${r.specialties.join(", ")}`);
+      return 0;
+    }
+    console.error("usage: drydock reviewer <signup|list>");
+    return 2;
+  }
+
+  if (cmd === "claim") {
+    const [, ticketId, reviewerId] = argv;
+    if (!ticketId || !reviewerId) {
+      console.error("usage: drydock claim <ticket-id> <reviewer-id>");
+      return 2;
+    }
+    const sink = localSink();
+    const ticket = await sink.get(ticketId);
+    if (!ticket) {
+      console.error(`no such ticket: ${ticketId} — list with: drydock queue`);
+      return 1;
+    }
+    const reviewer = reviewerStore().get(reviewerId);
+    if (!reviewer) {
+      console.error(`no such reviewer: ${reviewerId} — register with: drydock reviewer signup`);
+      return 1;
+    }
+    // The routing moat: only a reviewer qualified for the packet's specialties may take it.
+    if (!matchesPacket(reviewer, ticket.packet)) {
+      console.error(`🛑 ${reviewer.id} (${reviewer.specialties.join(", ")}) is not qualified for this packet — it needs: ${ticket.packet.specialties.join(", ")}`);
+      return 1;
+    }
+    try {
+      const claimed = await sink.claim(ticketId, reviewer.id);
+      console.log(`✅ ${claimed.id} claimed by ${reviewer.id} [${claimed.state}] — review it: drydock review ${claimed.id}`);
+      return 0;
+    } catch (e) {
+      console.error(`${e instanceof Error ? e.message : e}`);
+      return 1;
+    }
+  }
+
+  if (cmd === "review") {
+    const [, ticketId] = argv;
+    if (!ticketId) {
+      console.error("usage: drydock review <ticket-id>   (prints the scoped slice to judge)");
+      return 2;
+    }
+    const ticket = await localSink().get(ticketId);
+    if (!ticket) {
+      console.error(`no such ticket: ${ticketId} — list with: drydock queue`);
+      return 1;
+    }
+    console.log(`${ticket.id} [${ticket.state}]${ticket.claimedBy ? ` · claimed by ${ticket.claimedBy}` : ""}`);
+    console.log(`${ticket.packet.blocking} blocking · app: ${ticket.packet.workspacePath}`);
+    for (const item of ticket.packet.items) {
+      console.log(`\n── [${item.specialty}] ${item.finding.tool}:${item.finding.ruleId} — ${item.finding.message}`);
+      console.log(`   ref: ${item.ref}`);
+      if (item.slice) {
+        console.log(`   ${item.slice.file}:${item.slice.startLine}-${item.slice.endLine}`);
+        for (const line of item.slice.code.split("\n")) console.log(`   │ ${line}`);
+      } else {
+        console.log(`   (no slice — ${item.finding.file})`);
+      }
+    }
+    console.log(`\n   resolve: drydock resolve ${ticket.id} <approved|rejected|fixed> [justification]`);
+    return 0;
+  }
+
+  if (cmd === "resolve") {
+    const [, ticketId, verdictArg, ...justWords] = argv;
+    if (!ticketId || !verdictArg) {
+      console.error("usage: drydock resolve <ticket-id> <approved|rejected|fixed> [justification]");
+      return 2;
+    }
+    const verdict = verdictArg as ReviewVerdict;
+    if (!["approved", "rejected", "fixed"].includes(verdict)) {
+      console.error(`unknown verdict: ${verdictArg} — use approved | rejected | fixed`);
+      return 2;
+    }
+    const justification = justWords.join(" ").trim() || undefined;
+    // 'approved' downgrades a real finding to a waiver — it MUST carry a justification (audit + §11).
+    if (verdict === "approved" && !justification) {
+      console.error("🛑 'approved' requires a justification (it becomes an audited waiver): drydock resolve <id> approved <why>");
+      return 2;
+    }
+    const sink = localSink();
+    const ticket = await sink.get(ticketId);
+    if (!ticket) {
+      console.error(`no such ticket: ${ticketId}`);
+      return 1;
+    }
+    if (ticket.state !== "claimed" || !ticket.claimedBy) {
+      console.error(`cannot resolve ${ticketId}: state is ${ticket.state} (claim it first: drydock claim ${ticketId} <reviewer-id>)`);
+      return 1;
+    }
+    const now = new Date().toISOString();
+    const decisions: ReviewDecision[] = ticket.packet.items.map((item) => ({ ref: item.ref, verdict, reviewer: ticket.claimedBy!, justification, decidedAt: now }));
+    if (!decisions.length) {
+      console.error(`ticket ${ticketId} has no findings to decide`);
+      return 1;
+    }
+    try {
+      const resolved = await sink.resolve(ticketId, decisions);
+      console.log(`✅ ${resolved.id} resolved [${resolved.state}] — ${decisions.length} finding(s) marked '${verdict}' by ${ticket.claimedBy}`);
+      if (verdict === "approved") console.log("   → justified waiver(s) recorded; re-gate to lift the block (resume path).");
+      else if (verdict === "fixed") console.log("   → re-gate to confirm the fix (the gate, not the human, confirms 'fixed').");
+      else console.log("   → 'rejected' keeps the finding blocking — it stays until fixed.");
+      return 0;
+    } catch (e) {
+      console.error(`${e instanceof Error ? e.message : e}`);
+      return 1;
+    }
+  }
+
   if (cmd === "prod-scan") {
     if (!arg) {
       console.error("usage: drydock prod-scan <path-to-app.jsonl>");
@@ -776,6 +933,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     const packet = await buildEscalationPacket(result.verdicts, arg);
     const ticket = await localSink().open(packet); // hold + queue for async human review (§24)
+    await notifier().notifyOpened(ticket); // best-effort reviewer ping (Slack if DRYDOCK_SLACK_WEBHOOK set)
     console.log(`\n📦 escalation packet — ${packet.blocking} slice(s), routes: ${packet.specialties.join(", ")}`);
     console.log(`   held for review: ticket ${ticket.id} [${ticket.state}] — queued at ${queuePath()}`);
     for (const item of packet.items) {
@@ -812,6 +970,11 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",
       "  drydock queue [state]              list held escalations (needs-human | claimed | resolved)",
+      '  drydock reviewer signup "<name>" <specialty…>   register an SWE reviewer (security|database|reliability|general)',
+      "  drydock reviewer list             list registered reviewers",
+      "  drydock claim <ticket> <reviewer> claim a queued packet (refused unless the reviewer's specialty matches)",
+      "  drydock review <ticket>           print the scoped slice a reviewer judges",
+      "  drydock resolve <ticket> <approved|rejected|fixed> [why]   record the verdict (approved needs a justification)",
       "  drydock prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
       "",
       "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",

@@ -11,6 +11,13 @@ import type { Finding } from "../types.ts";
 
 export type Specialty = "security" | "database" | "reliability" | "general";
 
+/** The closed set of specialties (single source of truth for routing + reviewer registration). */
+export const SPECIALTIES: readonly Specialty[] = ["security", "database", "reliability", "general"] as const;
+
+export function isSpecialty(s: string): s is Specialty {
+  return (SPECIALTIES as readonly string[]).includes(s);
+}
+
 export function routeFinding(f: Finding): Specialty {
   switch (f.tool) {
     case "semgrep": // SAST: injection, XSS, eval, crypto, …

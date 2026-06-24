@@ -51,6 +51,9 @@ export function ticketId(packet: EscalationPacket): string {
 // ── Pure, guarded transitions ────────────────────────────────────────────────
 
 export function openTicket(packet: EscalationPacket, now: string): EscalationTicket {
+  // Fail-closed at the queue boundary: an unrouted packet (no specialties) could never be claimed
+  // (matchesPacket rejects it), so it would sit stuck forever. Refuse to queue it — it's a bug upstream.
+  if (!packet.specialties.length) throw new Error(`cannot queue ${ticketId(packet)}: packet has no specialties (routing bug)`);
   return { id: ticketId(packet), state: "needs-human", packet, claimedBy: null, decisions: [], createdAt: now, updatedAt: now };
 }
 
