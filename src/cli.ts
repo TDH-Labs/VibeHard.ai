@@ -38,6 +38,7 @@ import {
 import { fileCheckpointer, llmRefactorer, llmScorer, refactorPhase } from "./refactor/index.ts";
 import { refine } from "./refine/refine.ts";
 import { runTiers } from "./util/pool.ts";
+import { requiredCredentialsForApp } from "./credentials/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -861,6 +862,27 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
 
+  if (cmd === "credentials") {
+    if (!arg) {
+      console.error("usage: drydock credentials <dir>   (lists the third-party keys this app needs)");
+      return 2;
+    }
+    const target = resolve(arg);
+    const required = requiredCredentialsForApp(target);
+    if (!required.length) {
+      console.log("✅ No external credentials needed — this app runs on the Supabase backend VibeHard provisions.");
+      return 0;
+    }
+    console.log(`This app needs ${required.length} credential(s) you provide (VibeHard handles the database):\n`);
+    for (const c of required) {
+      const have = process.env[c.key] ? " ✓ set" : "";
+      console.log(`  ${c.key}${have}`);
+      console.log(`    ${c.label} — ${c.help}`);
+    }
+    console.log("\nSet these in the environment before `drydock ship`, and they're injected into the live app at runtime.");
+    return 0;
+  }
+
   if (cmd === "prod-scan") {
     if (!arg) {
       console.error("usage: drydock prod-scan <path-to-app.jsonl>");
@@ -988,6 +1010,7 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock gate <dir>                  run the security gate chain (report only)",
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
       "  drydock ship <dir>                  gate → provision a customer-owned backend → verify live RLS → deploy → live URL",
+      "  drydock credentials <dir>           list the third-party keys this app needs (Stripe, OAuth, email)",
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
       '  drydock refine <dir> "<change>"   iterate: apply a change, re-gate, revert if it breaks a passing build (§22)',
       "  drydock refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",

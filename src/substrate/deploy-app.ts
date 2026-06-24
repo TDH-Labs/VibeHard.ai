@@ -11,6 +11,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
+import { collectAppEnv, requiredCredentialsForApp } from "../credentials/credentials.ts";
 import { FileRecordStore } from "./record.ts";
 import { LocalEncryptedSecretsStore } from "./secrets.ts";
 import { refFromUrl, SupabaseBackendProvider } from "./supabase.ts";
@@ -82,5 +83,8 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
   const orgRef = process.env.SUPABASE_URL ? refFromUrl(process.env.SUPABASE_URL) : "default";
-  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables }, deps);
+  // backlog #5: the app's third-party creds (declared in its .env.example) come in via the process
+  // env (the web injects the tenant's saved values; a CLI user exports them) → injected at runtime.
+  const appEnv = collectAppEnv(requiredCredentialsForApp(workspacePath), process.env);
+  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, appEnv }, deps);
 }

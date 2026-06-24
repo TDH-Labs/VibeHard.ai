@@ -24,6 +24,9 @@ export interface DeployInput {
   migrations: Migration[];
   rlsTables: string[]; // the tables the live-RLS probe must find denied to anon
   authRedirectUrl?: string;
+  /** User-provided third-party credentials (Stripe, OAuth, email…) to inject into the running app's
+   *  runtime env, alongside the Supabase vars (backlog #5). Never includes Supabase/service keys. */
+  appEnv?: Record<string, string>;
 }
 
 export interface SubstrateDeps {
@@ -115,6 +118,9 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     //    (public, RLS-gated) — the service-role key is never injected (§16/R6.2).
     step("deploying frontend");
     const hostEnv: Record<string, string> = {
+      // User-provided third-party creds first; the Supabase vars below are authoritative and can
+      // never be overridden by a user value (appEnv is pre-filtered of SUPABASE_*/service keys).
+      ...(input.appEnv ?? {}),
       SUPABASE_URL: secrets.url,
       SUPABASE_ANON_KEY: secrets.anonKey,
       NEXT_PUBLIC_SUPABASE_URL: secrets.url,
