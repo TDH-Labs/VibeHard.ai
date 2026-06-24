@@ -33,6 +33,7 @@ import {
   type Advisory,
 } from "./procurement/index.ts";
 import { fileCheckpointer, llmRefactorer, llmScorer, refactorPhase } from "./refactor/index.ts";
+import { refine } from "./refine/refine.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -583,6 +584,57 @@ export async function main(argv: string[]): Promise<number> {
     return runAutoFixAndReport(target);
   }
 
+  if (cmd === "refine") {
+    const [, dir, change] = argv;
+    if (!dir || !change) {
+      console.error('usage: drydock refine <dir> "<change request>"');
+      return 2;
+    }
+    const target = resolve(dir);
+    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    // Reuse the built app's codegen system prompt (stack-correct bolt protocol); the "only change
+    // X, here's the current app" framing lives in the refine brief (src/refine/refine.ts).
+    const arch = loadStage<Architecture>(target, "architecture.json");
+    const systemPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : arch ? selectSystemPrompt(arch.stack) : undefined;
+    console.log(`refining ${target} — incremental regen → re-gate → revert if it breaks a passing build …`);
+    const result = await refine(target, change, {
+      now: new Date().toISOString(),
+      onStep: (m) => console.log(`  … ${m}`),
+      regen: async (d, prompt) => {
+        const written: string[] = [];
+        const session = await new BoltEngine(liveBoltDriver({ systemPrompt })).startSession(d, { provider, model });
+        let ok = true;
+        try {
+          for await (const ev of session.prompt(prompt)) {
+            if (ev.type === "file-changed") {
+              written.push(ev.path.replace(/^\/+/, "")); // normalize to the relative form listSourceFiles uses
+              console.log(`  ${ev.action}: ${ev.path}`);
+            } else if (ev.type === "thinking") console.log(`… ${ev.text}`);
+            else if (ev.type === "error") {
+              console.error(`generation error: ${ev.message}`);
+              ok = false;
+            }
+          }
+        } finally {
+          await session.dispose();
+        }
+        return { ok, filesWritten: written };
+      },
+    });
+    if (result.restored) {
+      console.log("\n↩️  refine reverted — it broke the previously-passing gate and auto-fix couldn't recover it. Your app is unchanged.");
+      return 1;
+    }
+    if (!result.accepted) {
+      console.log("\n🛑 refine did not complete (engine error) — see above.");
+      return 1;
+    }
+    console.log(`\n✅ refine applied — ${result.filesWritten.length} file(s) changed.`);
+    console.log(result.gate.passed ? "   gate: ✅ PASS — deploy allowed" : "   gate: ⚠️  not green (the build was already not green before this refine) — run `drydock gate` / `fix`");
+    return result.gate.passed ? 0 : 1;
+  }
+
   if (cmd === "refactor") {
     if (!arg) {
       console.error("usage: drydock refactor <dir>");
@@ -755,6 +807,7 @@ export async function main(argv: string[]): Promise<number> {
       "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
       "  drydock ship <dir>                  gate → provision a customer-owned backend → verify live RLS → deploy → live URL",
       "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
+      '  drydock refine <dir> "<change>"   iterate: apply a change, re-gate, revert if it breaks a passing build (§22)',
       "  drydock refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
       "  drydock research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
       "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",

@@ -32,6 +32,13 @@ export interface DataEntity {
   sensitive: boolean;
 }
 
+/** One post-build change request, folded back into the spec (backlog #2 iterate/refine).
+ *  The trail keeps the spec describing what the app actually became. */
+export interface Refinement {
+  at: string; // ISO timestamp the refine was accepted
+  change: string; // the user's plain-language change request
+}
+
 /** The structured spec the front-half produces and the back-half builds against. */
 export interface Spec {
   name: string;
@@ -45,6 +52,7 @@ export interface Spec {
   sensitiveData: SensitiveClass[]; // data classification (§21 control 1)
   realUsers: boolean; // rigor signal — not a throwaway
   maintained: boolean; // rigor signal — lives over time
+  refinements?: Refinement[]; // post-build change trail (iterate/refine); absent on fresh specs
 }
 
 /** True if the spec involves sensitive data, by classification OR a flagged entity. */
