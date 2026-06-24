@@ -77,6 +77,15 @@ describe("reviewArchitecture — graph validation (the disposer)", () => {
     expect(reviewArchitecture(arch([ws("api", [], [])])).map((f) => f.ruleId)).toContain("workstream-no-files");
   });
 
+  test("two workstreams claiming the same file → file-collision (concurrent codegen must be deterministic)", () => {
+    const a = arch([ws("api", [], ["shared.ts", "api.ts"]), ws("ui", [], ["shared.ts", "ui.ts"])]);
+    const collision = reviewArchitecture(a).find((f) => f.ruleId === "file-collision");
+    expect(collision?.severity).toBe("high");
+    expect(collision?.message).toContain("shared.ts");
+    // disjoint file sets → no collision
+    expect(reviewArchitecture(arch([ws("api", [], ["api.ts"]), ws("ui", [], ["ui.ts"])])).map((f) => f.ruleId)).not.toContain("file-collision");
+  });
+
   test("no workstreams at all → no-workstreams", () => {
     expect(reviewArchitecture(arch([])).map((f) => f.ruleId)).toEqual(["no-workstreams"]);
   });

@@ -37,6 +37,7 @@ import {
 } from "./procurement/index.ts";
 import { fileCheckpointer, llmRefactorer, llmScorer, refactorPhase } from "./refactor/index.ts";
 import { refine } from "./refine/refine.ts";
+import { runTiers } from "./util/pool.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
@@ -165,16 +166,17 @@ function printSpec(spec: Spec): void {
 /** Run the engine over `target` with `prompt`; stream events. Returns false on a
  *  generation error (so the caller skips gating a half-built app). Shared by
  *  `generate` (raw prompt) and `build` (PRD brief). */
-async function streamGeneration(target: string, prompt: string, provider: string, model: string, systemPrompt?: string): Promise<boolean> {
+async function streamGeneration(target: string, prompt: string, provider: string, model: string, systemPrompt?: string, label?: string): Promise<boolean> {
+  const tag = label ? `[${label}] ` : ""; // attribute interleaved output when tiers run in parallel
   const session = await new BoltEngine(liveBoltDriver({ systemPrompt })).startSession(target, { provider, model });
   let ok = true;
   try {
     for await (const ev of session.prompt(prompt)) {
-      if (ev.type === "thinking") console.log(`… ${ev.text}`);
-      else if (ev.type === "message") console.log(ev.text);
-      else if (ev.type === "file-changed") console.log(`  ${ev.action}: ${ev.path}`);
+      if (ev.type === "thinking") console.log(`… ${tag}${ev.text}`);
+      else if (ev.type === "message") console.log(`${tag}${ev.text}`);
+      else if (ev.type === "file-changed") console.log(`  ${tag}${ev.action}: ${ev.path}`);
       else if (ev.type === "error") {
-        console.error(`generation error: ${ev.message}`);
+        console.error(`${tag}generation error: ${ev.message}`);
         ok = false;
       }
     }
@@ -203,24 +205,30 @@ async function gateAndReport(target: string): Promise<boolean> {
   return result.passed;
 }
 
-/** Build an app from its architecture: generate each workstream in dependency-tier
- *  order (sequential within a tier for now; tiers are parallel-eligible — §22). Each
+/** Build an app from its architecture: generate workstreams in dependency-tier order. Tiers run
+ *  STRICTLY sequentially (tier N+1 depends on tier N's files via `built`); workstreams WITHIN a
+ *  tier are independent (buildOrder guarantees it), so they run concurrently, capped by
+ *  DRYDOCK_CODEGEN_CONCURRENCY (default 4) so the fan-out never overruns provider limits. Each
  *  workstream is a scoped engine pass that accumulates files into `target`. */
 async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
   // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
   // prompt; else the TS/Supabase one). DRYDOCK_LANG=python forces it, for deliberately
   // building/validating a Python app.
   const systemPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack);
-  const tiers = buildOrder(arch);
-  const built: string[] = [];
-  for (const tier of tiers) {
-    for (const ws of tier) {
+  const concurrency = Math.max(1, Number(process.env.DRYDOCK_CODEGEN_CONCURRENCY) || 4);
+  // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the
+  // prior-tiers snapshot) is mapped to names for the brief — identical to sequential codegen.
+  return runTiers(
+    buildOrder(arch),
+    concurrency,
+    (ws, built) => {
       console.log(`\n  ▸ workstream: ${ws.name} — ${ws.files.length} file(s)`);
-      if (!(await streamGeneration(target, workstreamBrief(arch, ws, built), provider, model, systemPrompt))) return false;
-      built.push(ws.name);
-    }
-  }
-  return true;
+      return streamGeneration(target, workstreamBrief(arch, ws, built.map((w) => w.name)), provider, model, systemPrompt, ws.name);
+    },
+    (tier) => {
+      if (tier.length > 1) console.log(`\n  ▸ tier: ${tier.length} independent workstreams in parallel (≤${concurrency}) — ${tier.map((w) => w.name).join(", ")}`);
+    },
+  );
 }
 
 /** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human

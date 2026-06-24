@@ -191,6 +191,17 @@ export function reviewArchitecture(arch: Architecture): Finding[] {
     out.push(gap("dependency-cycle", "high", "The workstream dependency graph has a cycle — it can't be built in a valid order."));
   }
 
+  // File ownership must be DISJOINT. Same-tier workstreams are built concurrently (parallel codegen),
+  // so two claiming the same path race to a non-deterministic last-writer-wins — and ambiguous
+  // ownership is an architecture smell regardless of tier. Flag it so the architect re-proposes.
+  const owners = new Map<string, string[]>();
+  for (const w of arch.workstreams) {
+    for (const f of w.files) (owners.get(f) ?? owners.set(f, []).get(f)!).push(w.name);
+  }
+  for (const [file, claimants] of owners) {
+    if (claimants.length > 1) out.push(gap("file-collision", "high", `File "${file}" is claimed by multiple workstreams (${claimants.join(", ")}) — ownership must be disjoint so the concurrent build is deterministic.`));
+  }
+
   // SAD headline decisions must be present (a hollow SAD can't guide a build or a reviewer)
   if (!arch.systemOverview.trim()) out.push(gap("no-system-overview", "high", "The SAD has no system overview (§1)."));
   if (!arch.pattern.name.trim()) out.push(gap("no-pattern", "high", "The SAD names no architectural pattern (§2)."));
