@@ -14,6 +14,7 @@ import { FileReviewerStore, makeReviewer, matchesPacket, parseSpecialties } from
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
+import { designBlock } from "./design/presets.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -215,7 +216,9 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
   // prompt; else the TS/Supabase one). VIBEHARD_LANG=python forces it, for deliberately
   // building/validating a Python app.
-  const systemPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack);
+  // #12: inject the chosen design preset (VIBEHARD_DESIGN) into the frontend codegen so every screen
+  // inherits a consistent, professional look. Python (FastAPI API) has no UI, so no design block.
+  const systemPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock();
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
   // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the
   // prior-tiers snapshot) is mapped to names for the brief — identical to sequential codegen.
