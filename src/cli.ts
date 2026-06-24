@@ -16,7 +16,7 @@ import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { decideRigor, llmAssumptionProposer, llmIntake, planIntake, type Spec } from "./spec/index.ts";
+import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
 import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/index.ts";
 import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
@@ -403,15 +403,24 @@ export async function main(argv: string[]): Promise<number> {
       console.error('usage: drydock intake "<prompt>"');
       return 2;
     }
-    // grill-me (backlog #1): confirm-assumptions. State the key defaults the build will use so the
-    // user can correct them. OPTIONAL — the proposer never throws, so this is purely advisory.
-    const assumptions = await llmAssumptionProposer()(promptText);
-    if (!assumptions.length) {
-      console.log("No assumptions to confirm — this is simple enough to build as described.");
+    // grill-me (backlog #1): a real INTERVIEW — one question at a time, each with a suggested answer
+    // (press Enter to accept). Branches on prior answers, stops when clear. OPTIONAL/fail-safe.
+    const interviewer = llmInterviewer();
+    const turns: InterviewTurn[] = [];
+    console.log("A few quick questions so we build the right thing (press Enter to accept the suggestion):\n");
+    while (turns.length < MAX_QUESTIONS) {
+      const step = await interviewer(promptText, turns);
+      if (step.done || !step.question) break;
+      console.log(step.question.question);
+      const answer = (prompt(`  [suggested: ${step.question.recommended}] > `) || "").trim() || step.question.recommended;
+      turns.push({ question: step.question.question, answer });
+      console.log("");
+    }
+    if (!turns.length) {
+      console.log("No questions — this is simple enough to build as described.");
       return 0;
     }
-    console.log("Here's what I'll assume unless you tell me otherwise — correct anything before building:");
-    for (const a of assumptions) console.log(`  • ${a}`);
+    console.log(`\nHere's what I'll build:\n${foldInterview(promptText, turns)}`);
     return 0;
   }
 
