@@ -37,13 +37,15 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
     opts.config ??
     (process.env.OPENCODE_API_KEY ? { provider: "opencode", model: "deepseek-v4-pro" } : { provider: "anthropic", model: "claude-opus-4-8" });
 
-  return async (prd, prior) => {
+  return async (prd, prior, srs) => {
     const summary = {
       name: prd.spec.name,
       stack_hint: { tenancy: prd.spec.tenancy, auth: prd.spec.auth, storesData: prd.spec.storesData },
       requirements: prd.requirements.map((r) => r.feature),
-      dataModel: prd.spec.dataEntities,
+      // Prefer the SRS's drafted data model + interfaces when the SRS stage ran (richer than the spec).
+      dataModel: srs && srs.dataModel.length ? srs.dataModel : prd.spec.dataEntities,
       nfrs: prd.nfrs,
+      ...(srs ? { externalInterfaces: srs.apiInterfaces.map((a) => a.target), modules: srs.modules } : {}),
     };
     const user = prior
       ? [

@@ -8,9 +8,12 @@
 import type { Finding } from "../types.ts";
 import { isBlocking } from "../types.ts";
 import type { Prd } from "../prd/index.ts";
+import type { Srs } from "../srs/index.ts";
 import { reviewArchitecture, type Architecture } from "./architecture.ts";
 
-export type Architect = (prd: Prd, prior: { arch: Architecture; gaps: Finding[] } | null) => Promise<Architecture>;
+/** An Architect designs from the PRD, optionally enriched by the SRS (data model + interfaces +
+ *  modules) when the SRS stage ran before it. The 3rd param is optional so fakes can ignore it. */
+export type Architect = (prd: Prd, prior: { arch: Architecture; gaps: Finding[] } | null, srs?: Srs) => Promise<Architecture>;
 
 export interface ArchitectResult {
   arch: Architecture;
@@ -21,18 +24,19 @@ export interface ArchitectResult {
 
 export interface ArchitectOptions {
   architect: Architect;
+  srs?: Srs; // when the SRS stage ran, the architect designs against its data model + interfaces
   budget?: number;
   onStep?: (message: string) => void;
 }
 
 export async function architectApp(prd: Prd, opts: ArchitectOptions): Promise<ArchitectResult> {
   const budget = Math.max(1, opts.budget ?? 3);
-  let arch = await opts.architect(prd, null);
+  let arch = await opts.architect(prd, null, opts.srs);
   let gaps = reviewArchitecture(arch);
   let rounds = 1;
   while (gaps.some(isBlocking) && rounds < budget) {
     opts.onStep?.(`round ${rounds}: ${gaps.filter(isBlocking).length} architecture gap(s) — redesigning`);
-    arch = await opts.architect(prd, { arch, gaps });
+    arch = await opts.architect(prd, { arch, gaps }, opts.srs);
     gaps = reviewArchitecture(arch);
     rounds++;
   }

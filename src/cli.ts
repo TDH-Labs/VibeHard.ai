@@ -15,6 +15,7 @@ import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, llmIntake, planIntake, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
+import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/index.ts";
 import { architectApp, buildOrder, llmArchitect, type Architecture } from "./architecture/index.ts";
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
@@ -62,6 +63,15 @@ function persistPrd(target: string, prd: Prd): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "prd.json"), JSON.stringify(prd, null, 2));
   writeFileSync(join(target, "PRD.md"), renderPrdMarkdown(prd));
+}
+
+/** Persist the SRS: SRS.md (the readable Principal-Systems-Architect document for engineers + QA)
+ *  + .drydock/srs.json. Stage 3's durable output, between the PRD and the architecture. */
+function persistSrs(target: string, srs: Srs): void {
+  const dir = join(target, ".drydock");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "srs.json"), JSON.stringify(srs, null, 2));
+  writeFileSync(join(target, "SRS.md"), renderSrsMarkdown(srs));
 }
 
 const DISPOSITION_LABEL: Record<Advisory["disposition"], string> = {
@@ -414,9 +424,28 @@ export async function main(argv: string[]): Promise<number> {
     persistPrd(target, prd);
     console.log(`   📄 PRD written → ${join(target, "PRD.md")}`);
 
-    // 3. PRD → architecture (workstream dependency graph)
+    // 3. PRD → SRS — a Principal-Systems-Architect document (strict per-module I/O specs,
+    //    quantified NFRs, flagged unknowns). The operating environment, security posture, and
+    //    compliance are DERIVED from the substrate (§11 — platform facts, not model guesses).
+    //    Gated, persisted as SRS.md, and fed into architecture.
+    console.log("\n── specifying (SRS) … ──");
+    const srsRes = await elaborateSrs(prd, { specifier: llmSpecifier({ config }), onStep });
+    const srs = srsRes.srs;
+    console.log(
+      `   ${srs.functionalRequirements.length} functional requirement(s) · ${srs.apiInterfaces.length} interface(s) · ${srs.openIssues.length} open issue(s) flagged`,
+    );
+    for (const f of srsRes.gaps.filter((g) => !isBlocking(g))) explainFinding(f); // advisory rigor nudges
+    if (!srsRes.ready) {
+      console.log("\n🛑 SRS not complete:");
+      for (const f of srsRes.gaps.filter(isBlocking)) explainFinding(f);
+      return 1;
+    }
+    persistSrs(target, srs);
+    console.log(`   📄 SRS written → ${join(target, "SRS.md")}`);
+
+    // 4. SRS → architecture (workstream dependency graph, designed against the SRS)
     console.log("\n── architecting … ──");
-    const archRes = await architectApp(prdRes.prd, { architect: llmArchitect({ config }), onStep });
+    const archRes = await architectApp(prd, { architect: llmArchitect({ config }), srs, onStep });
     if (!archRes.ready) {
       console.log("\n🛑 architecture not buildable:");
       for (const f of archRes.gaps.filter(isBlocking)) explainFinding(f);
