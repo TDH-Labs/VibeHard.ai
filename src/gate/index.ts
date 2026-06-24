@@ -36,9 +36,13 @@ export interface DeployResult extends PipelineResult {
   sentinel: string | null;
 }
 
-export async function runGate(projectPath: string, gates: Gate[] = GATES): Promise<PipelineResult> {
+export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerdict?: (v: GateVerdict) => void): Promise<PipelineResult> {
   const verdicts: GateVerdict[] = [];
-  for (const g of gates) verdicts.push(await g.run(projectPath));
+  for (const g of gates) {
+    const v = await g.run(projectPath);
+    onVerdict?.(v); // surface each gate's result the moment it lands (live per-gate progress)
+    verdicts.push(v);
+  }
   return { verdicts, passed: verdicts.every((v) => v.status === "pass") };
 }
 

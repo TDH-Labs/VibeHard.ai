@@ -16,7 +16,7 @@ import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { decideRigor, llmIntake, llmQuestioner, planIntake, type Spec } from "./spec/index.ts";
+import { decideRigor, llmAssumptionProposer, llmIntake, planIntake, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
 import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/index.ts";
 import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
@@ -231,6 +231,13 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   );
 }
 
+/** Print a gate's result the moment it lands — readable for a human, and machine-parseable for the
+ *  web dashboard (it keys on the `gate: <glyph> <name>` shape to drive a per-gate checklist). */
+function printGateVerdict(v: { gate: string; status: string; blocking: number }): void {
+  const glyph = v.status === "pass" ? "✓" : v.status === "block" ? "✗" : "⚠";
+  console.log(`  gate: ${glyph} ${v.gate}${v.status === "pass" ? "" : ` (${v.blocking} blocking)`}`);
+}
+
 /** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human
  *  review on exhaustion (§24). Returns the exit code. Shared by `fix` and `build`. */
 async function runAutoFixAndReport(target: string): Promise<number> {
@@ -240,6 +247,7 @@ async function runAutoFixAndReport(target: string): Promise<number> {
   // GitHub/Slack adapter lands (§24), this becomes a real availability check.
   const result = await autoFix(target, {
     onStep: (m) => console.log(`  … ${m}`),
+    gate: (p) => runGate(p, undefined, printGateVerdict), // emit each gate's pass/fail live
     humanAvailable: async () => false,
   });
   if (result.fixed) {
@@ -250,6 +258,7 @@ async function runAutoFixAndReport(target: string): Promise<number> {
   if (result.escalation) {
     const ticket = await localSink().open(result.escalation);
     await notifier().notifyOpened(ticket); // best-effort reviewer ping
+    console.log(`  ::held ${ticket.id}`); // machine-parseable: links this build to its review ticket
     console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
     console.log(`   queued at ${queuePath()} — list with: drydock queue`);
   }
@@ -394,17 +403,15 @@ export async function main(argv: string[]): Promise<number> {
       console.error('usage: drydock intake "<prompt>"');
       return 2;
     }
-    // grill-me (backlog #1): the few clarifying questions a non-technical prompt needs before a
-    // build. Questions are OPTIONAL — the questioner never throws, so this is purely advisory.
-    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
-    const questions = await llmQuestioner({ config: { provider, model } })(promptText);
-    if (!questions.length) {
-      console.log("No clarifying questions — the request is clear enough to build.");
+    // grill-me (backlog #1): confirm-assumptions. State the key defaults the build will use so the
+    // user can correct them. OPTIONAL — the proposer never throws, so this is purely advisory.
+    const assumptions = await llmAssumptionProposer()(promptText);
+    if (!assumptions.length) {
+      console.log("No assumptions to confirm — this is simple enough to build as described.");
       return 0;
     }
-    console.log("A few clarifying questions before building:");
-    for (const q of questions) console.log(`  • ${q}`);
+    console.log("Here's what I'll assume unless you tell me otherwise — correct anything before building:");
+    for (const a of assumptions) console.log(`  • ${a}`);
     return 0;
   }
 
