@@ -71,8 +71,10 @@ export class StripeClient {
     return { id: j.id };
   }
 
-  /** A subscription Checkout session — the URL the STOREFRONT sends a customer to, to subscribe. */
-  async createCheckoutSession(input: { customerId: string; priceId: string; successUrl: string; cancelUrl: string }): Promise<{ id: string; url: string }> {
+  /** A subscription Checkout session — the URL the STOREFRONT sends a customer to, to subscribe.
+   *  `tenantId` is stamped onto the SUBSCRIPTION's metadata so the webhook can resolve the tenant
+   *  from every subscription.* event (the source-of-truth link). */
+  async createCheckoutSession(input: { customerId: string; priceId: string; successUrl: string; cancelUrl: string; tenantId?: string }): Promise<{ id: string; url: string }> {
     const j = (await this.req("POST", "/v1/checkout/sessions", {
       mode: "subscription",
       customer: input.customerId,
@@ -80,6 +82,7 @@ export class StripeClient {
       "line_items[0][quantity]": 1,
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
+      "subscription_data[metadata][tenantId]": input.tenantId,
     })) as { id: string; url: string };
     return { id: j.id, url: j.url };
   }
@@ -95,8 +98,9 @@ export class StripeClient {
 
 export interface StripeBillingOptions {
   client?: StripeClient;
-  /** Stripe price id → plan name (e.g. "build" / "practice" / "firm"). The webhook uses this to
-   *  sync tenant.plan when a subscription changes. */
+  /** Stripe price id → plan name. Values MUST be real plan keys from PLANS (plans.ts): "starter" /
+   *  "pro" (or "free"). The webhook uses this to sync tenant.plan; an unknown name fails closed to
+   *  free (planFor), so a typo here silently downgrades paying customers — keep it aligned with PLANS. */
   priceToPlan?: Record<string, string>;
 }
 
