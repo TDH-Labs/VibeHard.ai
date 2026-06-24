@@ -47,7 +47,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function queueDir(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-queue-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-queue-"));
   tmps.push(d);
   return join(d, "queue");
 }

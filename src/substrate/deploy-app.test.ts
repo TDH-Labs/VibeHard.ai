@@ -109,12 +109,12 @@ describe("deployApp — derives input + runs the orchestrator", () => {
 describe("defaultSubstrateDeps — host is chosen by artifact (Dockerfile → Fly, else Vercel)", () => {
   // The store fails closed without a passphrase; provide a dummy so construction succeeds
   // regardless of whether an operator .env is loaded. This test only inspects host selection.
-  const prevKey = process.env.DRYDOCK_SECRETS_KEY;
+  const prevKey = process.env.VIBEHARD_SECRETS_KEY;
   beforeAll(() => {
-    if (!process.env.DRYDOCK_SECRETS_KEY) process.env.DRYDOCK_SECRETS_KEY = "test-passphrase-not-a-real-secret";
+    if (!process.env.VIBEHARD_SECRETS_KEY) process.env.VIBEHARD_SECRETS_KEY = "test-passphrase-not-a-real-secret";
   });
   afterAll(() => {
-    if (prevKey === undefined) delete process.env.DRYDOCK_SECRETS_KEY;
+    if (prevKey === undefined) delete process.env.VIBEHARD_SECRETS_KEY;
   });
 
   test("a workspace WITH a Dockerfile → Fly (container deploy, any language)", () => {

@@ -5,8 +5,8 @@
  * output must reach the target. This is "the gate sits between generate and deploy"
  * exercised for real (semgrep + gitleaks containers, RLS check, launch probe).
  *
- * Guarded behind DRYDOCK_INTEGRATION (needs Docker + Node). Run with:
- *   DRYDOCK_INTEGRATION=1 bun test e2e.integration
+ * Guarded behind VIBEHARD_INTEGRATION (needs Docker + Node). Run with:
+ *   VIBEHARD_INTEGRATION=1 bun test e2e.integration
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -22,7 +22,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function workspace(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-e2e-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-e2e-"));
   tmps.push(d);
   return d;
 }
@@ -76,7 +76,7 @@ function streamFor(files: Record<string, string>): string {
   return `Here you go.<boltArtifact id="app" title="app">${actions}</boltArtifact>`;
 }
 
-const run = process.env.DRYDOCK_INTEGRATION ? describe : describe.skip;
+const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("generate → gate → deploy (real gate)", () => {
   test("vulnerable generated app is REFUSED at the deploy boundary", async () => {

@@ -1,5 +1,5 @@
 /**
- * bolt.diy → Drydock event normalizer (PROJECT_BRIEF.md §13 fault line #1, §14).
+ * bolt.diy → VibeHard event normalizer (PROJECT_BRIEF.md §13 fault line #1, §14).
  *
  * RECONCILED 2026-06-21 against the real bolt.diy source
  * (stackblitz-labs/bolt.diy → app/lib/runtime/message-parser.ts + the emission
@@ -21,7 +21,7 @@
  *     carrying the SQL. That file IS the RLS gate's only input. Routing it to a
  *     shell command (the old default for non-file actions) would never materialize
  *     it → the RLS gate would see no migrations and pass blind — defeating the
- *     exact CVE-2025-48757 class Drydock exists to catch. We materialize it as a
+ *     exact CVE-2025-48757 class VibeHard exists to catch. We materialize it as a
  *     file. The paired `operation="query"` re-runs the same SQL (no file) and is
  *     surfaced as a command.
  *

@@ -10,7 +10,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 function tmp(): string {
-  const d = mkdtempSync(join(tmpdir(), "drydock-reviewer-test-"));
+  const d = mkdtempSync(join(tmpdir(), "vibehard-reviewer-test-"));
   dirs.push(d);
   return d;
 }

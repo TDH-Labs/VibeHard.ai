@@ -1,7 +1,7 @@
 # Runtime Substrate — ARCHITECTURE (technical design)
 
 > Stage 3 of 3. The PRD's requirements turned into components, the seams they sit behind,
-> the dependency graph that orders the build, and the v1-vs-later split. Mirrors Drydock's
+> the dependency graph that orders the build, and the v1-vs-later split. Mirrors VibeHard's
 > existing patterns (the `Engine`/`DeployTarget` seams; the gate sentinel precondition).
 > **Revised after review (v2):** customer-owned provisioning, a live-RLS probe step, crude
 > teardown in v1, a local secrets store, a de-risking spike, and a walking-skeleton v1.
@@ -55,7 +55,7 @@ state; a re-run resumes (R10).
   crude teardown (R9). Pure-ish control flow over the seams → unit-testable with **fake
   providers** (the project's standard pattern).
 - **W6 Wiring.** Slot the orchestrator behind the gated-deploy path (`engine/deploy.ts`),
-  make `drydock deploy` real + add `drydock destroy`, and run provisionAndDeploy from
+  make `vibehard deploy` real + add `vibehard destroy`, and run provisionAndDeploy from
   `build`'s tail after a green build (sentinel present). Reuses `deployGate`/the sentinel.
 
 ## Dependency graph → build order (topological tiers)
@@ -73,7 +73,7 @@ Tier 4:                            wiring + CLI/build integration (W6)
 ```
 
 Same `buildOrder`-style topological plan the front-half produces for generated apps —
-applied to Drydock's own feature.
+applied to VibeHard's own feature.
 
 ## v1 = the WALKING SKELETON (the discipline that came out of review)
 The substrate is the **least differentiated** layer — commodity assembly. v1 builds the
@@ -83,7 +83,7 @@ more, behind clean seams:
 - **In v1:** the seam *interfaces* (cheap, right) + **single happy-path impls**; customer
   Supabase connect (OAuth) → provision/reuse one project → apply migration → **live-RLS
   probe (abort on fail)** → configure auth → local-encrypted secrets → deploy to one host →
-  URL; **crude `drydock destroy`**; local record; gate-gated; zero-LLM. Hand-provision /
+  URL; **crude `vibehard destroy`**; local record; gate-gated; zero-LLM. Hand-provision /
   manual steps are acceptable where cheaper *behind the seams*.
 - **"Thin" applies to the COMMODITY assembly, NOT the safety guarantees.** The gate
   precondition, the **live-RLS probe**, and the secret discipline are real even in the
@@ -97,7 +97,7 @@ more, behind clean seams:
 - **Three swappable providers** (backend/host/secrets) — same seam discipline as `Engine`/
   `DeployTarget`; ONE impl each for v1, alternates only on concrete need (§3 / §13).
 - **Customer-owned:** every project is provisioned in the *customer's* org via their OAuth
-  grant — Drydock is the processor, never the controller (§16; SPEC "Decisions from review").
+  grant — VibeHard is the processor, never the controller (§16; SPEC "Decisions from review").
 - **Idempotency is keyed on the `DeploymentRecord`**, not on probing providers.
 - **The migration runs for the first time here**, and **step 4 proves RLS is live** — so the
   orchestrator treats a migration error (R3) or a failed live-RLS probe (R4) as a hard stop
@@ -106,5 +106,5 @@ more, behind clean seams:
 ## What this does NOT include (boundaries restated)
 - The **front-door UI** (the bolt.diy fork) — separate work; this is the backend last-mile.
 - The **AI Maintainer** (separate product — `docs/ROADMAP.md`).
-- Email beyond Supabase auth emails; payments; multi-region; Drydock-owned hosting of
+- Email beyond Supabase auth emails; payments; multi-region; VibeHard-owned hosting of
   customer data (explicitly rejected — customer-owned, per the SPEC decision).

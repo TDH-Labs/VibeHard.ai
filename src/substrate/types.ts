@@ -1,7 +1,7 @@
 /**
  * Runtime substrate — the seams + records (docs/runtime-substrate/). The substrate
  * turns a gated, passing app into a live, hosted app with a real managed backend, in
- * the CUSTOMER'S own Supabase org (Drydock is the processor, never the data owner —
+ * the CUSTOMER'S own Supabase org (VibeHard is the processor, never the data owner —
  * §16). Three swappable providers (backend / host / secrets) behind interfaces, one
  * durable record, one deterministic orchestrator. Zero LLM in this path (§11).
  *
@@ -66,7 +66,7 @@ export interface BackendProvider {
   verifyLiveRls(handle: BackendHandle, tables: string[]): Promise<LiveRlsResult>;
   /** Configure auth (providers + redirect URLs to the deployed app). */
   configureAuth(handle: BackendHandle, appUrl: string): Promise<void>;
-  /** Tear the project down (for `drydock destroy`). */
+  /** Tear the project down (for `vibehard destroy`). */
   deleteProject(handle: BackendHandle): Promise<void>;
 }
 

@@ -3,11 +3,11 @@
  * app is verified by building it (not by probing a server), so a legit Vite-style
  * app is no longer false-blocked as "no entry point", and a broken build is caught.
  *
- * Runs `npm run build`, so guarded behind DRYDOCK_INTEGRATION. Fixtures declare NO
+ * Runs `npm run build`, so guarded behind VIBEHARD_INTEGRATION. Fixtures declare NO
  * dependencies, so no `npm install` / network is needed — the real-deps (Vite)
  * install+build path is exercised by live generation (needs ANTHROPIC_API_KEY).
  *
- *   DRYDOCK_INTEGRATION=1 bun test verify.build.integration
+ *   VIBEHARD_INTEGRATION=1 bun test verify.build.integration
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -20,13 +20,13 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function scratch(pkg: object): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-build-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-build-"));
   tmps.push(d);
   await Bun.write(join(d, "package.json"), JSON.stringify(pkg));
   return d;
 }
 
-const run = process.env.DRYDOCK_INTEGRATION ? describe : describe.skip;
+const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("verify build path (real npm run build)", () => {
   test("a passing build → verify PASS", async () => {

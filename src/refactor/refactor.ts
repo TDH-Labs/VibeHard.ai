@@ -116,7 +116,7 @@ const EXCLUDE = new Set<string>(DERIVED_DIRS);
 
 export const fileCheckpointer: Checkpointer = {
   save(workspace: string): string {
-    const backup = mkdtempSync(join(tmpdir(), "drydock-refactor-"));
+    const backup = mkdtempSync(join(tmpdir(), "vibehard-refactor-"));
     cpSync(workspace, backup, { recursive: true, filter: (src) => !EXCLUDE.has(src.split("/").pop() ?? "") });
     return backup;
   },

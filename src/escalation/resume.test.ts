@@ -15,7 +15,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function workspace(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-resume-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-resume-"));
   tmps.push(d);
   return d;
 }

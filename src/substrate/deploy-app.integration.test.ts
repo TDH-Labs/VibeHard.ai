@@ -5,7 +5,7 @@
  * live RLS → encrypt secrets at rest → deploy → live. GUARDED + self-cleaning (drops the
  * probe table, removes the temp state).
  *
- *   SUPABASE_DB_HOST=aws-1-us-east-1.pooler.supabase.com DRYDOCK_INTEGRATION=1 \
+ *   SUPABASE_DB_HOST=aws-1-us-east-1.pooler.supabase.com VIBEHARD_INTEGRATION=1 \
  *     bun test src/substrate/deploy-app.integration.test.ts
  */
 import { afterAll, describe, expect, test } from "bun:test";
@@ -22,14 +22,14 @@ import type { SubstrateDeps } from "./orchestrator.ts";
 import type { HostProvider } from "./types.ts";
 
 const RUN =
-  !!process.env.DRYDOCK_INTEGRATION &&
+  !!process.env.VIBEHARD_INTEGRATION &&
   !!process.env.SUPABASE_URL &&
   !!process.env.SUPABASE_ANON_KEY &&
   !!process.env.SUPABASE_SERVICE_ROLE_KEY &&
   (!!process.env.SUPABASE_DB_PASSWORD || !!process.env.SUPABASE_DB_URL) &&
-  !!process.env.DRYDOCK_SECRETS_KEY;
+  !!process.env.VIBEHARD_SECRETS_KEY;
 const maybe = RUN ? test : test.skip;
-const TABLE = "_drydock_e2e";
+const TABLE = "_vibehard_e2e";
 
 function envFrom(): SupabaseEnv {
   return {
@@ -81,7 +81,7 @@ describe("LIVE e2e — deployApp provisions a real Supabase backend (fake host)"
         const deps: SubstrateDeps = {
           backend: new SupabaseBackendProvider(),
           host: fakeHost,
-          secrets: new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY!),
+          secrets: new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.VIBEHARD_SECRETS_KEY!),
           records: new FileRecordStore(join(stateDir, "deployments")),
         };
 

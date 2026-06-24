@@ -1,6 +1,6 @@
-# Drydock — roadmap notes (beyond the current product)
+# VibeHard — roadmap notes (beyond the current product)
 
-Durable notes for work that is **out of scope for the current Drydock build** but
+Durable notes for work that is **out of scope for the current VibeHard build** but
 intentionally captured. The in-scope roadmap is `PROJECT_BRIEF.md` §15; this file is
 for future products / spin-offs and deferred sub-features.
 
@@ -25,10 +25,10 @@ different risk class than gating a build: a bad build never shipped; a bad prod 
 hits live users and their data now. It needs its own surface, its own trust posture,
 and infrastructure this product doesn't have.
 
-**What it REUSES from Drydock (why we're uniquely positioned to build it):** the hard
+**What it REUSES from VibeHard (why we're uniquely positioned to build it):** the hard
 part of "AI maintaining prod code" was never the edit — anyone can prompt an LLM to
 change a repo. The hard part is letting it touch production *without breaking or leaking*.
-That safety **is** Drydock's deterministic spine, already built: the gate chain (the
+That safety **is** VibeHard's deterministic spine, already built: the gate chain (the
 safety check on every AI change), auto-fix (the fixer), prod-feedback §20 (the sensor),
 refactor-phase §22 (the iron-rule revert), escalation §24 (judgment → human), and the
 **spec + PRD acceptance criteria as the invariant** the maintenance must preserve.
@@ -57,7 +57,7 @@ worth more in prod, where the stakes and the recurring revenue both live.
 
 ## Deferred refactor surfaces (current product ships only the explicit whole-app pass)
 
-The current build ships `drydock refactor <dir>` — an explicit, operator-invoked,
+The current build ships `vibehard refactor <dir>` — an explicit, operator-invoked,
 whole-app pass on a passing build (iron rule: re-verify, revert on break). Deferred until
 there's a reason (an account layer, automatic triggers, a traction signal):
 
@@ -87,5 +87,5 @@ never certifies." Needs a design/brand pass + landing / pricing / trust-&-securi
 **The hosted app UI (bigger, same "storefront" theme).** The product itself: a web app
 where a non-technical user types a prompt and watches build → gate → ship, with the gates
 HIDDEN (enforced FOR them, not shown TO them — §1/§16) and holds/escalations surfaced in
-plain language. Today Drydock is a CLI the target user can't operate; this UI is what
+plain language. Today VibeHard is a CLI the target user can't operate; this UI is what
 stands between the proven engine and a real customer.

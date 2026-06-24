@@ -39,7 +39,7 @@ export function tablesFromMigrations(migrations: Migration[]): string[] {
 }
 
 /**
- * Assemble the real providers from env. Records + secrets live under stateDir (default ~/.drydock).
+ * Assemble the real providers from env. Records + secrets live under stateDir (default ~/.vibehard).
  * The HOST is chosen by artifact: a Dockerfile in the workspace → Fly (container deploy, any
  * language); otherwise Vercel (JS/TS-native). One signal — the presence of a Dockerfile — used
  * consistently with the verify gate's launch detection and FlyHostProvider's own precondition.
@@ -47,9 +47,9 @@ export function tablesFromMigrations(migrations: Migration[]): string[] {
 export function defaultSubstrateDeps(
   opts: { stateDir?: string; onStep?: (m: string) => void; workspacePath?: string; managed?: boolean; appName?: string } = {},
 ): SubstrateDeps {
-  const stateDir = opts.stateDir ?? join(homedir(), ".drydock");
+  const stateDir = opts.stateDir ?? join(homedir(), ".vibehard");
   const containerized = !!opts.workspacePath && existsSync(join(opts.workspacePath, "Dockerfile"));
-  const secrets = new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.DRYDOCK_SECRETS_KEY ?? "");
+  const secrets = new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.VIBEHARD_SECRETS_KEY ?? "");
   return {
     // Managed mode → auto-CREATE a Supabase project per app (Management API); else adopt the
     // project named in the environment (single-project v1). Managed needs no SUPABASE_URL/keys.
@@ -70,15 +70,15 @@ export interface DeployAppOptions {
   deps?: SubstrateDeps; // defaults to defaultSubstrateDeps (the real providers)
   stateDir?: string;
   onStep?: (message: string) => void;
-  managed?: boolean; // force managed (auto-create a project); defaults to the DRYDOCK_MANAGED env flag
+  managed?: boolean; // force managed (auto-create a project); defaults to the VIBEHARD_MANAGED env flag
 }
 
 /** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
 export async function deployApp(workspacePath: string, opts: DeployAppOptions = {}): Promise<DeployOutcome> {
   const app = opts.app ?? basename(workspacePath);
   // Managed (auto-create a project per app): forced by the caller (e.g. deployForTenant) or,
-  // failing that, opt-in via DRYDOCK_MANAGED=1. Default = adopt the env project.
-  const managed = opts.managed ?? process.env.DRYDOCK_MANAGED === "1";
+  // failing that, opt-in via VIBEHARD_MANAGED=1. Default = adopt the env project.
+  const managed = opts.managed ?? process.env.VIBEHARD_MANAGED === "1";
   const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);

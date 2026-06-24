@@ -104,10 +104,10 @@ function renderHistory(prompt: string, history: InterviewTurn[]): string {
 /** The live interviewer — one model call per question. */
 export function llmInterviewer(opts: InterviewerOptions = {}): Interviewer {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
-  const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+  const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
   // The interview is user-facing and short — default to the CAPABLE model (not the fast build model)
-  // for reliable, well-branched questions. Override with DRYDOCK_INTAKE_MODEL.
-  const model = process.env.DRYDOCK_INTAKE_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+  // for reliable, well-branched questions. Override with VIBEHARD_INTAKE_MODEL.
+  const model = process.env.VIBEHARD_INTAKE_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
   const config: EngineConfig = opts.config ?? { provider, model };
   return async (prompt: string, history: InterviewTurn[]) => {
     try {

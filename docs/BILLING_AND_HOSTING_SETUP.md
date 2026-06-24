@@ -19,7 +19,7 @@ webhook. Unmapped prices and forged/replayed events are rejected (fail-closed).
 2. Set env on the web host:
    - `STRIPE_SECRET_KEY=sk_test_…` (the client REFUSES `sk_live_` unless overridden).
    - `STRIPE_WEBHOOK_SECRET=whsec_…` (from the webhook endpoint you create next).
-   - `DRYDOCK_STRIPE_PRICE_MAP={"price_abc":"starter","price_def":"pro"}` — map each
+   - `VIBEHARD_STRIPE_PRICE_MAP={"price_abc":"starter","price_def":"pro"}` — map each
      Stripe price id to a **real plan key from PLANS**. A typo here fails closed to
      `free` (silently downgrades), so keep it aligned with plans.ts.
 3. In Stripe → Developers → Webhooks, add an endpoint `https://<your-host>/api/billing/webhook`
@@ -31,17 +31,17 @@ webhook. Unmapped prices and forged/replayed events are rejected (fail-closed).
 
 ## 2. Public hosting — CODE DONE (Supabase + Vercel/Fly), needs tokens + DNS
 
-**What's built:** `drydock ship <dir>` gates → provisions a backend (Supabase,
+**What's built:** `vibehard ship <dir>` gates → provisions a backend (Supabase,
 managed or adopt) → deploys to Vercel (or Fly if a Dockerfile is present) → live
 URL. See src/substrate/.
 
 **Operator steps:**
 - Backend: `SUPABASE_JWT_SECRET` (required; RLS in every deployed app). For adopt
   mode also `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`; managed mode
-  (`DRYDOCK_MANAGED=1`, forced for tenant deploys) auto-provisions per app.
+  (`VIBEHARD_MANAGED=1`, forced for tenant deploys) auto-provisions per app.
 - Host: `VERCEL_TOKEN` (+ `VERCEL_SCOPE` for a team) OR `FLY_API_TOKEN`
   (+ optional `FLY_ORG`/`FLY_REGION`).
-- Secrets: set `DRYDOCK_SECRETS_KEY` to a real key (the default is a dev placeholder).
+- Secrets: set `VIBEHARD_SECRETS_KEY` to a real key (the default is a dev placeholder).
 - **DNS (operator):** apps get a Vercel/Fly subdomain by default. Custom domains
   are a post-deploy step in the Vercel/Fly dashboard (add domain + CNAME).
 - **OAuth apps (operator):** the storefront's Google/GitHub sign-in needs OAuth

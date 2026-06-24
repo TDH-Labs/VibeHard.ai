@@ -20,7 +20,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function scratch(files: Record<string, string>): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-rls-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-rls-"));
   tmps.push(d);
   for (const [path, content] of Object.entries(files)) await Bun.write(join(d, path), content);
   return d;

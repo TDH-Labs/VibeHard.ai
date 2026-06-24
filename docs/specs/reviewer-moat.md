@@ -6,7 +6,7 @@ queues SCOPED packets (blocking findings + ±3-line code slices + specialty
 routing) and applies reviewer decisions deterministically. What's missing is the
 REVIEWER side: an SWE reviewer identity, getting NOTIFIED when work is queued,
 CLAIMING a packet (routed to their specialty), reviewing the scoped slice, and
-RESOLVING it. This is drydock's differentiator — expert eyes on exactly the
+RESOLVING it. This is vibehard's differentiator — expert eyes on exactly the
 risky slice, not the whole app.
 
 ## What already exists (reuse, don't rebuild)
@@ -24,16 +24,16 @@ risky slice, not the whole app.
 3. **CLI review flow** — signup / claim / review / resolve.
 
 ## Acceptance criteria
-1. `drydock reviewer signup "<name>" [specialty…]` creates a reviewer with
+1. `vibehard reviewer signup "<name>" [specialty…]` creates a reviewer with
    validated specialties (security|database|reliability|general; default
-   general), persisted; `drydock reviewer list` shows them.
-2. `drydock claim <ticket-id> <reviewer-id>` claims a needs-human ticket FOR a
+   general), persisted; `vibehard reviewer list` shows them.
+2. `vibehard claim <ticket-id> <reviewer-id>` claims a needs-human ticket FOR a
    registered reviewer, and REFUSES if the reviewer covers none of the packet's
    specialties (the routing moat) — with a clear message. An inactive/unknown
    reviewer is refused.
-3. `drydock review <ticket-id>` prints the scoped slice (each finding + its
+3. `vibehard review <ticket-id>` prints the scoped slice (each finding + its
    file:line code slice) — exactly what the reviewer judges, nothing more.
-4. `drydock resolve <ticket-id> <approved|rejected|fixed> [justification]`
+4. `vibehard resolve <ticket-id> <approved|rejected|fixed> [justification]`
    records a decision (by the claiming reviewer) for the ticket's findings and
    moves it to resolved. `approved` requires a justification (it becomes a
    waiver); without one it's refused (never silently honored).
@@ -60,7 +60,7 @@ risky slice, not the whole app.
   (POST, fetch injected for tests, errors swallowed).
 - `src/escalation/routing.ts`: export `SPECIALTIES` + `isSpecialty` (single source).
 - `src/cli.ts`: reviewer/claim/review/resolve commands; build a notifier from
-  `DRYDOCK_SLACK_WEBHOOK` and fire it (best-effort) in the escalate + fix paths.
+  `VIBEHARD_SLACK_WEBHOOK` and fire it (best-effort) in the escalate + fix paths.
 
 ## Verify
 - tsc clean; full suite green.

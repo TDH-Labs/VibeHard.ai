@@ -24,7 +24,7 @@ export const DERIVED_DIRS = [
   "coverage",
   ".turbo",
   ".git",
-  ".drydock", // our own meta dir (the persisted spec/PRD) — never app source
+  ".vibehard", // our own meta dir (the persisted spec/PRD) — never app source
 ] as const;
 
 const DERIVED = new Set<string>(DERIVED_DIRS);

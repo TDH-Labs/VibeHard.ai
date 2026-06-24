@@ -9,7 +9,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function scratch(files: Record<string, string>): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-scope-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-scope-"));
   tmps.push(d);
   for (const [path, content] of Object.entries(files)) await Bun.write(join(d, path), content);
   return d;
@@ -36,7 +36,7 @@ describe("hasAuthoredSource (§11 fail-closed guard)", () => {
 
   test("false for an empty or missing dir", async () => {
     expect(hasAuthoredSource(await scratch({}))).toBe(false);
-    expect(hasAuthoredSource(join(tmpdir(), "drydock-does-not-exist-xyz"))).toBe(false);
+    expect(hasAuthoredSource(join(tmpdir(), "vibehard-does-not-exist-xyz"))).toBe(false);
   });
 
   test("authored source nested alongside derived dirs is still found", async () => {

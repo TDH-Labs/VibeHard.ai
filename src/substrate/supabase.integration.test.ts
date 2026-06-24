@@ -4,25 +4,25 @@
  * row in each, then fires the anonymous probe and asserts it FLAGS the leaky table and
  * CLEARS the protected one. This is the differentiated guarantee, demonstrated end-to-end.
  *
- * GUARDED: mutates the DB (creates/seeds/drops `_drydock_probe_*`), so it runs only with
- * DRYDOCK_INTEGRATION=1 and the Supabase creds present. Teardown drops the probe tables.
+ * GUARDED: mutates the DB (creates/seeds/drops `_vibehard_probe_*`), so it runs only with
+ * VIBEHARD_INTEGRATION=1 and the Supabase creds present. Teardown drops the probe tables.
  *
- *   DRYDOCK_INTEGRATION=1 bun test src/substrate/supabase.integration.test.ts
+ *   VIBEHARD_INTEGRATION=1 bun test src/substrate/supabase.integration.test.ts
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { resolveDbUrl, SupabaseBackendProvider, type SupabaseEnv } from "./supabase.ts";
 
 const RUN =
-  !!process.env.DRYDOCK_INTEGRATION &&
+  !!process.env.VIBEHARD_INTEGRATION &&
   !!process.env.SUPABASE_URL &&
   !!process.env.SUPABASE_ANON_KEY &&
   !!process.env.SUPABASE_SERVICE_ROLE_KEY &&
   (!!process.env.SUPABASE_DB_PASSWORD || !!process.env.SUPABASE_DB_URL);
 
 const maybe = RUN ? test : test.skip;
-const OPEN = "_drydock_probe_open";
-const SECURE = "_drydock_probe_secure";
+const OPEN = "_vibehard_probe_open";
+const SECURE = "_vibehard_probe_secure";
 
 // Faithful CVE-2025-48757 reproduction. Supabase now AUTO-ENABLES RLS on new tables, so
 // the real leak isn't "no RLS" — it's a permissive policy. OPEN has RLS on but a

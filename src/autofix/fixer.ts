@@ -10,7 +10,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { DRYDOCK_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT } from "../engine/bolt/prompt.ts";
+import { VIBEHARD_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT } from "../engine/bolt/prompt.ts";
 import type { EngineConfig, Finding, GateVerdict } from "../types.ts";
 import { isBlocking } from "../types.ts";
 import { BoltEngine } from "../engine/bolt/engine.ts";
@@ -114,7 +114,7 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
       // Fix in the app's OWN language — a Python workspace (requirements.txt/pyproject)
       // gets the Python prompt, so the fixer's edits match the stack it's repairing.
       const usesPython = existsSync(join(workspacePath, "requirements.txt")) || existsSync(join(workspacePath, "pyproject.toml"));
-      const systemPrompt = usesPython ? PYTHON_SYSTEM_PROMPT : DRYDOCK_SYSTEM_PROMPT;
+      const systemPrompt = usesPython ? PYTHON_SYSTEM_PROMPT : VIBEHARD_SYSTEM_PROMPT;
       const session = await new BoltEngine(liveBoltDriver({ modelFactory: opts.modelFactory, systemPrompt })).startSession(
         workspacePath,
         config,

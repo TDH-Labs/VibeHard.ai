@@ -25,7 +25,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function scratch(files: Record<string, string>): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-verify-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-verify-"));
   tmps.push(d);
   for (const [path, content] of Object.entries(files)) await Bun.write(join(d, path), content);
   return d;
@@ -137,15 +137,15 @@ describe("parseEnvKeys / dummyEnvValue / synthEnv (pure)", () => {
     expect(dummyEnvValue("SUPABASE_URL")).toMatch(/^https?:\/\//);
     expect(dummyEnvValue("DATABASE_URI")).toMatch(/^https?:\/\//);
     expect(dummyEnvValue("PORT")).toBe("3000");
-    expect(dummyEnvValue("SESSION_SECRET")).toBe("drydock-verify-placeholder");
-    expect(dummyEnvValue("SUPABASE_ANON_KEY")).toBe("drydock-verify-placeholder");
+    expect(dummyEnvValue("SESSION_SECRET")).toBe("vibehard-verify-placeholder");
+    expect(dummyEnvValue("SUPABASE_ANON_KEY")).toBe("vibehard-verify-placeholder");
   });
 
   test("synthEnv unions keys across sources and is null-safe", () => {
     const env = synthEnv(["SUPABASE_URL=\nA_KEY=x", null, undefined, "PORT="]);
     expect(env).toEqual({
       SUPABASE_URL: "http://localhost:54321",
-      A_KEY: "drydock-verify-placeholder",
+      A_KEY: "vibehard-verify-placeholder",
       PORT: "3000",
     });
   });
@@ -214,8 +214,8 @@ describe("detectLaunch", () => {
 
 describe("dockerTag (pure)", () => {
   test("a deterministic, docker-safe tag from the dir name", () => {
-    expect(dockerTag("/tmp/My App!")).toBe("drydock-verify-my-app");
-    expect(dockerTag("/work/notes-api")).toBe("drydock-verify-notes-api");
+    expect(dockerTag("/tmp/My App!")).toBe("vibehard-verify-my-app");
+    expect(dockerTag("/work/notes-api")).toBe("vibehard-verify-notes-api");
   });
 });
 

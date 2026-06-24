@@ -29,7 +29,7 @@ describe("SupabaseManagementClient", () => {
   test("provisionProject: create → poll until healthy → keys → pooler host, assembled", async () => {
     let polls = 0;
     const { impl, calls } = fakeFetch((method, path) => {
-      if (method === "GET" && path === "/v1/organizations") return { json: [{ id: "org_sole", name: "Drydock" }] };
+      if (method === "GET" && path === "/v1/organizations") return { json: [{ id: "org_sole", name: "VibeHard" }] };
       if (method === "POST" && path === "/v1/projects") return { json: { id: "newref123", region: "us-east-1", status: "COMING_UP" } };
       if (method === "GET" && path === "/v1/projects/newref123") {
         polls++;

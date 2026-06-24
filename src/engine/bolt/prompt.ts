@@ -1,13 +1,13 @@
 /**
- * Drydock system prompt — DERIVED AND ADAPTED from bolt.diy's getSystemPrompt()
+ * VibeHard system prompt — DERIVED AND ADAPTED from bolt.diy's getSystemPrompt()
  * (stackblitz-labs/bolt.diy → app/lib/common/prompts/prompts.ts). bolt.diy is MIT
  * Licensed; © StackBlitz, Inc. This is a modified derivative, not a verbatim copy.
  *
  * Why derive (PROJECT_BRIEF.md §13 + operator direction): keep bolt's hard-won
  * <boltArtifact>/<boltAction> protocol and ordering rules — the BoltDriver seam and
- * normalizer.ts depend on that exact wire format — and adapt the rest to Drydock:
+ * normalizer.ts depend on that exact wire format — and adapt the rest to VibeHard:
  *
- *   • Runtime: Drydock runs generated apps SERVER-SIDE (Docker/Fly), not in a
+ *   • Runtime: VibeHard runs generated apps SERVER-SIDE (Docker/Fly), not in a
  *     browser WebContainer. bolt's WebContainer constraints (no native binaries,
  *     Python-stdlib-only, no C/C++ compiler) are removed — they don't apply here.
  *   • Database: flipped from bolt's "prefer sqlite/libsql" (a WebContainer
@@ -24,7 +24,7 @@
  * files and break the gate. Re-justified for our architecture, not WebContainer.
  *
  * Dropped: bolt's React-Native/Expo mobile section (WebContainer-coupled, out of
- * Drydock's web-app scope). Kept: the artifact protocol and chain-of-thought.
+ * VibeHard's web-app scope). Kept: the artifact protocol and chain-of-thought.
  *
  * Added (not from bolt): <simplicity_standards> — a build-vs-complexity ladder
  * (necessity → platform/stdlib → existing deps → minimal code) countering the LLM's
@@ -41,8 +41,8 @@
 /** The working directory generated file paths are relative to (matches the gate's scan root). */
 export const WORK_DIR = "/home/project";
 
-export const DRYDOCK_SYSTEM_PROMPT = `
-You are Drydock, an expert AI assistant and exceptional senior software developer with vast knowledge across many languages, frameworks, and best practices. You generate complete, production-grade web applications.
+export const VIBEHARD_SYSTEM_PROMPT = `
+You are VibeHard, an expert AI assistant and exceptional senior software developer with vast knowledge across many languages, frameworks, and best practices. You generate complete, production-grade web applications.
 
 <runtime_constraints>
   Generated apps run SERVER-SIDE in a sandboxed Linux container (Docker), not in a browser. Native binaries, full package managers (npm/pip), and compilers ARE available — do not avoid native dependencies. Prefer a conventional Node.js/TypeScript stack (a clear server entry point, or Vite for SPA front ends).
@@ -110,7 +110,7 @@ You are Drydock, an expert AI assistant and exceptional senior software develope
        - start: start the dev server / app. Use only to launch; never re-run on file changes.
        - supabase: a database migration or query (see <database_instructions>).
     5. ORDER matters: create a file before any command that uses it. Put \`package.json\` FIRST so dependencies install first; list ALL dependencies in it and run a single install (not \`npm i <pkg>\` per package). For every dependency use a CARET range on a CURRENT major (e.g. \`"^5.0.0"\`), NEVER an exact stale pin — the package manager then resolves the latest patched release, which keeps known-vulnerability exposure low (a security gate scans the INSTALLED versions and blocks on CVEs). Favor recent, actively-maintained major versions; avoid end-of-life ones.
-    6. CRITICAL: Always provide the FULL, updated content of each file. NEVER use placeholders like "// rest of the code unchanged" or diff/patch snippets — Drydock writes file contents verbatim, so partial content corrupts the file.
+    6. CRITICAL: Always provide the FULL, updated content of each file. NEVER use placeholders like "// rest of the code unchanged" or diff/patch snippets — VibeHard writes file contents verbatim, so partial content corrupts the file.
     7. Split functionality into small, focused modules with clear imports. Keep files small, clean, readable, and maintainable.
     8. Provide a launchable entry point (a server that listens, or a Vite app) so the app can be verified to boot.
   </artifact_instructions>
@@ -164,7 +164,7 @@ server.listen(process.env.PORT || 3000);</boltAction>
  * rls-reliance check passes. Selected by `selectSystemPrompt(stack)`.
  */
 export const PYTHON_SYSTEM_PROMPT = `
-You are Drydock, an expert AI assistant and exceptional senior backend engineer. You generate complete, production-grade web services in PYTHON.
+You are VibeHard, an expert AI assistant and exceptional senior backend engineer. You generate complete, production-grade web services in PYTHON.
 
 <runtime_constraints>
   Generated apps are DEPLOYED AS A CONTAINER (a Dockerfile, on Fly.io) — NOT as serverless functions. Build a FastAPI service run by uvicorn that LISTENS ON THE PORT IN THE \`PORT\` ENVIRONMENT VARIABLE (default 8080). Supabase (hosted Postgres) is the backend. You MUST produce: requirements.txt, a FastAPI app (\`main.py\` exposing \`app\`), a Dockerfile, a .env.example, and the Supabase migration(s).
@@ -299,5 +299,5 @@ NEVER use the word "artifact" in prose. Use valid markdown, be concise: the brie
 /** Pick the codegen system prompt for an architecture's stack. Python/FastAPI/Flask →
  *  the Python prompt; everything else → the default TypeScript/Supabase web prompt. */
 export function selectSystemPrompt(stack: string): string {
-  return /\b(python|fastapi|flask|uvicorn|django)\b/i.test(stack) ? PYTHON_SYSTEM_PROMPT : DRYDOCK_SYSTEM_PROMPT;
+  return /\b(python|fastapi|flask|uvicorn|django)\b/i.test(stack) ? PYTHON_SYSTEM_PROMPT : VIBEHARD_SYSTEM_PROMPT;
 }

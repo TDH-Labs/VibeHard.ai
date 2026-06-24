@@ -1,16 +1,16 @@
 /**
  * dep-vuln gate — end to end with REAL trivy (pinned container). Guarded behind
- * DRYDOCK_INTEGRATION (needs Docker + trivy's vuln DB; first run downloads the DB
- * into the drydock-trivy-cache volume, then it's cached). Run with:
+ * VIBEHARD_INTEGRATION (needs Docker + trivy's vuln DB; first run downloads the DB
+ * into the vibehard-trivy-cache volume, then it's cached). Run with:
  *
- *   DRYDOCK_INTEGRATION=1 bun test depvuln.integration
+ *   VIBEHARD_INTEGRATION=1 bun test depvuln.integration
  */
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { runDepVuln } from "./depvuln.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
-const run = process.env.DRYDOCK_INTEGRATION ? describe : describe.skip;
+const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("dep-vuln gate (real trivy)", () => {
   test("BLOCKS a project with a known-vulnerable dependency (lodash 4.17.4)", async () => {

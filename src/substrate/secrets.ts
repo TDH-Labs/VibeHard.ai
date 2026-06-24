@@ -2,7 +2,7 @@
  * SecretsStore — encrypted-at-rest LOCAL store (docs/runtime-substrate § W3, v1). It
  * holds the app's connection secrets, INCLUDING the Supabase service-role key, so it
  * must be genuinely encrypted, not just "stored privately" — the NFR has teeth. v1 is
- * AES-256-GCM with a scrypt-derived key from a passphrase (env DRYDOCK_SECRETS_KEY); a
+ * AES-256-GCM with a scrypt-derived key from a passphrase (env VIBEHARD_SECRETS_KEY); a
  * cloud KMS impl drops in behind the same seam later. Tamper or wrong key → GCM auth
  * fails → `get` returns null (never a silent wrong-plaintext).
  *
@@ -27,7 +27,7 @@ export class LocalEncryptedSecretsStore implements SecretsStore {
   ) {
     if (!passphrase) {
       // Fail closed: refuse to operate without a key rather than store secrets weakly.
-      throw new Error("LocalEncryptedSecretsStore needs a passphrase (set DRYDOCK_SECRETS_KEY)");
+      throw new Error("LocalEncryptedSecretsStore needs a passphrase (set VIBEHARD_SECRETS_KEY)");
     }
   }
 

@@ -1,5 +1,5 @@
 {
-  "name": "drydock",
+  "name": "vibehard",
   "version": "0.0.0",
   "private": true,
   "description": "Safe vibe coding — an enforced gate chain between an AI app generator and deploy.",
@@ -9,7 +9,7 @@
     "bun": ">=1.1.0"
   },
   "bin": {
-    "drydock": "./src/cli.ts"
+    "vibehard": "./src/cli.ts"
   },
   "scripts": {
     "test": "bun test",

@@ -26,7 +26,7 @@ const run = process.env.ANTHROPIC_API_KEY ? describe : describe.skip;
 
 run("liveBoltDriver (real Anthropic)", () => {
   test("generates a real app that materializes files into the workspace", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "drydock-live-"));
+    const dir = await mkdtemp(join(tmpdir(), "vibehard-live-"));
     tmps.push(dir);
     const session = await new BoltEngine(liveBoltDriver()).startSession(dir, CONFIG);
 

@@ -10,7 +10,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function workspace(files: Record<string, string>): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-pkt-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-pkt-"));
   tmps.push(d);
   for (const [path, content] of Object.entries(files)) await Bun.write(join(d, path), content);
   return d;

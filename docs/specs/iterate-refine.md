@@ -6,11 +6,11 @@ After an app is built, let the user request a change in plain language
 **incrementally regenerated + re-gated**, without re-planning the whole thing
 from scratch and without silently breaking a previously-passing build.
 
-`drydock refine <dir> "<change request>"`
+`vibehard refine <dir> "<change request>"`
 
 ## Why this shape
 - **Spec is the source of truth** (§ project principle): the change is folded
-  into `.drydock/spec.json` so the request is durably recorded and the spec
+  into `.vibehard/spec.json` so the request is durably recorded and the spec
   keeps describing what the app actually is. Code stays a projection.
 - **Minimal blast radius:** we do NOT re-run the heavy PRD→SRS→architecture
   plan (the user already found full planning slow). We feed the engine the
@@ -24,8 +24,8 @@ from scratch and without silently breaking a previously-passing build.
   shipped.
 
 ## Acceptance criteria
-1. `drydock refine <dir> "<change>"` exists; errors clearly if `<dir>` has no
-   `.drydock/spec.json` (must `build` first) or the change string is empty.
+1. `vibehard refine <dir> "<change>"` exists; errors clearly if `<dir>` has no
+   `.vibehard/spec.json` (must `build` first) or the change string is empty.
 2. The change is appended to the persisted spec (a `refinements` trail) so it
    survives and informs future refines.
 3. Regeneration is incremental: unrelated files are not gratuitously rewritten
@@ -49,7 +49,7 @@ from scratch and without silently breaking a previously-passing build.
 ## Design
 - `src/refine/refine.ts`: pure-ish orchestrator
   `refine(dir, change, opts)` →
-  1. load `.drydock/spec.json`; if absent → throw a clear error.
+  1. load `.vibehard/spec.json`; if absent → throw a clear error.
   2. `wasGreen = (await gate(dir)).passed` (baseline).
   3. `backup = checkpoint.save(dir)`.
   4. fold change into spec (`appendRefinement`) + persist.

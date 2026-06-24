@@ -1,6 +1,6 @@
-# Drydock — project brief & kickoff
+# VibeHard — project brief & kickoff
 
-> **Working name:** *Drydock* (a drydock is where a vessel is inspected and made
+> **Working name:** *VibeHard* (a vibehard is where a vessel is inspected and made
 > seaworthy before it sails — which is exactly what this product does to
 > AI-generated apps before they deploy). Placeholder; rename freely. Sits in the
 > same nautical family as **Harbor** / **Tugboat**, which it builds on.
@@ -33,7 +33,7 @@ Two facts define the market:
 **The gap = the product.** Nobody occupies the intersection of *non-technical
 accessibility* + *enforced engineering quality*. Every existing tool is either a
 developer tool (Cursor, Claude Code, Factory — assume IDE/dev literacy) or an
-accessible builder with no real gates (Lovable, Bolt). Drydock is the missing
+accessible builder with no real gates (Lovable, Bolt). VibeHard is the missing
 layer: **hide the gates *from* the operator while enforcing them *for* the operator.**
 
 > **Before proposing a direction change, read §10 (settled decisions).** A
@@ -51,7 +51,7 @@ layer: **hide the gates *from* the operator while enforcing them *for* the opera
 | **Escalation marketplace** ⭐ | On-demand engineer reviews the slice a gate flags | **Build — the moat.** No OSS shortcut. |
 
 **Core principle:** the gates sit *between* generate and deploy. bolt.diy ships
-straight to deploy today (that's why Lovable apps leak); Drydock inserts the gate
+straight to deploy today (that's why Lovable apps leak); VibeHard inserts the gate
 chain into that path. **Nothing deploys until it passes.** When a gate flags a
 judgment call it can't auto-resolve, the *single localized slice* is packaged and
 routed to an on-demand engineer (the Harbor "rooms" route to the right specialty).
@@ -60,6 +60,12 @@ routed to an on-demand engineer (the Harbor "rooms" route to the right specialty
 rebuild the front door or the agent loop — graft onto bolt.diy + the SDK. Build
 only the two ⭐ rows. That's ~80% assembled, 20% built — and the 20% is the
 defensible part.
+
+**Front-door design language is BINDING — see `docs/design-language.md`.** The
+fork gives ~80% of a working builder; that doc is the 20% that makes it *VibeHard*
+(forge-not-waiting-room; empowerment-not-reassurance; gravitas-not-confetti; name
+the human; honest copy — binds to §16). First mockups (build / ignition / held)
+done 2026-06-22. Don't ship bolt.diy's developer surface with a new logo.
 
 ## 4. Tech stack (decided)
 - **Primary language: TypeScript, on Bun.** It's the one language spanning every
@@ -103,7 +109,7 @@ gitleaks in pinned OrbStack containers — no fabricated findings):
 - A prior prototype "architect loop" (opencode-swarm; bash + markdown skills +
   JSON config) proved the *pipeline design* (grill → PRD → buy-vs-build → verify
   → security → compliance → refactor → prod-feedback). It is a reference, **not**
-  a foundation — it's prompt-defined and provider-fragile. Drydock re-homes that
+  a foundation — it's prompt-defined and provider-fragile. VibeHard re-homes that
   pipeline as enforced TS gates.
 - **`reference/` (gitignored, local-only) — provenance + the actual prototype
   source.** See `reference/PROVENANCE.md`: it points to the two origin chat
@@ -134,7 +140,7 @@ gitleaks in pinned OrbStack containers — no fabricated findings):
 **Port the gate-proof orchestration from bash to a typed TypeScript library** —
 this becomes the reusable `gate` module every other layer calls.
 
-1. Scaffold a Bun + TypeScript project here (`~/dev/drydock`), mirroring Harbor's
+1. Scaffold a Bun + TypeScript project here (`~/dev/vibehard`), mirroring Harbor's
    conventions (`bun test`, `tsc --noEmit` must be green; strict TS).
 2. Build `src/gate/` that:
    - runs each scanner as a pinned container (semgrep + custom `sqli.yaml`,
@@ -149,7 +155,7 @@ this becomes the reusable `gate` module every other layer calls.
 3. Add tests: BLOCK on a fixture with the three failure modes; PASS on the fixed
    fixture; assert findings come from the real scanners (or mock the container
    boundary for unit tests + one integration test that really runs them).
-4. CLI entry: `drydock gate <dir>` printing the verdict + findings (parity with
+4. CLI entry: `vibehard gate <dir>` printing the verdict + findings (parity with
    `gate-proof/gates/scan-target.sh`).
 
 **After M1:** wire the gate behind a generator (run it automatically on freshly
@@ -158,7 +164,7 @@ review packet → engineer → resume — "Option B"). Don't build the marketpla
 until the gate-library + a generator loop are solid.
 
 ## 9. Definition of done for M1
-`drydock gate ~/dev/gate-proof/app` reproduces the proof's verdict from typed TS
+`vibehard gate ~/dev/gate-proof/app` reproduces the proof's verdict from typed TS
 (not bash): BLOCK on the vulnerable app, PASS on the remediated one, with findings
 sourced from real semgrep + gitleaks. `bun test` + `tsc --noEmit` green.
 
@@ -215,7 +221,7 @@ through a deterministic gate before it ships.**
 | Domain knowledge (PRD craft, SOC2 checklist, secure-coding) | **Skill** | reference the LLM consults; the *enforcement* derived from it is code |
 
 **The inversion (vs the prototype):** the prototype put *enforcement* in skills
-(prompts) — which is exactly why the LLM skipped steps. Drydock makes enforcement
+(prompts) — which is exactly why the LLM skipped steps. VibeHard makes enforcement
 deterministic code and shrinks skills to *interpretation, generation, and
 knowledge*. The LLM works **inside** a step; the **sequence and gating between
 steps is TypeScript that cannot be talked past.**
@@ -227,7 +233,7 @@ reports green (the **false-PASS class**). Concretely: a scanner that errors,
 produces no valid output, or can't find its inputs returns a **CRITICAL
 `scan-failed` finding (which blocks)** — never an empty (passing) result. This
 class has bitten **three times**: the Pi `pipefail`/glob bug (no source detected →
-nothing ran → "green"), Drydock's relative-Docker-path bug (empty named volume →
+nothing ran → "green"), VibeHard's relative-Docker-path bug (empty named volume →
 scanned nothing → PASS), and the `sast`/`secrets` fail-open caught + fixed
 2026-06-21 (`JSON.parse(out) … catch {}` → 0 findings → PASS on scanner error).
 **Treat any "0 findings" path as suspect until you've proven the check actually
@@ -236,7 +242,7 @@ from the I/O so the fail-closed logic is unit-tested without a container.
 
 ## 12. M1 spec (corrected from an external "harbor-core" spec review, 2026-06-20)
 An external spec was reviewed; adopt its bones, with these **binding corrections**:
-- **Name stays Drydock** (not "Harbor"/`harbor-core` — collides with the existing
+- **Name stays VibeHard** (not "Harbor"/`harbor-core` — collides with the existing
   Harbor repo).
 - **Test runner: `bun test`** (not vitest — consistency with the skeleton + Harbor).
 - **Gate set = the SECURITY gates** (`sast`, `secrets`, `rls`, launch-probe
@@ -275,7 +281,7 @@ src/
     rls.ts          # static SQL/RLS check → Finding[]
     verify.ts       # launch + probe, multi-run
     index.ts        # runGate(dir, gates) → GateVerdict[]; deploy-sentinel logic
-  cli.ts            # drydock gate <dir>
+  cli.ts            # vibehard gate <dir>
 ```
 Severity mapping (preserve the proof's behavior): semgrep ERROR → `high`
 (blocking), WARNING → `medium`, INFO → `low`; `blocking` counts `critical|high`
@@ -400,7 +406,7 @@ a gate list is copyable (a Wix-backed Base44 could add it). The defensible moat 
 deploy-*blocking* gates — friction fights their speed metric; we own "we block,
 they warn"). Build the human layer; don't mistake the gates for the product.
 
-**Compliance scope — BINDING RULE, do not violate.** Drydock is a **security layer,
+**Compliance scope — BINDING RULE, do not violate.** VibeHard is a **security layer,
 NOT a compliance certification.** We do **not** have SOC 2 or HIPAA "built in," and
 a scanner *cannot* certify compliance — those are organizational / legal /
 infrastructural regimes (policies, audits, BAAs, compliant hosting, breach
@@ -419,6 +425,23 @@ grafted** (commodity — don't try to out-build them there). Our story:
 **"scoped, architected, secure, verified" + a human safety net** vs their "fast,
 runs, maybe wrong + maybe leaks." Differentiation stack = gates (table-stakes) +
 PRD/architecture (softer, reinforcing) + human escalation (moat) + segment.
+
+**Marketing voice + messaging is BINDING — see `docs/positioning.md`** (grounded in
+competitor shopping 2026-06-22). Key findings: Set A (Lovable/Bolt/Replit/v0/Base44)
+all sound identical — "what will you build?", speed/ease/magic, "build" is worn out,
+security absent. Set B (Blaze/Knack/Specode) own "HIPAA-compliant" as a badge (which
+§16 forbids us — and buyers increasingly distrust it). Our gap: **as easy as Set A,
+as careful as Set B, honest enough to show our work instead of faking a badge** — the
+grown-up in the room. Marketing leads fear-first→empowerment; the §16 honest-copy
+HARD BANS (no "HIPAA-compliant"/"unhackable"/"0 breaches") are a *contrarian trust
+play*, not just a constraint.
+
+**Pricing model is captured in `docs/pricing.md`** (Teladoc-benchmarked, 2026-06-22).
+Shape: **agency-access pricing + pooled human review** (Build / Practice / Firm tiers;
+human SWE review *included* in Practice, never a point-of-fix toll). Key correction:
+the SWE review is **scoped to ~20–30 min** (gate localizes the slice) → ~$50/review,
+so a ~$199–299/mo Practice tier holds ~70% margin (Teladoc's). The **one open variable
+is the escalation rate** — unknown until the first cohort; it sets the final prices.
 
 **Adaptive rigor** (applies to gates AND the PRD/architecture front-half). Rigor
 scales to the task: full PRD / architecture / verification for real or complex
@@ -442,6 +465,23 @@ the fix. These are the receipts behind "we block, they warn" — keep appending.
   block, they warn" claim literally true for the one breach we position against.
   Regression tests: Supabase query + no migration → block; sound per-table policies
   → pass; non-Supabase app → no false positive. (`src/gate/rls.ts`.)
+- **2026-06-21 — `rls` CDN/client-side blind spot closed (the dominant
+  vibe-coded shape).** Validating the fix above on a real run surfaced a hole *in the
+  fix*: Supabase was detected **only** by the `@supabase/supabase-js` npm import, so a
+  CDN app (`<script src>` + `window.supabase` global, inline `.from()`, **no**
+  `package.json` dep) read as "not using Supabase" → gate no-ops → **vacuous PASS** —
+  the same false-negative through a different door, and the *most common* no-code
+  shape (script tag, no build step). Fix: (1) broaden the source scan to templates
+  (`.html/.htm/.ejs/.hbs/.handlebars/.pug`) where CDN tags + inline queries live;
+  (2) replace the single import check with `SUPABASE_MARKERS` (any-of): the
+  import/CDN `src`, the `window.supabase` UMD global, a `*.supabase.co` project URL,
+  or `SUPABASE_(URL|ANON_KEY|SERVICE_ROLE_KEY|KEY)` env names (incl. `VITE_`/
+  `NEXT_PUBLIC_` prefixes). Detection errs toward **block** (the safe side); the cost
+  is false-positives (Supabase-auth-only, or a stray `*.supabase.co` in a comment)
+  now block — **acceptable only because the §24 `false_positive` audited-waiver is the
+  release valve.** Don't chase perfect precision; let imprecision fail toward "a human
+  looks." Regression: CDN + no migration → block; CDN + sound migration → pass.
+  (`src/gate/rls.ts`, e2e in `rls.test.ts`.)
 - **2026-06-21 — `verify` hardened for the variety of real apps** (detail in §18):
   probe `/health` **then `/`** (any 2xx/3xx, redirects followed, = booted); inject
   dummy env from `.env.example`; **install deps before launch**; capture the boot
@@ -522,9 +562,9 @@ Track: later; advisory-only; ties into the human-escalation moat.
   option, the human decides, never auto-procures.** Deterministic registry + LLM
   match. Real senior-engineer move (agents default to BUILD); pairs with the segment
   (don't let a non-technical user rebuild Stripe).
-- **rigor-select** — ⚠️ Drydock reframe of Pi's `methodology-select`. **Pi's version
+- **rigor-select** — ⚠️ VibeHard reframe of Pi's `methodology-select`. **Pi's version
   chose superpowers-path vs swarm-path (the prototype's two execution models) — that
-  does NOT map to Drydock** (single bolt engine). The Drydock analog is the §16
+  does NOT map to VibeHard** (single bolt engine). The VibeHard analog is the §16
   **adaptive-rigor** decision (prototype vs production rigor, set from the request),
   NOT an execution-model fork. Capture it as the rigor mechanism, not Pi's skill.
 - **refactor-phase** — *(Pi: `reference/prototype/skills/refactor-phase/`)* after
@@ -537,7 +577,7 @@ Track: later; advisory-only; ties into the human-escalation moat.
 - **compliance-aware gate** — *(Pi: `reference/prototype/skills/compliance-posture/`)*
   when the spec flags sensitive data, evaluate SOC 2 / ISO applicability, retention,
   access-control models, sanitization, audit logs (beyond the single RLS control).
-  ⚠️ Pi's skill *"blocks DONE if a control is missing"* — **Drydock's version must
+  ⚠️ Pi's skill *"blocks DONE if a control is missing"* — **VibeHard's version must
   obey §16:** it *checks the technical controls a framework requires, flags gaps,
   and routes the rest to a human.* It **"helps toward" compliance; it NEVER
   certifies.** Must not become a "HIPAA / SOC 2 compliant" claim.
@@ -549,7 +589,7 @@ separate gate** — fold it into the lint gate + verify. ⚠️ The *lesson* is 
 matters: Pi's bash used `ls *.py *.js 2>/dev/null | grep -q .` under `set -o
 pipefail`, which failed whenever *any* glob didn't match → "no source found" → NO
 lint/tests/README gate ran, yet it looked green (a **false-PASS**). Fixed in Pi
-with native glob expansion (`has_glob()`). For Drydock (TS, not bash) that specific
+with native glob expansion (`has_glob()`). For VibeHard (TS, not bash) that specific
 bug is moot, but the principle is the **§11 fail-closed invariant**: detection that
 can't identify the stack must fail closed, not silently skip.
 
@@ -574,7 +614,7 @@ node-launch / SPA-build probe; this is the full contract it grows into.
   leaks, flaky tests, or time-dependent bugs — re-run N times. (Already the
   `verify.ts` philosophy; this is the binding statement of it.)
 - **Sentinel.** Each run's success marker is `HARD_VERIFY_PASS` (exit 0); the gate
-  passes only when every run emits it. Drydock's deploy ratchet (`.gate/HARD_VERIFY_PASS`)
+  passes only when every run emits it. VibeHard's deploy ratchet (`.gate/HARD_VERIFY_PASS`)
   already mirrors this — one sentinel writer, written iff all gates pass.
 - **Retry budget — default 5.** Each FAIL → fix → re-verify cycle decrements it
   (this is the §15 auto-fix loop's bound). Budget exhausted with verify still
@@ -628,7 +668,7 @@ skips) and **§16 adaptive rigor** (block at production, warn at prototype).
 The outer loop that closes the lifecycle: the deployed app emits structured logs →
 a scheduled scan detects anomalies → a feedback packet feeds the next iteration.
 **Non-blocking, feeds-forward** (never an LLM in a blocking path — §11). Needs
-hosting (§15 LATER), but the contract is fixed now. Drydock types the packet (like
+hosting (§15 LATER), but the contract is fixed now. VibeHard types the packet (like
 `Finding`/`EscalationPacket`); the scan is deterministic.
 
 - **JSONL log schema** (app emits, append-only, one event/line → `logs/<project>/app.jsonl`):
@@ -652,7 +692,7 @@ hosting (§15 LATER), but the contract is fixed now. Drydock types the packet (l
   `allowed = round(total×(1−SLO/100))`, floor 1, breach when `failures ≥ allowed` —
   the count-based fallback.)
 - **Window + cadence.** Scan window 15m; scan cadence every 5m (Harbor cron /
-  launchd in the prototype → a Drydock scheduled job); rolling 24h latency baseline;
+  launchd in the prototype → a VibeHard scheduled job); rolling 24h latency baseline;
   previous-window comparison for webhooks.
 - **Feedback packet (`PROD_FEEDBACK_PACKET`).** Fields: `anomaly_type, severity,
   detected_at, window, measured vs baseline vs SLO, route/source, sample_log_lines
@@ -664,7 +704,7 @@ hosting (§15 LATER), but the contract is fixed now. Drydock types the packet (l
 ## 21. Compliance framework beyond RLS — BOUNDED BY §16
 RLS is **one of seven** controls a sensitive-data customer needs. The prototype's
 `compliance-posture` gate (triggered when the spec flags `sensitive_data`) checks
-all seven. **Drydock keeps the technical-control checks but obeys the §16 binding
+all seven. **VibeHard keeps the technical-control checks but obeys the §16 binding
 rule: it checks controls, flags gaps, routes the rest to a human — it "helps
 toward," it NEVER certifies. Never emit "HIPAA/SOC 2 compliant."**
 
@@ -717,7 +757,7 @@ Output is a schema-validated spec/PRD (durable, ours); adaptive rigor (§16).
   no → BUILD; else **BUY**. **Advisory** — surfaces the option + rationale in the
   PRD; the human decides; default BUILD; **never auto-procures**. Pairs with the
   segment: don't let a non-technical user rebuild Stripe.
-- **rigor & parallelism select** (the Drydock reframe of Pi's `methodology-select` —
+- **rigor & parallelism select** (the VibeHard reframe of Pi's `methodology-select` —
   §17). Two deterministic decisions made from the request/plan, *not* an
   execution-model fork:
   - **Adaptive rigor** (§16): prototype (N=1, skip ceremony) vs production (full
@@ -744,7 +784,7 @@ Output is a schema-validated spec/PRD (durable, ours); adaptive rigor (§16).
 
 ## 23. Explicitly OUT of scope (with the transferable lesson kept)
 - **opencode-swarm (18-agent config).** The operator's prototyping tool —
-  provider-fragile, 18 role→model assignments. **Not the Drydock engine** (§10.3:
+  provider-fragile, 18 role→model assignments. **Not the VibeHard engine** (§10.3:
   single bolt.diy/SDK engine; don't mistake the prototype engine for the product
   engine). The model-assignment evidence is opencode-specific and not carried over.
   **Transferable idea kept → §22:** parallel-vs-sequential codegen sub-tasks driven
@@ -752,8 +792,8 @@ Output is a schema-validated spec/PRD (durable, ours); adaptive rigor (§16).
 - **Harbor progressive-disclosure chain** (`agent_map → room → skills_index →
   SKILL.md`; `harbor sync`/`skill-assign`; `config.toml [skills.rooms.*]`). Harbor's
   room/skill *discovery* substrate serves a general multi-domain agent environment;
-  **Drydock is single-purpose** (one pipeline: intake → generate → gate → deploy)
-  and needs no room routing or progressive skill discovery. Drydock still uses the
+  **VibeHard is single-purpose** (one pipeline: intake → generate → gate → deploy)
+  and needs no room routing or progressive skill discovery. VibeHard still uses the
   Harbor *primitives* it actually needs (audit, session, budget, isolation — §6),
   just not the discovery routing.
 - **Transferable lesson that DOES carry (already §11):** the `has_glob`/`pipefail`
@@ -778,6 +818,35 @@ gate blocks (or auto-fix exhausts / hits a judgment call)
   → our gate RE-RUNS as CI (GitHub Action) on that PR  ← re-gate
   → passes → deploy proceeds  (deploy itself needs hosting — §15)
 ```
+
+### Async queue + structured packet (mechanics — adopted 2026-06-21, from a Scale.com eval; Scale itself REJECTED per the §24 BINDING rule)
+Two *shapes* surfaced while evaluating Scale AI as the workforce. The **labor was
+wrong** (anonymous crowd/data-labelers — gut the trust moat, no accountability for
+sensitive-data code); these **two mechanics are right regardless of who reviews**,
+so keep them and point them at our own pool / GitHub, never at Scale:
+
+- **Async triage queue — `NEVER` an inline blocking gate.** A human review takes
+  minutes-to-hours; the deploy pipeline must **not** stall synchronously waiting on
+  it (Gemini's own reality-check: Scale-style SLAs are multi-hour). When auto-fix
+  exhausts → the app enters a **`needs-human` HELD state** (a distinct state, *not* a
+  failed/blocked build), the escalation is **queued**, and the reviewer claims + fixes
+  **async**. Only the **re-gate** (CI on the PR) sits on the synchronous path back to
+  deploy. This decouples human latency from pipeline latency — it names the held
+  state + queue that the flow above implies.
+- **Structured escalation packet — a closed request/response contract both ways**
+  (extends "packet = the `Finding` we already produce"):
+  - **Request (VibeHard → review surface):** the `Finding` (tool, ruleId, severity,
+    file, line, message) **+ scoped code context** ("enough to judge", §24) **+ the
+    human instruction** (confirm or false-positive; if confirmed, fix minimally and
+    preserve behavior).
+  - **Response (review surface → VibeHard, via webhook):** `{ verdict: "confirmed" |
+    "false_positive", fixedSnippet?, rationale }`. `false_positive` = an **audited
+    waiver** (§24); `confirmed` + fix flows back **through the gate**, never trusted
+    directly (human proposes, deterministic disposes).
+  - On GitHub this rides existing primitives — Issue body = request, **PR diff =
+    `fixedSnippet`**, label = `verdict`, `pull_request.closed` webhook = the callback.
+    **No custom API to Scale or anyone.** The *shape* is portable if the surface ever
+    changes; the *labor* stays the vetted pool (§24 BINDING).
 
 ### Why GitHub + Slack (and not a built console)
 - **GitHub already *is* the reviewer platform:** Issue = the ticket, self-assign =
@@ -811,8 +880,10 @@ audit tells you everything.
 
 ### MVP boundary (build now vs defer)
 - **Build (MVP glue):** GitHub repo/Issue/PR convention, gate-as-GitHub-Action
-  (re-gate on PR), Slack alert + FCFS claim, the verdict→waiver audit, packet =
-  the `Finding` we already produce.
+  (re-gate on PR), Slack alert + FCFS claim, the verdict→waiver audit, the
+  **`needs-human` held state + async queue**, and the **structured escalation packet
+  contract** (request + webhook-response shape above) — packet body = the `Finding`
+  we already produce + scoped context.
 - **Defer (§15 LATER, the moat/ops):** a built reviewer console, specialty routing,
   scoped-slice access (reviewer sees only the flagged slice, not the whole codebase
   — the gate already localizes it), billing/SLA, recruiting a large pool, liability
@@ -861,7 +932,7 @@ notifications) — **NOT the reviewers and NOT their pay.** Both are separate:
     where Deel/Upwork EOR add value over Gusto/Stripe Connect. A scale-only concern.
 
 ### What the GitHub API/webhooks do for the "on-demand request"
-- **Create the request:** Drydock programmatically opens an Issue/PR (finding +
+- **Create the request:** VibeHard programmatically opens an Issue/PR (finding +
   code) and **requests review from a "reviewers" team** (API) → members notified.
 - **Urgency + first-come claim:** GitHub's native notifications are *passive* (watch
   the repo), so pair with **Slack** (GitHub→Slack app or your webhook→Slack) for the

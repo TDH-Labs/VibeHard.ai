@@ -9,11 +9,11 @@
 All are **behaviour after the gate sentinel** — the substrate never runs on a blocked build.
 
 ### R1 — Connect the customer's Supabase org (one-time)
-The customer grants Drydock access to their Supabase organization via OAuth; the grant is
+The customer grants VibeHard access to their Supabase organization via OAuth; the grant is
 stored (a token reference) for that customer.
-- **AC1.1** A customer can complete the connect flow and Drydock can thereafter act in
+- **AC1.1** A customer can complete the connect flow and VibeHard can thereafter act in
   their org with least-privilege scope.
-- **AC1.2** Drydock never provisions in its *own* org — every project lives in the
+- **AC1.2** VibeHard never provisions in its *own* org — every project lives in the
   customer's org (it is the builder/processor, not the data owner).
 
 ### R2 — Provision/reuse one backend per app, in the customer's org (idempotent)
@@ -68,7 +68,7 @@ Build and deploy the frontend to one host; return a live URL; later deploys upda
 status }` — the idempotency key for R2/R3/R7 and the basis for re-deploy + teardown.
 - **AC8.1** The record survives across deploys; a re-deploy reads it and is idempotent.
 
-### R9 — `drydock destroy <app>` (crude teardown — v1, NOT later)  ⭐
+### R9 — `vibehard destroy <app>` (crude teardown — v1, NOT later)  ⭐
 Delete the app's provisioned resources (the Supabase project in the customer's org + the
 host deployment) and clear its record.
 - **AC9.1** After destroy, the project and the deployment are gone and the record is cleared.
@@ -86,9 +86,9 @@ Provision/deploy happen **only** after `HARD_VERIFY_PASS`; a failed step leaves 
 
 ## Non-functional requirements (NFRs)
 **Security (the substrate handles customer credentials):**
-- Drydock is a **processor, not controller** (customer-owned org). Least-privilege OAuth
+- VibeHard is a **processor, not controller** (customer-owned org). Least-privilege OAuth
   scope; the service-role key is **server-side only**, never in a frontend build; **no
-  secret is ever logged** (§21 applies to Drydock itself here).
+  secret is ever logged** (§21 applies to VibeHard itself here).
 - Secrets: **encrypted at rest in a local store behind the `SecretsStore` seam for v1**
   (still genuinely encrypted — these are service-role keys); a cloud KMS drops in behind the
   same seam later. (Matches v1's minimalism end-to-end — no heavier than the local record.)

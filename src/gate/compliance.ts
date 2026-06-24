@@ -1,7 +1,7 @@
 /**
  * Compliance-posture gate (PROJECT_BRIEF.md §21, BOUNDED BY §16). RLS is one of the
  * seven controls a sensitive-data customer needs; this gate covers the rest. It is
- * CLASSIFICATION-DRIVEN: it reads the spec the front-half persisted (.drydock/spec.json)
+ * CLASSIFICATION-DRIVEN: it reads the spec the front-half persisted (.vibehard/spec.json)
  * and only assesses an app whose data is sensitive — otherwise it's a no-op.
  *
  * Disposition (§21):
@@ -94,11 +94,11 @@ interface PersistedSpec {
   storesData?: boolean;
 }
 
-/** Read the classification the front-half persisted to .drydock/spec.json. Null when
+/** Read the classification the front-half persisted to .vibehard/spec.json. Null when
  *  the app never went through the front-half (then the gate no-ops — it can't assess
  *  compliance without a classification). */
 function readClassification(projectPath: string): Pick<ComplianceInput, "sensitiveClasses" | "authenticated" | "storesData"> | null {
-  const p = join(projectPath, ".drydock", "spec.json");
+  const p = join(projectPath, ".vibehard", "spec.json");
   if (!existsSync(p)) return null;
   try {
     const s = JSON.parse(readFileSync(p, "utf8")) as PersistedSpec;

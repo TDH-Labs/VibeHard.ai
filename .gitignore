@@ -4,7 +4,7 @@ dist/
 
 # Gate run artifacts (scanner JSON, evidence, sentinels)
 .gate/
-.drydock/
+.vibehard/
 
 # Logs / scratch
 *.log

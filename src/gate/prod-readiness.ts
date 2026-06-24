@@ -12,7 +12,7 @@
  * §16 ADAPTIVE RIGOR: block at production, warn at prototype (`applyRigor` downgrades
  * blockers to advisories below production). The gate is CLASSIFICATION-DRIVEN like
  * compliance — it reads the rigor from the spec the front-half persisted
- * (.drydock/spec.json) and is a no-op without it. Pure checks split from the I/O.
+ * (.vibehard/spec.json) and is a no-op without it. Pure checks split from the I/O.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -112,7 +112,7 @@ function readFirst(projectPath: string, names: string[]): string | null {
 /** Run the production-readiness checks. No persisted spec → no-op (the gate is
  *  rigor-driven and only assesses apps that went through the front-half). */
 export async function runProdReadiness(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
-  const specPath = join(projectPath, ".drydock", "spec.json");
+  const specPath = join(projectPath, ".vibehard", "spec.json");
   if (!existsSync(specPath)) return verdictOf("prod-readiness", [], ranAt);
 
   let rigor: Rigor = "production"; // fail-closed: an unreadable spec is treated as production-strict

@@ -14,14 +14,14 @@ import type { EscalationPacket } from "./packet.ts";
 import type { ReviewDecision } from "./review.ts";
 import { claimTicket, openTicket, resolveTicket, ticketId, type EscalationSink, type EscalationTicket, type TicketState } from "./queue.ts";
 
-const MARKER = "DRYDOCK_TICKET";
+const MARKER = "VIBEHARD_TICKET";
 
 export interface GitHubEscalationSinkOptions {
-  repo: string; // "owner/name" (DRYDOCK_ESCALATION_REPO)
+  repo: string; // "owner/name" (VIBEHARD_ESCALATION_REPO)
   token?: string; // GITHUB_PAT
   fetchImpl?: typeof fetch;
   apiBase?: string; // default https://api.github.com
-  label?: string; // default "drydock-escalation"
+  label?: string; // default "vibehard-escalation"
 }
 
 type GhIssue = { number: number; body?: string | null; html_url?: string };
@@ -62,7 +62,7 @@ export class GitHubEscalationSink implements EscalationSink {
     if (!this.token) throw new Error("GitHubEscalationSink: missing GITHUB_PAT");
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.apiBase = opts.apiBase ?? "https://api.github.com";
-    this.label = opts.label ?? "drydock-escalation";
+    this.label = opts.label ?? "vibehard-escalation";
   }
 
   private async api(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -70,7 +70,7 @@ export class GitHubEscalationSink implements EscalationSink {
       method,
       headers: {
         Authorization: `Bearer ${this.token}`,
-        "User-Agent": "drydock",
+        "User-Agent": "vibehard",
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
@@ -148,7 +148,7 @@ export class GitHubEscalationSink implements EscalationSink {
     if (existing) return existing.ticket; // idempotent on packet identity (same id → same issue)
     const ticket = openTicket(packet, now);
     const created = (await this.api("POST", `/repos/${this.repo}/issues`, {
-      title: `[drydock] needs-human: ${packet.reason} (${id})`,
+      title: `[vibehard] needs-human: ${packet.reason} (${id})`,
       body: this.renderBody(ticket),
       labels: [this.label, "needs-human"],
     })) as { number?: number };

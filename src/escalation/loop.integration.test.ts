@@ -5,8 +5,8 @@
  * slice → resume RE-GATES and deploys. Proves the gate confirms the fix (the
  * human's word is never trusted) and the ratchet holds across the loop.
  *
- * Guarded behind DRYDOCK_INTEGRATION (Docker + Node). Run with:
- *   DRYDOCK_INTEGRATION=1 bun test loop.integration
+ * Guarded behind VIBEHARD_INTEGRATION (Docker + Node). Run with:
+ *   VIBEHARD_INTEGRATION=1 bun test loop.integration
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -24,7 +24,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function workspace(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-loop-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-loop-"));
   tmps.push(d);
   return d;
 }
@@ -81,7 +81,7 @@ function streamFor(files: Record<string, string>): string {
   return `Here you go.<boltArtifact id="app" title="app">${actions}</boltArtifact>`;
 }
 
-const run = process.env.DRYDOCK_INTEGRATION ? describe : describe.skip;
+const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("escalation loop: generate → block → packet → fix → resume → deploy", () => {
   test("the full hand-off, end to end with real scanners", async () => {

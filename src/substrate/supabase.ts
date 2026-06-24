@@ -184,7 +184,7 @@ export class SupabaseBackendProvider implements BackendProvider {
     }
     if (this.managed) {
       const mgmt = this.management ?? new SupabaseManagementClient({ token: readManagementToken() });
-      const p = await mgmt.provisionProject({ name: this.appName ?? "drydock-app", orgId: this.orgId });
+      const p = await mgmt.provisionProject({ name: this.appName ?? "vibehard-app", orgId: this.orgId });
       // operate the remainder of the deploy on the NEW project
       this.env = { url: p.url, anonKey: p.anonKey, serviceKey: p.serviceKey, dbPassword: p.dbPassword, dbHost: p.dbHost };
       // Persist the FULL connection (incl. the unrecoverable db password) so a future redeploy can
@@ -247,8 +247,8 @@ export class SupabaseBackendProvider implements BackendProvider {
     /* deferred — done in the dashboard for now */
   }
 
-  /** Adopt-existing model: Drydock is the processor, not the owner — it never deletes the
-   *  customer's project. Teardown removes Drydock's own artifacts elsewhere. */
+  /** Adopt-existing model: VibeHard is the processor, not the owner — it never deletes the
+   *  customer's project. Teardown removes VibeHard's own artifacts elsewhere. */
   async deleteProject(_handle: BackendHandle): Promise<void> {
     /* intentionally not supported in the adopt-existing model */
   }

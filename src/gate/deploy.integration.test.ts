@@ -1,17 +1,17 @@
 /**
  * M1 Definition of Done (PROJECT_BRIEF.md §9), end to end with the REAL
  * scanners (semgrep + gitleaks in pinned containers), the static RLS check, and
- * the launch probe. Guarded behind DRYDOCK_INTEGRATION because it needs Docker +
+ * the launch probe. Guarded behind VIBEHARD_INTEGRATION because it needs Docker +
  * Node and is slow; default `bun test` stays fast. Run with:
  *
- *   DRYDOCK_INTEGRATION=1 bun test deploy.integration
+ *   VIBEHARD_INTEGRATION=1 bun test deploy.integration
  */
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { deployGate } from "./index.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
-const run = process.env.DRYDOCK_INTEGRATION ? describe : describe.skip;
+const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("deploy gate — M1 DoD (real scanners)", () => {
   test("BLOCKS the vulnerable app and writes no sentinel", async () => {

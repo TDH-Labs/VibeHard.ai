@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function workspace(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-bolt-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-bolt-"));
   tmps.push(d);
   return d;
 }

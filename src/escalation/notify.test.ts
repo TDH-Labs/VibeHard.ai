@@ -20,7 +20,7 @@ describe("formatOpenedMessage", () => {
     expect(msg).toContain("2 blocking");
     expect(msg).toContain("esc-abc123");
     expect(msg).toContain("security, database");
-    expect(msg).toContain("drydock claim esc-abc123");
+    expect(msg).toContain("vibehard claim esc-abc123");
   });
 });
 

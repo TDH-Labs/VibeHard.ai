@@ -130,7 +130,7 @@ const gap = (ruleId: string, severity: Finding["severity"], message: string): Fi
 });
 
 // ── Substrate-fit (architect-steering) ──────────────────────────────────────────
-// Drydock deploys on Supabase (the data layer the gate verifies RLS on, LIVE) + a
+// VibeHard deploys on Supabase (the data layer the gate verifies RLS on, LIVE) + a
 // Vercel app or a single Dockerfile container (Fly). The architect must pick a stack
 // the platform can actually ship AND verify; these flag an off-substrate stack so the
 // existing architect retry loop re-proposes — a build can never reach codegen with an
@@ -150,7 +150,7 @@ export function assessSubstrateFit(arch: Architecture): Finding[] {
       gap(
         "stack-incompatible-backend",
         "high",
-        `Stack names "${incompatible[0]}", which Drydock can't provision or verify RLS on. The data layer must be Supabase (Postgres + Row-Level Security).`,
+        `Stack names "${incompatible[0]}", which VibeHard can't provision or verify RLS on. The data layer must be Supabase (Postgres + Row-Level Security).`,
       ),
     );
   }

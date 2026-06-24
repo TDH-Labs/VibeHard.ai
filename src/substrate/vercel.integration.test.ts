@@ -1,10 +1,10 @@
 /**
  * LIVE smoke — deploys a tiny static workspace to Vercel and tears it down. Proves the
  * deploy leg works end-to-end against the real platform. GUARDED: runs only with
- * DRYDOCK_INTEGRATION=1 and VERCEL_TOKEN present. Uses a preview deploy (lighter) and
+ * VIBEHARD_INTEGRATION=1 and VERCEL_TOKEN present. Uses a preview deploy (lighter) and
  * removes the project in teardown.
  *
- *   DRYDOCK_INTEGRATION=1 bun test src/substrate/vercel.integration.test.ts
+ *   VIBEHARD_INTEGRATION=1 bun test src/substrate/vercel.integration.test.ts
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VercelHostProvider } from "./vercel.ts";
 
-const RUN = !!process.env.DRYDOCK_INTEGRATION && !!process.env.VERCEL_TOKEN;
+const RUN = !!process.env.VIBEHARD_INTEGRATION && !!process.env.VERCEL_TOKEN;
 const maybe = RUN ? test : test.skip;
 
 describe("LIVE smoke — VercelHostProvider deploys a static workspace", () => {
@@ -20,7 +20,7 @@ describe("LIVE smoke — VercelHostProvider deploys a static workspace", () => {
     "deploys and returns a live .vercel.app URL, then tears the project down",
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "dd-vercel-smoke-"));
-      writeFileSync(join(dir, "index.html"), "<!doctype html><title>drydock smoke</title><h1>drydock-smoke-ok</h1>");
+      writeFileSync(join(dir, "index.html"), "<!doctype html><title>vibehard smoke</title><h1>vibehard-smoke-ok</h1>");
       const provider = new VercelHostProvider({ prod: false }); // preview deploy
       let hostRef = "";
       try {

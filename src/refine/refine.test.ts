@@ -25,16 +25,16 @@ afterEach(() => {
 });
 
 function makeProject(spec: Spec = BASE): string {
-  const dir = mkdtempSync(join(tmpdir(), "drydock-refine-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "vibehard-refine-test-"));
   dirs.push(dir);
-  mkdirSync(join(dir, ".drydock"), { recursive: true });
-  writeFileSync(join(dir, ".drydock", "spec.json"), JSON.stringify(spec, null, 2));
+  mkdirSync(join(dir, ".vibehard"), { recursive: true });
+  writeFileSync(join(dir, ".vibehard", "spec.json"), JSON.stringify(spec, null, 2));
   writeFileSync(join(dir, "app.js"), "original");
   return dir;
 }
 
 function readSpec(dir: string): Spec {
-  return JSON.parse(readFileSync(join(dir, ".drydock", "spec.json"), "utf8")) as Spec;
+  return JSON.parse(readFileSync(join(dir, ".vibehard", "spec.json"), "utf8")) as Spec;
 }
 
 /** A regen that modifies app.js and adds added.js — like an engine touching files. */
@@ -81,13 +81,13 @@ describe("listSourceFiles", () => {
     const dir = makeProject();
     mkdirSync(join(dir, "node_modules"), { recursive: true });
     writeFileSync(join(dir, "node_modules", "x.js"), "dep");
-    expect(listSourceFiles(dir)).toEqual(["app.js"]); // not node_modules/x.js, not .drydock/spec.json
+    expect(listSourceFiles(dir)).toEqual(["app.js"]); // not node_modules/x.js, not .vibehard/spec.json
   });
 });
 
 describe("refine orchestrator", () => {
   test("errors when there is no spec to refine", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "drydock-refine-nospec-"));
+    const dir = mkdtempSync(join(tmpdir(), "vibehard-refine-nospec-"));
     dirs.push(dir);
     await expect(refine(dir, "anything", { regen: regenTouch, now: "t" })).rejects.toThrow(/spec\.json/);
   });

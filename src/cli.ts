@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * drydock CLI. M1: `drydock gate <dir>` runs the deterministic security gate
+ * vibehard CLI. M1: `vibehard gate <dir>` runs the deterministic security gate
  * chain on a project directory (PROJECT_BRIEF.md §8, §12).
  */
 import { join, resolve } from "node:path";
@@ -46,63 +46,63 @@ export const VERSION = "0.0.0";
 const SEV_DOT: Record<Severity, string> = { critical: "🔴", high: "🔴", medium: "🟠", low: "🟡" };
 
 /** The escalation queue location — a per-machine reviewer queue (§24 async queue).
- *  Override with DRYDOCK_QUEUE_DIR. */
+ *  Override with VIBEHARD_QUEUE_DIR. */
 function queuePath(): string {
-  return process.env.DRYDOCK_QUEUE_DIR ?? join(homedir(), ".drydock", "queue");
+  return process.env.VIBEHARD_QUEUE_DIR ?? join(homedir(), ".vibehard", "queue");
 }
 function localSink(): LocalEscalationSink {
   return new LocalEscalationSink(queuePath());
 }
 function reviewerStore(): FileReviewerStore {
-  return new FileReviewerStore(process.env.DRYDOCK_REVIEWERS_DIR ?? join(homedir(), ".drydock", "reviewers"));
+  return new FileReviewerStore(process.env.VIBEHARD_REVIEWERS_DIR ?? join(homedir(), ".vibehard", "reviewers"));
 }
 /** Slack ping when a packet is queued, iff a webhook is configured; else a silent no-op.
  *  Best-effort by contract (notifyOpened never throws) — a Slack outage never loses a ticket. */
 function notifier(): Notifier {
-  const url = process.env.DRYDOCK_SLACK_WEBHOOK;
+  const url = process.env.VIBEHARD_SLACK_WEBHOOK;
   return url ? slackNotifier(url) : nullNotifier;
 }
 
-/** Persist the spec into the project (.drydock/spec.json) so the compliance gate
+/** Persist the spec into the project (.vibehard/spec.json) so the compliance gate
  *  (§21) has the data classification at gate time — the front-half's durable output. */
 function persistSpec(target: string, spec: Spec): void {
-  const dir = join(target, ".drydock");
+  const dir = join(target, ".vibehard");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "spec.json"), JSON.stringify(spec, null, 2));
 }
 
 /** Persist the PRD: PRD.md (the readable Principal-PM document the operator + reviewer read)
- *  + .drydock/prd.json (structured, for tooling). The front-half's richest durable output. */
+ *  + .vibehard/prd.json (structured, for tooling). The front-half's richest durable output. */
 function persistPrd(target: string, prd: Prd): void {
-  const dir = join(target, ".drydock");
+  const dir = join(target, ".vibehard");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "prd.json"), JSON.stringify(prd, null, 2));
   writeFileSync(join(target, "PRD.md"), renderPrdMarkdown(prd));
 }
 
 /** Persist the SRS: SRS.md (the readable Principal-Systems-Architect document for engineers + QA)
- *  + .drydock/srs.json. Stage 3's durable output, between the PRD and the architecture. */
+ *  + .vibehard/srs.json. Stage 3's durable output, between the PRD and the architecture. */
 function persistSrs(target: string, srs: Srs): void {
-  const dir = join(target, ".drydock");
+  const dir = join(target, ".vibehard");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "srs.json"), JSON.stringify(srs, null, 2));
   writeFileSync(join(target, "SRS.md"), renderSrsMarkdown(srs));
 }
 
 /** Persist the SAD: SAD.md (the Software Architecture Document for engineers + reviewers) +
- *  .drydock/architecture.json (the design without the nested prd/srs — those persist separately). */
+ *  .vibehard/architecture.json (the design without the nested prd/srs — those persist separately). */
 function persistSad(target: string, arch: Architecture): void {
-  const dir = join(target, ".drydock");
+  const dir = join(target, ".vibehard");
   mkdirSync(dir, { recursive: true });
   const { prd: _p, srs: _s, ...design } = arch;
   writeFileSync(join(dir, "architecture.json"), JSON.stringify(design, null, 2));
   writeFileSync(join(target, "SAD.md"), renderSadMarkdown(arch));
 }
 
-/** Resume support: load a stage's saved artifact (.drydock/<file>) so a re-run skips work it
+/** Resume support: load a stage's saved artifact (.vibehard/<file>) so a re-run skips work it
  *  already finished. A stopped/paused build continues where it left off — no re-spend. */
 function loadStage<T>(target: string, file: string): T | null {
-  const p = join(target, ".drydock", file);
+  const p = join(target, ".vibehard", file);
   if (!existsSync(p)) return null;
   try {
     return JSON.parse(readFileSync(p, "utf8")) as T;
@@ -194,7 +194,7 @@ async function gateAndReport(target: string): Promise<boolean> {
   if (!result.passed) {
     console.log("\nWhat needs attention before this can ship:");
     for (const v of result.verdicts) for (const f of v.findings) explainFinding(f);
-    console.log("\n🛑 BLOCK — fix or escalate (drydock escalate <dir>)");
+    console.log("\n🛑 BLOCK — fix or escalate (vibehard escalate <dir>)");
   } else {
     const warnings = result.verdicts.flatMap((v) => v.findings);
     if (warnings.length) {
@@ -209,14 +209,14 @@ async function gateAndReport(target: string): Promise<boolean> {
 /** Build an app from its architecture: generate workstreams in dependency-tier order. Tiers run
  *  STRICTLY sequentially (tier N+1 depends on tier N's files via `built`); workstreams WITHIN a
  *  tier are independent (buildOrder guarantees it), so they run concurrently, capped by
- *  DRYDOCK_CODEGEN_CONCURRENCY (default 4) so the fan-out never overruns provider limits. Each
+ *  VIBEHARD_CODEGEN_CONCURRENCY (default 4) so the fan-out never overruns provider limits. Each
  *  workstream is a scoped engine pass that accumulates files into `target`. */
 async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
   // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
-  // prompt; else the TS/Supabase one). DRYDOCK_LANG=python forces it, for deliberately
+  // prompt; else the TS/Supabase one). VIBEHARD_LANG=python forces it, for deliberately
   // building/validating a Python app.
-  const systemPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack);
-  const concurrency = Math.max(1, Number(process.env.DRYDOCK_CODEGEN_CONCURRENCY) || 4);
+  const systemPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack);
+  const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
   // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the
   // prior-tiers snapshot) is mapped to names for the brief — identical to sequential codegen.
   return runTiers(
@@ -261,7 +261,7 @@ async function runAutoFixAndReport(target: string): Promise<number> {
     await notifier().notifyOpened(ticket); // best-effort reviewer ping
     console.log(`  ::held ${ticket.id}`); // machine-parseable: links this build to its review ticket
     console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
-    console.log(`   queued at ${queuePath()} — list with: drydock queue`);
+    console.log(`   queued at ${queuePath()} — list with: vibehard queue`);
   }
   console.log("\n   residual blocking findings:");
   for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
@@ -291,7 +291,7 @@ export async function main(argv: string[]): Promise<number> {
     const platform = new Platform();
     if (sub === "signup") {
       if (!name) {
-        console.error('usage: drydock tenant signup "<name>" [plan]');
+        console.error('usage: vibehard tenant signup "<name>" [plan]');
         return 2;
       }
       const t = platform.signUp(name, argv[3] ?? "free");
@@ -302,7 +302,7 @@ export async function main(argv: string[]): Promise<number> {
     if (sub === "list") {
       const tenants = platform.listTenants();
       if (!tenants.length) {
-        console.log('no tenants yet — `drydock tenant signup "<name>"`');
+        console.log('no tenants yet — `vibehard tenant signup "<name>"`');
         return 0;
       }
       for (const t of tenants) {
@@ -322,7 +322,7 @@ export async function main(argv: string[]): Promise<number> {
     if (sub === "deploy") {
       const [, , tid, dir] = argv;
       if (!tid || !dir) {
-        console.error("usage: drydock tenant deploy <tenant-id> <dir>   (quota-checked; provisions the tenant's OWN project + deploys)");
+        console.error("usage: vibehard tenant deploy <tenant-id> <dir>   (quota-checked; provisions the tenant's OWN project + deploys)");
         return 2;
       }
       try {
@@ -341,11 +341,11 @@ export async function main(argv: string[]): Promise<number> {
     if (sub === "build") {
       const [, , tid, app, dir] = argv;
       if (!tid || !app || !dir) {
-        console.error("usage: drydock tenant build <tenant-id> <app> <dir>   (quota-checked; gate→fix→re-gate; holds escalate)");
+        console.error("usage: vibehard tenant build <tenant-id> <app> <dir>   (quota-checked; gate→fix→re-gate; holds escalate)");
         return 2;
       }
-      const repo = process.env.DRYDOCK_ESCALATION_REPO;
-      const sink = repo ? new GitHubEscalationSink({ repo }) : new LocalEscalationSink(join(homedir(), ".drydock", "escalations"));
+      const repo = process.env.VIBEHARD_ESCALATION_REPO;
+      const sink = repo ? new GitHubEscalationSink({ repo }) : new LocalEscalationSink(join(homedir(), ".vibehard", "escalations"));
       const runner = new LocalBuildRunner({ sink, onStep: (m) => console.log(`   · ${m}`) });
       try {
         const job = await platform.build(tid, app, runner, resolve(dir));
@@ -374,13 +374,13 @@ export async function main(argv: string[]): Promise<number> {
       for (const b of builds) console.log(`${b.id}  ${b.status}  ${b.app}  ${b.queuedAt}${b.error ? `  — ${b.error}` : ""}`);
       return 0;
     }
-    console.error("usage: drydock tenant <signup|list|show|deploy|build|usage|builds>");
+    console.error("usage: vibehard tenant <signup|list|show|deploy|build|usage|builds>");
     return 2;
   }
 
   if (cmd === "gate" || cmd === "deploy") {
     if (!arg) {
-      console.error(`usage: drydock ${cmd} <dir>`);
+      console.error(`usage: vibehard ${cmd} <dir>`);
       return 2;
     }
     const result = cmd === "deploy" ? await deployGate(arg) : await runGate(arg);
@@ -401,7 +401,7 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "intake") {
     const [, promptText] = argv;
     if (!promptText) {
-      console.error('usage: drydock intake "<prompt>"');
+      console.error('usage: vibehard intake "<prompt>"');
       return 2;
     }
     // grill-me (backlog #1): a real INTERVIEW — one question at a time, each with a suggested answer
@@ -428,13 +428,13 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "plan") {
     const [, promptText] = argv;
     if (!promptText) {
-      console.error('usage: drydock plan "<prompt>"');
+      console.error('usage: vibehard plan "<prompt>"');
       return 2;
     }
     // Front-half (§22): the LLM drafts a PRD, the deterministic readiness check grills
     // it, and it re-drafts to resolve blocking gaps — bounded. Spec proposed, gate disposes.
-    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     console.log(`drafting a spec with ${provider}/${model} …`);
     const result = await planIntake(promptText, {
       intake: llmIntake({ config: { provider, model } }),
@@ -449,7 +449,7 @@ export async function main(argv: string[]): Promise<number> {
       for (const f of advisory) explainFinding(f);
     }
     if (result.ready) {
-      console.log(`\n✅ spec ready to build (after ${result.rounds} round(s)) — next: drydock generate "<this app>" <dir>`);
+      console.log(`\n✅ spec ready to build (after ${result.rounds} round(s)) — next: vibehard generate "<this app>" <dir>`);
       return 0;
     }
     console.log(`\n🛑 spec NOT ready after ${result.rounds} round(s) — these need clarifying first:`);
@@ -460,19 +460,19 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "build") {
     const [, promptText, dir] = argv;
     if (!promptText || !dir) {
-      console.error('usage: drydock build "<prompt>" <dir>');
+      console.error('usage: vibehard build "<prompt>" <dir>');
       return 2;
     }
     const target = resolve(dir);
-    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     const config = { provider, model };
     const onStep = (m: string) => console.log(`  … ${m}`);
 
     // The full pipeline (§22 front-half → back-half). RESUMABLE: every finished stage's artifact
-    // is loaded from .drydock/ on a re-run, so a stopped/paused build continues where it left off
+    // is loaded from .vibehard/ on a re-run, so a stopped/paused build continues where it left off
     // (no re-spend). Each front-half stage's deterministic review must still pass before the next.
-    if (existsSync(join(target, ".drydock", "spec.json"))) {
+    if (existsSync(join(target, ".vibehard", "spec.json"))) {
       console.log("↻ resuming this build — finished stages load from saved work instead of re-running.\n");
     }
 
@@ -561,7 +561,7 @@ export async function main(argv: string[]): Promise<number> {
     }
 
     // 5. adversarial plan review + codegen — skipped together once the code has been generated.
-    const builtMarker = join(target, ".drydock", "built.json");
+    const builtMarker = join(target, ".vibehard", "built.json");
     if (existsSync(builtMarker)) {
       console.log("✓ generated code — restored from saved work");
     } else {
@@ -595,18 +595,18 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "generate") {
     const [, promptText, dir] = argv;
     if (!promptText || !dir) {
-      console.error('usage: drydock generate "<prompt>" <dir>');
+      console.error('usage: vibehard generate "<prompt>" <dir>');
       return 2;
     }
     // Generate live, then auto-gate the freshly generated code (PROJECT_BRIEF.md §8 "Option A").
     const target = resolve(dir);
     // Provider/model selection: explicit override wins; else opencode when its key is
     // present, otherwise anthropic. Logged so the choice is never silent.
-    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     console.log(`generating with ${provider}/${model} → ${target}`);
-    // DRYDOCK_LANG=python → the Python (FastAPI + Supabase + Dockerfile) codegen prompt.
-    const sysPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : undefined;
+    // VIBEHARD_LANG=python → the Python (FastAPI + Supabase + Dockerfile) codegen prompt.
+    const sysPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : undefined;
     if (!(await streamGeneration(target, promptText, provider, model, sysPrompt))) return 1; // don't gate a half-built app
     console.log(`\n── gating generated app at ${target} ──`);
     return (await gateAndReport(target)) ? 0 : 1;
@@ -614,7 +614,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (cmd === "fix") {
     if (!arg) {
-      console.error("usage: drydock fix <dir>");
+      console.error("usage: vibehard fix <dir>");
       return 2;
     }
     const target = resolve(arg);
@@ -625,16 +625,16 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "refine") {
     const [, dir, change] = argv;
     if (!dir || !change) {
-      console.error('usage: drydock refine <dir> "<change request>"');
+      console.error('usage: vibehard refine <dir> "<change request>"');
       return 2;
     }
     const target = resolve(dir);
-    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     // Reuse the built app's codegen system prompt (stack-correct bolt protocol); the "only change
     // X, here's the current app" framing lives in the refine brief (src/refine/refine.ts).
     const arch = loadStage<Architecture>(target, "architecture.json");
-    const systemPrompt = process.env.DRYDOCK_LANG === "python" ? PYTHON_SYSTEM_PROMPT : arch ? selectSystemPrompt(arch.stack) : undefined;
+    const systemPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : arch ? selectSystemPrompt(arch.stack) : undefined;
     console.log(`refining ${target} — incremental regen → re-gate → revert if it breaks a passing build …`);
     const result = await refine(target, change, {
       now: new Date().toISOString(),
@@ -669,13 +669,13 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     }
     console.log(`\n✅ refine applied — ${result.filesWritten.length} file(s) changed.`);
-    console.log(result.gate.passed ? "   gate: ✅ PASS — deploy allowed" : "   gate: ⚠️  not green (the build was already not green before this refine) — run `drydock gate` / `fix`");
+    console.log(result.gate.passed ? "   gate: ✅ PASS — deploy allowed" : "   gate: ⚠️  not green (the build was already not green before this refine) — run `vibehard gate` / `fix`");
     return result.gate.passed ? 0 : 1;
   }
 
   if (cmd === "refactor") {
     if (!arg) {
-      console.error("usage: drydock refactor <dir>");
+      console.error("usage: vibehard refactor <dir>");
       return 2;
     }
     const target = resolve(arg);
@@ -686,8 +686,8 @@ export async function main(argv: string[]): Promise<number> {
       console.log("🛑 refactor runs only on a PASSING build — gate it (and fix/escalate) first.");
       return 1;
     }
-    const provider = process.env.DRYDOCK_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
-    const model = process.env.DRYDOCK_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
+    const provider = process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+    const model = process.env.VIBEHARD_MODEL || (provider === "opencode" ? "deepseek-v4-pro" : "claude-opus-4-8");
     const config = { provider, model };
     console.log("refactor-phase: score quality → refactor (behavior-preserving) → re-verify, revert on break …");
     const result = await refactorPhase(target, {
@@ -724,7 +724,7 @@ export async function main(argv: string[]): Promise<number> {
     if (sub === "signup") {
       const name = rest[0];
       if (!name) {
-        console.error(`usage: drydock reviewer signup "<name>" [${SPECIALTIES.join("|")} …]`);
+        console.error(`usage: vibehard reviewer signup "<name>" [${SPECIALTIES.join("|")} …]`);
         return 2;
       }
       const { specialties, invalid } = parseSpecialties(rest.slice(1));
@@ -740,38 +740,38 @@ export async function main(argv: string[]): Promise<number> {
         return 1;
       }
       console.log(`✅ reviewer registered: ${reviewer.id} — specialties: ${reviewer.specialties.join(", ")}`);
-      console.log("   they'll be pinged when a packet routes to them (set DRYDOCK_SLACK_WEBHOOK to enable Slack).");
+      console.log("   they'll be pinged when a packet routes to them (set VIBEHARD_SLACK_WEBHOOK to enable Slack).");
       return 0;
     }
     if (sub === "list" || sub === undefined) {
       const all = store.list();
       if (!all.length) {
-        console.log('no reviewers yet — drydock reviewer signup "<name>" <specialty…>');
+        console.log('no reviewers yet — vibehard reviewer signup "<name>" <specialty…>');
         return 0;
       }
       console.log(`${all.length} reviewer(s):`);
       for (const r of all) console.log(`  ${r.id}  [${r.status}] — ${r.specialties.join(", ")}`);
       return 0;
     }
-    console.error("usage: drydock reviewer <signup|list>");
+    console.error("usage: vibehard reviewer <signup|list>");
     return 2;
   }
 
   if (cmd === "claim") {
     const [, ticketId, reviewerId] = argv;
     if (!ticketId || !reviewerId) {
-      console.error("usage: drydock claim <ticket-id> <reviewer-id>");
+      console.error("usage: vibehard claim <ticket-id> <reviewer-id>");
       return 2;
     }
     const sink = localSink();
     const ticket = await sink.get(ticketId);
     if (!ticket) {
-      console.error(`no such ticket: ${ticketId} — list with: drydock queue`);
+      console.error(`no such ticket: ${ticketId} — list with: vibehard queue`);
       return 1;
     }
     const reviewer = reviewerStore().get(reviewerId);
     if (!reviewer) {
-      console.error(`no such reviewer: ${reviewerId} — register with: drydock reviewer signup`);
+      console.error(`no such reviewer: ${reviewerId} — register with: vibehard reviewer signup`);
       return 1;
     }
     // The routing moat: only a reviewer qualified for the packet's specialties may take it.
@@ -781,7 +781,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     try {
       const claimed = await sink.claim(ticketId, reviewer.id);
-      console.log(`✅ ${claimed.id} claimed by ${reviewer.id} [${claimed.state}] — review it: drydock review ${claimed.id}`);
+      console.log(`✅ ${claimed.id} claimed by ${reviewer.id} [${claimed.state}] — review it: vibehard review ${claimed.id}`);
       return 0;
     } catch (e) {
       console.error(`${e instanceof Error ? e.message : e}`);
@@ -792,12 +792,12 @@ export async function main(argv: string[]): Promise<number> {
   if (cmd === "review") {
     const [, ticketId] = argv;
     if (!ticketId) {
-      console.error("usage: drydock review <ticket-id>   (prints the scoped slice to judge)");
+      console.error("usage: vibehard review <ticket-id>   (prints the scoped slice to judge)");
       return 2;
     }
     const ticket = await localSink().get(ticketId);
     if (!ticket) {
-      console.error(`no such ticket: ${ticketId} — list with: drydock queue`);
+      console.error(`no such ticket: ${ticketId} — list with: vibehard queue`);
       return 1;
     }
     console.log(`${ticket.id} [${ticket.state}]${ticket.claimedBy ? ` · claimed by ${ticket.claimedBy}` : ""}`);
@@ -812,14 +812,14 @@ export async function main(argv: string[]): Promise<number> {
         console.log(`   (no slice — ${item.finding.file})`);
       }
     }
-    console.log(`\n   resolve: drydock resolve ${ticket.id} <approved|rejected|fixed> [justification]`);
+    console.log(`\n   resolve: vibehard resolve ${ticket.id} <approved|rejected|fixed> [justification]`);
     return 0;
   }
 
   if (cmd === "resolve") {
     const [, ticketId, verdictArg, ...justWords] = argv;
     if (!ticketId || !verdictArg) {
-      console.error("usage: drydock resolve <ticket-id> <approved|rejected|fixed> [justification]");
+      console.error("usage: vibehard resolve <ticket-id> <approved|rejected|fixed> [justification]");
       return 2;
     }
     const verdict = verdictArg as ReviewVerdict;
@@ -830,7 +830,7 @@ export async function main(argv: string[]): Promise<number> {
     const justification = justWords.join(" ").trim() || undefined;
     // 'approved' downgrades a real finding to a waiver — it MUST carry a justification (audit + §11).
     if (verdict === "approved" && !justification) {
-      console.error("🛑 'approved' requires a justification (it becomes an audited waiver): drydock resolve <id> approved <why>");
+      console.error("🛑 'approved' requires a justification (it becomes an audited waiver): vibehard resolve <id> approved <why>");
       return 2;
     }
     const sink = localSink();
@@ -840,7 +840,7 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     }
     if (ticket.state !== "claimed" || !ticket.claimedBy) {
-      console.error(`cannot resolve ${ticketId}: state is ${ticket.state} (claim it first: drydock claim ${ticketId} <reviewer-id>)`);
+      console.error(`cannot resolve ${ticketId}: state is ${ticket.state} (claim it first: vibehard claim ${ticketId} <reviewer-id>)`);
       return 1;
     }
     const now = new Date().toISOString();
@@ -864,7 +864,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (cmd === "credentials") {
     if (!arg) {
-      console.error("usage: drydock credentials <dir>   (lists the third-party keys this app needs)");
+      console.error("usage: vibehard credentials <dir>   (lists the third-party keys this app needs)");
       return 2;
     }
     const target = resolve(arg);
@@ -879,13 +879,13 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`  ${c.key}${have}`);
       console.log(`    ${c.label} — ${c.help}`);
     }
-    console.log("\nSet these in the environment before `drydock ship`, and they're injected into the live app at runtime.");
+    console.log("\nSet these in the environment before `vibehard ship`, and they're injected into the live app at runtime.");
     return 0;
   }
 
   if (cmd === "prod-scan") {
     if (!arg) {
-      console.error("usage: drydock prod-scan <path-to-app.jsonl>");
+      console.error("usage: vibehard prod-scan <path-to-app.jsonl>");
       return 2;
     }
     // §20 production back-edge: scan a deployed app's logs for anomalies → feedback
@@ -906,7 +906,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (cmd === "ship") {
     if (!arg) {
-      console.error("usage: drydock ship <dir>   (gates, then provisions a backend + deploys to a live URL)");
+      console.error("usage: vibehard ship <dir>   (gates, then provisions a backend + deploys to a live URL)");
       return 2;
     }
     const dir = resolve(arg);
@@ -915,7 +915,7 @@ export async function main(argv: string[]): Promise<number> {
     const gate = await deployGate(dir);
     for (const v of gate.verdicts) console.log(`   ${v.status === "pass" ? "✅" : "🛑"} ${v.gate}`);
     if (!gate.passed) {
-      console.log("\n🛑 BLOCK — not deploying. Fix or escalate first (drydock escalate <dir>).");
+      console.log("\n🛑 BLOCK — not deploying. Fix or escalate first (vibehard escalate <dir>).");
       return 1;
     }
     // 2. provision (customer-owned Supabase) → migrate → VERIFY LIVE RLS → deploy (Vercel) → live URL
@@ -936,16 +936,16 @@ export async function main(argv: string[]): Promise<number> {
 
   if (cmd === "research") {
     if (!arg) {
-      console.error("usage: drydock research <dir>   (reads .drydock/spec.json; ONLINE — queries npm + deps.dev)");
+      console.error("usage: vibehard research <dir>   (reads .vibehard/spec.json; ONLINE — queries npm + deps.dev)");
       return 2;
     }
     // §22 full make-vs-buy advisor: discover OSS + service candidates, vet them on
     // deterministic evidence (license / advisories / maintenance / OpenSSF Scorecard),
     // rank, and summarize. ONLINE + OPT-IN — keyless (npm + deps.dev), NOT a gate. It
     // never auto-installs; anything actually adopted still passes the security gates.
-    const specPath = join(resolve(arg), ".drydock", "spec.json");
+    const specPath = join(resolve(arg), ".vibehard", "spec.json");
     if (!existsSync(specPath)) {
-      console.error(`no .drydock/spec.json in ${arg} — run \`drydock plan\` or \`build\` first so there's a spec to research.`);
+      console.error(`no .vibehard/spec.json in ${arg} — run \`vibehard plan\` or \`build\` first so there's a spec to research.`);
       return 2;
     }
     const spec = JSON.parse(readFileSync(specPath, "utf8")) as Spec;
@@ -956,7 +956,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     const hasKey = !!(process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY);
     console.log(`\n🔎 researching ${caps.length} capabilit${caps.length === 1 ? "y" : "ies"} for "${spec.name}" — querying npm + deps.dev (licenses, advisories, OpenSSF Scorecard)…`);
-    console.log(`   make-vs-buy advisory — Drydock never installs or procures for you${hasKey ? "" : "  ·  no LLM key → deterministic summaries"}.`);
+    console.log(`   make-vs-buy advisory — VibeHard never installs or procures for you${hasKey ? "" : "  ·  no LLM key → deterministic summaries"}.`);
     const advisories = await researchProcurement(caps, {
       candidateSource: combinedCandidateSource(registryCandidateSource, npmSearchCandidateSource({ limit: 5 })),
       evidenceProvider: depsDevEvidenceProvider(),
@@ -969,7 +969,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (cmd === "escalate") {
     if (!arg) {
-      console.error("usage: drydock escalate <dir>");
+      console.error("usage: vibehard escalate <dir>");
       return 2;
     }
     const result = await runGate(arg);
@@ -979,7 +979,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     const packet = await buildEscalationPacket(result.verdicts, arg);
     const ticket = await localSink().open(packet); // hold + queue for async human review (§24)
-    await notifier().notifyOpened(ticket); // best-effort reviewer ping (Slack if DRYDOCK_SLACK_WEBHOOK set)
+    await notifier().notifyOpened(ticket); // best-effort reviewer ping (Slack if VIBEHARD_SLACK_WEBHOOK set)
     console.log(`\n📦 escalation packet — ${packet.blocking} slice(s), routes: ${packet.specialties.join(", ")}`);
     console.log(`   held for review: ticket ${ticket.id} [${ticket.state}] — queued at ${queuePath()}`);
     for (const item of packet.items) {
@@ -1001,31 +1001,31 @@ export async function main(argv: string[]): Promise<number> {
 
   console.log(
     [
-      "drydock — safe vibe coding.",
+      "vibehard — safe vibe coding.",
       "",
-      '  drydock intake "<prompt>"           grill-me: the few clarifying questions a prompt needs first (advisory)',
-      '  drydock plan "<prompt>"             draft + grill a spec before building (front-half §22)',
-      '  drydock build "<prompt>" <dir>      full pipeline: spec → PRD → architecture → build → gate → fix → hold',
-      '  drydock generate "<prompt>" <dir>   generate an app from a raw prompt (engine only) + auto-gate it',
-      "  drydock gate <dir>                  run the security gate chain (report only)",
-      "  drydock deploy <dir>                run the chain + write the deploy sentinel iff all pass",
-      "  drydock ship <dir>                  gate → provision a customer-owned backend → verify live RLS → deploy → live URL",
-      "  drydock credentials <dir>           list the third-party keys this app needs (Stripe, OAuth, email)",
-      "  drydock fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
-      '  drydock refine <dir> "<change>"   iterate: apply a change, re-gate, revert if it breaks a passing build (§22)',
-      "  drydock refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
-      "  drydock research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
-      "  drydock escalate <dir>             localize blocking findings into a routed review packet + queue it",
-      "  drydock queue [state]              list held escalations (needs-human | claimed | resolved)",
-      '  drydock reviewer signup "<name>" <specialty…>   register an SWE reviewer (security|database|reliability|general)',
-      "  drydock reviewer list             list registered reviewers",
-      "  drydock claim <ticket> <reviewer> claim a queued packet (refused unless the reviewer's specialty matches)",
-      "  drydock review <ticket>           print the scoped slice a reviewer judges",
-      "  drydock resolve <ticket> <approved|rejected|fixed> [why]   record the verdict (approved needs a justification)",
-      "  drydock prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
+      '  vibehard intake "<prompt>"           grill-me: the few clarifying questions a prompt needs first (advisory)',
+      '  vibehard plan "<prompt>"             draft + grill a spec before building (front-half §22)',
+      '  vibehard build "<prompt>" <dir>      full pipeline: spec → PRD → architecture → build → gate → fix → hold',
+      '  vibehard generate "<prompt>" <dir>   generate an app from a raw prompt (engine only) + auto-gate it',
+      "  vibehard gate <dir>                  run the security gate chain (report only)",
+      "  vibehard deploy <dir>                run the chain + write the deploy sentinel iff all pass",
+      "  vibehard ship <dir>                  gate → provision a customer-owned backend → verify live RLS → deploy → live URL",
+      "  vibehard credentials <dir>           list the third-party keys this app needs (Stripe, OAuth, email)",
+      "  vibehard fix <dir>                  auto-fix blocked findings (LLM + dep-bump), re-gate, else hold for review",
+      '  vibehard refine <dir> "<change>"   iterate: apply a change, re-gate, revert if it breaks a passing build (§22)',
+      "  vibehard refactor <dir>             improve code quality on a passing build; revert any change that breaks it (§22)",
+      "  vibehard research <dir>            make-vs-buy advisor: discover + vet OSS/services (npm + deps.dev), advisory only (§22)",
+      "  vibehard escalate <dir>             localize blocking findings into a routed review packet + queue it",
+      "  vibehard queue [state]              list held escalations (needs-human | claimed | resolved)",
+      '  vibehard reviewer signup "<name>" <specialty…>   register an SWE reviewer (security|database|reliability|general)',
+      "  vibehard reviewer list             list registered reviewers",
+      "  vibehard claim <ticket> <reviewer> claim a queued packet (refused unless the reviewer's specialty matches)",
+      "  vibehard review <ticket>           print the scoped slice a reviewer judges",
+      "  vibehard resolve <ticket> <approved|rejected|fixed> [why]   record the verdict (approved needs a justification)",
+      "  vibehard prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
       "",
       "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",
-      "generate needs ANTHROPIC_API_KEY. Review queue dir: DRYDOCK_QUEUE_DIR (default ~/.drydock/queue).",
+      "generate needs ANTHROPIC_API_KEY. Review queue dir: VIBEHARD_QUEUE_DIR (default ~/.vibehard/queue).",
     ].join("\n"),
   );
   return 0;

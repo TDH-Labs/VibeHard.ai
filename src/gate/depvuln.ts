@@ -14,7 +14,7 @@ import { verdictOf } from "../types.ts";
 
 const TRIVY_IMAGE = "aquasec/trivy:0.58.1";
 /** Persist trivy's vuln DB across runs so it's downloaded once, not every scan. */
-const TRIVY_CACHE_VOLUME = "drydock-trivy-cache";
+const TRIVY_CACHE_VOLUME = "vibehard-trivy-cache";
 
 /** trivy severity → our scale (CRITICAL/HIGH block; MEDIUM/LOW are reported, not blocking). */
 export function mapTrivySeverity(s: string | undefined): Severity {

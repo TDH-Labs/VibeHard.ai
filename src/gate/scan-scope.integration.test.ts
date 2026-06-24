@@ -3,9 +3,9 @@
  * Proves the false-positive bug from the dogfood run is fixed: findings planted in
  * a derived/build dir (.next/) are ignored, while authored source is still scanned,
  * and an all-derived project trips scan-failed (fail-closed). Guarded behind
- * DRYDOCK_INTEGRATION (Docker).
+ * VIBEHARD_INTEGRATION (Docker).
  *
- *   DRYDOCK_INTEGRATION=1 bun test scan-scope.integration
+ *   VIBEHARD_INTEGRATION=1 bun test scan-scope.integration
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -19,7 +19,7 @@ afterEach(async () => {
   for (const d of tmps.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function scratch(files: Record<string, string>): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), "drydock-scope-it-"));
+  const d = await mkdtemp(join(tmpdir(), "vibehard-scope-it-"));
   tmps.push(d);
   for (const [path, content] of Object.entries(files)) await Bun.write(join(d, path), content);
   return d;
@@ -29,7 +29,7 @@ async function scratch(files: Record<string, string>): Promise<string> {
 const PLANTED = `const STRIPE_SECRET_KEY = "sk_live_51HplantedFAKEkeyForExclusionTestABCDEFGH";\nconst q = db.prepare(\`SELECT * FROM users WHERE name = '\${name}'\`);\n`;
 const CLEAN_SERVER = `const { createServer } = require("node:http");\ncreateServer((_, r) => r.end("ok")).listen(process.env.PORT || 3000);\n`;
 
-const run = process.env.DRYDOCK_INTEGRATION ? describe : describe.skip;
+const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("scan scope — gates inspect source, not derived output", () => {
   test("findings inside .next/ are IGNORED while clean source still PASSES", async () => {

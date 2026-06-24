@@ -25,7 +25,7 @@ const safeSeg = (s: string): string => s.replace(/[^a-zA-Z0-9_-]/g, "_");
 export type DeployFn = (workspacePath: string, opts?: DeployAppOptions) => Promise<DeployOutcome>;
 
 export interface PlatformOptions {
-  baseDir?: string; // default ~/.drydock
+  baseDir?: string; // default ~/.vibehard
   tenants?: TenantStore;
   billing?: BillingProvider;
   ledger?: UsageLedger; // durable usage record (default: FileUsageLedger under baseDir)
@@ -46,7 +46,7 @@ export class Platform {
   private readonly newId: () => string;
 
   constructor(opts: PlatformOptions = {}) {
-    this.baseDir = opts.baseDir ?? join(homedir(), ".drydock");
+    this.baseDir = opts.baseDir ?? join(homedir(), ".vibehard");
     this.tenants = opts.tenants ?? new FileTenantStore(join(this.baseDir, "tenants"));
     this.billing = opts.billing ?? new LocalBillingProvider();
     this.ledger = opts.ledger ?? new FileUsageLedger(this.baseDir);
@@ -162,7 +162,7 @@ export class Platform {
     const app = opts.app ?? basename(workspacePath);
     this.assertCanDeploy(tenantId, app);
     // FORCE managed: every tenant app gets its OWN auto-provisioned project in its OWN isolated
-    // dir — never the operator's shared project (which a global DRYDOCK_MANAGED flag couldn't guarantee).
+    // dir — never the operator's shared project (which a global VIBEHARD_MANAGED flag couldn't guarantee).
     const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId), managed: true });
     await this.meter(tenantId, { kind: "deploy", app, at: this.now() });
     return outcome;

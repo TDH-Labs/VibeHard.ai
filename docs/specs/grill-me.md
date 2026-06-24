@@ -14,7 +14,7 @@ build so the spec is sharper and fewer apps get built wrong or held. Original vi
 2. Questions are **specific**, not generic — e.g. for a bookkeeping portal: *"Should clients be
    able to pay invoices in the portal, or only view them?"* — not *"What features do you want?"*
 3. **Adaptive:** a clear/trivial prompt yields **few or no** questions (don't grill a converter — §16).
-4. Surfaces: a CLI path (`drydock intake "<prompt>"` prints the questions) **and** a web endpoint
+4. Surfaces: a CLI path (`vibehard intake "<prompt>"` prints the questions) **and** a web endpoint
    (`GET /api/intake?prompt=`) returning `{questions: string[]}`.
 5. Web flow: **Build it →** first fetches questions → shows them inline → user answers or
    **Skip & build** → answers are folded into the prompt → the normal build proceeds.

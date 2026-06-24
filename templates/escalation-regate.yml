@@ -1,17 +1,17 @@
-# Drydock re-gate — GitHub Actions workflow TEMPLATE (PROJECT_BRIEF.md §24).
+# VibeHard re-gate — GitHub Actions workflow TEMPLATE (PROJECT_BRIEF.md §24).
 #
-# This file is NOT for the Drydock repo. Drydock emits it into the private
+# This file is NOT for the VibeHard repo. VibeHard emits it into the private
 # ESCALATION repo (the one holding a held app + its finding) as
-# `.github/workflows/drydock-regate.yml`. It is the "our gate RE-RUNS as CI on
+# `.github/workflows/vibehard-regate.yml`. It is the "our gate RE-RUNS as CI on
 # that PR" leg of the escalation flow: the human reviewer pushes a fix PR, this
 # runs the SAME deterministic gate chain on the result, and the PR can only merge
 # (→ deploy proceeds) if the gate passes. The human proposes; the gate disposes.
 #
 # Placeholders to fill when wiring a real escalation repo:
-#   <DRYDOCK_REPO>  e.g. TDH-Labs/drydock   (where the gate code lives)
-#   <DRYDOCK_REF>   a pinned commit SHA or tag (never a moving branch — the gate
+#   <VIBEHARD_REPO>  e.g. TDH-Labs/vibehard   (where the gate code lives)
+#   <VIBEHARD_REF>   a pinned commit SHA or tag (never a moving branch — the gate
 #                   that judges a fix must be the exact, audited gate)
-name: drydock-regate
+name: vibehard-regate
 
 on:
   pull_request:
@@ -27,23 +27,23 @@ jobs:
       - name: Check out the app under review (the fix PR)
         uses: actions/checkout@v4
 
-      - name: Check out the pinned Drydock gate
+      - name: Check out the pinned VibeHard gate
         uses: actions/checkout@v4
         with:
-          repository: <DRYDOCK_REPO>
-          ref: <DRYDOCK_REF> # pinned — the audited gate, not a moving target
-          path: .drydock-engine
+          repository: <VIBEHARD_REPO>
+          ref: <VIBEHARD_REF> # pinned — the audited gate, not a moving target
+          path: .vibehard-engine
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.14"
 
       - name: Install the gate
-        working-directory: .drydock-engine
+        working-directory: .vibehard-engine
         run: bun install --frozen-lockfile
 
       # `deploy` runs the full chain AND writes the sentinel only if every gate
       # passes — so a green run here is a real "would deploy", and a red run blocks
       # the merge. Exit code is the gate's verdict; that gates the PR.
       - name: Re-gate the fix
-        run: bun .drydock-engine/src/cli.ts deploy "$GITHUB_WORKSPACE"
+        run: bun .vibehard-engine/src/cli.ts deploy "$GITHUB_WORKSPACE"

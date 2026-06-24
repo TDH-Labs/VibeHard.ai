@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DRYDOCK_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./prompt.ts";
+import { VIBEHARD_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./prompt.ts";
 
 describe("selectSystemPrompt", () => {
   test("Python/FastAPI/Flask stacks → the Python prompt", () => {
@@ -9,7 +9,7 @@ describe("selectSystemPrompt", () => {
   });
   test("JS/TS stacks → the default TypeScript prompt", () => {
     for (const s of ["Next.js + Supabase", "Vite + React + Supabase", "Express + Postgres + React"]) {
-      expect(selectSystemPrompt(s)).toBe(DRYDOCK_SYSTEM_PROMPT);
+      expect(selectSystemPrompt(s)).toBe(VIBEHARD_SYSTEM_PROMPT);
     }
   });
 });

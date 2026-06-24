@@ -1,18 +1,18 @@
 # Runtime Substrate — SPEC (intent)
 
 > Stage 1 of 3 (spec → PRD → architecture). The grilled intent: *what* we're building,
-> *for whom*, the scope, and the security/ownership posture. Authored as a Drydock feature
-> plan, using Drydock's own front-half discipline. **Revised after review (v2)** — see the
+> *for whom*, the scope, and the security/ownership posture. Authored as a VibeHard feature
+> plan, using VibeHard's own front-half discipline. **Revised after review (v2)** — see the
 > "Decisions from review" section.
 
 ## One-liner
 The **last mile that turns a gated, passing app into a live, hosted app with a real
 managed backend** — connect → provision → apply migration → **verify RLS is live** → inject
-secrets → deploy → live URL. It turns Drydock from a *verified-code factory* into an *app
-platform*, **without Drydock becoming the operator of everyone's data.**
+secrets → deploy → live URL. It turns VibeHard from a *verified-code factory* into an *app
+platform*, **without VibeHard becoming the operator of everyone's data.**
 
 ## Why now (the gap it closes)
-Today Drydock produces verified, secure source code plus a `supabase/migrations/*.sql`
+Today VibeHard produces verified, secure source code plus a `supabase/migrations/*.sql`
 the gates check for RLS — but nothing provisions a database, applies that migration, or
 deploys anything. `deploy` is a stub that throws. So nothing downstream works — not a
 design-partner demo, not even the escalation slice (whose last step is "re-gate → deploy").
@@ -23,14 +23,14 @@ makes them matter.
 - **The non-technical operator** — gets a **live URL** and a working app, after a one-time
   "connect your Supabase" step. Never writes a migration, sets an env var, or opens a
   deploy console. (Primary.)
-- **The Drydock platform** — orchestrates connect/provision/deploy deterministically.
+- **The VibeHard platform** — orchestrates connect/provision/deploy deterministically.
 
 ## Decisions from review (load-bearing)
-- **Customer-owned backends (DECIDED).** Drydock provisions each app's backend **into the
+- **Customer-owned backends (DECIDED).** VibeHard provisions each app's backend **into the
   customer's OWN Supabase organization**, via an OAuth connection the customer grants once.
-  Drydock acts *on the customer's behalf* — it is the **builder/processor, never the data
+  VibeHard acts *on the customer's behalf* — it is the **builder/processor, never the data
   controller.** The data, the infra cost, and the data-controller liability stay with the
-  customer. Drydock never holds N customers' PHI/financial data — exactly the platform/
+  customer. VibeHard never holds N customers' PHI/financial data — exactly the platform/
   compliance weight §16 says not to take on early. The one-time "connect Supabase" friction
   is, for the sensitive-data segment, a **trust feature**: *your data lives in your own
   account; we never hold it.* (The fully-bundled "we own it all" model fits hobbyists;
@@ -53,7 +53,7 @@ makes them matter.
 - **Inject secrets** into the host; **anon key only** reaches the browser, **service-role
   key never** does. Stored encrypted at rest (local store v1, behind a seam).
 - **Deploy the frontend** to one host → a **live URL**.
-- **`drydock destroy <app>`** — a crude teardown (delete the app's resources + clear its
+- **`vibehard destroy <app>`** — a crude teardown (delete the app's resources + clear its
   record). Needed for dogfooding hygiene + customer offboarding from day one.
 - **Persist an app → resources record** for idempotent re-deploy.
 - **Hand the live app to §20 prod-feedback.**
@@ -67,10 +67,10 @@ makes them matter.
 - The **AI Maintainer** (separate product — `docs/ROADMAP.md`).
 
 ## Data + security posture
-- **Drydock is a processor, not a controller** (customer-owned backends). It handles the
+- **VibeHard is a processor, not a controller** (customer-owned backends). It handles the
   customer's connection secrets *transiently* to inject them — by reference where possible,
   encrypted at rest, **never logged** (§21 sanitization), via **least-privilege** OAuth
-  scopes. Data classification of what Drydock touches: **credentials** → production rigor.
+  scopes. Data classification of what VibeHard touches: **credentials** → production rigor.
 - **Isolation:** each app's backend is the customer's own project — isolation by ownership,
   not just by RLS.
 
@@ -84,4 +84,4 @@ makes them matter.
 ## Success = a non-technical operator goes from prompt to a working, secure, live URL
 …in their own Supabase account, with the gated RLS **proven enforced live**, secrets handled
 safely, and re-deploys that don't blow away their data — none of which they had to
-understand, and none of which makes Drydock the custodian of their data.
+understand, and none of which makes VibeHard the custodian of their data.

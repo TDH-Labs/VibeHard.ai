@@ -1,6 +1,6 @@
-# Drydock — development loop (process of record)
+# VibeHard — development loop (process of record)
 
-How we build Drydock: the same discipline Drydock imposes on the apps it builds —
+How we build VibeHard: the same discipline VibeHard imposes on the apps it builds —
 **the agent proposes; deterministic checks + live runs dispose; the human owns judgment.**
 This is §11 ("LLM proposes, deterministic disposes") and §16 (adaptive rigor) turned on our
 own development. Grounded in current best practice (Anthropic *Building Effective Agents* +

@@ -7,14 +7,14 @@
  * LLM summarize the vetted shortlist into a plain-English recommendation for a
  * non-technical operator.
  *
- * Architecture mirrors the rest of Drydock:
+ * Architecture mirrors the rest of VibeHard:
  *   • Pure deterministic core (assess.ts) — the safety-critical part; fully unit-tested.
  *   • Injectable I/O seams (below) — discovery / evidence / summary — each with a fake.
  *   • LLM PROPOSES the prose; deterministic evidence DISPOSES safety (§11). The gates
  *     (depvuln/sast/secrets) remain the backstop on anything actually installed — a
  *     recommendation is suggested, never trusted.
  *   • ONLINE + OPT-IN: this calls out to the network (keyless: npm + deps.dev/OSV), so
- *     it lives OUTSIDE the deterministic gate chain — a `drydock research` advisory, not
+ *     it lives OUTSIDE the deterministic gate chain — a `vibehard research` advisory, not
  *     a deploy gate. It NEVER auto-procures or auto-installs.
  */
 

@@ -18,7 +18,7 @@ strictly sequential (tier N+1 sees tier N's files via `built`).
 
 ## Acceptance criteria
 1. Within a tier, workstreams run concurrently, capped at
-   `DRYDOCK_CODEGEN_CONCURRENCY` (default 4), never more.
+   `VIBEHARD_CODEGEN_CONCURRENCY` (default 4), never more.
 2. Tiers remain sequential; `built` accumulates a full tier before the next.
 3. The produced file set is the SAME as sequential codegen (no behavior change,
    just faster) — verified by the existing build/gate path staying green.

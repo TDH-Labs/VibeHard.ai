@@ -7,7 +7,7 @@ import { simulateReadableStream, type LanguageModel } from "ai";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { defaultModelFactory, liveBoltDriver } from "./driver.ts";
 import { BoltEngine } from "./engine.ts";
-import { DRYDOCK_SYSTEM_PROMPT } from "./prompt.ts";
+import { VIBEHARD_SYSTEM_PROMPT } from "./prompt.ts";
 import type { EngineConfig, EngineEvent } from "../../types.ts";
 
 const CONFIG: EngineConfig = { provider: "anthropic", model: "claude-opus-4-8" };
@@ -62,7 +62,7 @@ describe("liveBoltDriver", () => {
 
     expect(model.doStreamCalls).toHaveLength(1);
     const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
-    expect(sent).toContain("You are Drydock"); // our derived system prompt
+    expect(sent).toContain("You are VibeHard"); // our derived system prompt
     expect(sent).toContain("<boltArtifact>"); // protocol rules carried in the prompt
     expect(sent).toContain("build a users api"); // the user's prompt
   });
@@ -118,7 +118,7 @@ describe("defaultModelFactory", () => {
 
 describe("BoltEngine + liveBoltDriver (mocked LLM)", () => {
   test("a mocked generation materializes files into the workspace", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "drydock-driver-"));
+    const dir = await mkdtemp(join(tmpdir(), "vibehard-driver-"));
     tmps.push(dir);
     const stream =
       'Building.<boltArtifact id="a" title="a">' +
@@ -135,13 +135,13 @@ describe("BoltEngine + liveBoltDriver (mocked LLM)", () => {
   });
 });
 
-// DRYDOCK_SYSTEM_PROMPT is exercised above; keep a direct guard on its key invariants.
-describe("DRYDOCK_SYSTEM_PROMPT", () => {
+// VIBEHARD_SYSTEM_PROMPT is exercised above; keep a direct guard on its key invariants.
+describe("VIBEHARD_SYSTEM_PROMPT", () => {
   test("carries the protocol + the baked gate standards", () => {
-    expect(DRYDOCK_SYSTEM_PROMPT).toContain("<boltArtifact>");
-    expect(DRYDOCK_SYSTEM_PROMPT).toContain("parameterized");
-    expect(DRYDOCK_SYSTEM_PROMPT).toContain("enable row level security");
-    expect(DRYDOCK_SYSTEM_PROMPT).toContain("environment variables");
-    expect(DRYDOCK_SYSTEM_PROMPT).not.toContain("WebContainer"); // browser-runtime constraints stripped
+    expect(VIBEHARD_SYSTEM_PROMPT).toContain("<boltArtifact>");
+    expect(VIBEHARD_SYSTEM_PROMPT).toContain("parameterized");
+    expect(VIBEHARD_SYSTEM_PROMPT).toContain("enable row level security");
+    expect(VIBEHARD_SYSTEM_PROMPT).toContain("environment variables");
+    expect(VIBEHARD_SYSTEM_PROMPT).not.toContain("WebContainer"); // browser-runtime constraints stripped
   });
 });

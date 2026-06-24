@@ -1,8 +1,8 @@
 /**
  * Supabase Management API client — the AUTO-CREATE leg of the backend (vs the v1
- * "adopt an existing project"). This is what turns Drydock from single-project into a
+ * "adopt an existing project"). This is what turns VibeHard from single-project into a
  * managed multi-tenant platform: each app gets its OWN Supabase project, provisioned
- * programmatically — the "Drydock Cloud" model (cf. Lovable Cloud, but every project is
+ * programmatically — the "VibeHard Cloud" model (cf. Lovable Cloud, but every project is
  * gated + live-RLS-verified before it's reachable).
  *
  * All HTTP is behind an injectable fetch seam + injectable sleep, so create/poll/keys

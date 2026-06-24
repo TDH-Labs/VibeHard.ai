@@ -3,7 +3,7 @@
 ## Scope of THIS increment
 Backlog #5 is mostly external (Stripe products/prices, DNS, OAuth apps, sandbox
 infra). The Stripe CLIENT + provider already exist and are tested
-(src/platform/stripe.ts); hosting largely exists (`drydock ship` → Supabase +
+(src/platform/stripe.ts); hosting largely exists (`vibehard ship` → Supabase +
 Vercel/Fly). The keystone MISSING piece is the **subscription webhook → tenant
 lifecycle** sync, and it's security-critical: an unsigned/forged webhook could
 hand any tenant a paid plan (privilege escalation). That's what this increment

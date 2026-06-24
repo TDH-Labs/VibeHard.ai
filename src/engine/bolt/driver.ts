@@ -14,7 +14,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { EngineConfig } from "../../types.ts";
 import type { BoltDriver } from "./engine.ts";
-import { DRYDOCK_SYSTEM_PROMPT } from "./prompt.ts";
+import { VIBEHARD_SYSTEM_PROMPT } from "./prompt.ts";
 
 /** Build the AI-SDK model for an EngineConfig. The one place provider specifics live. */
 export type ModelFactory = (config: EngineConfig) => LanguageModel;
@@ -51,6 +51,29 @@ export const defaultModelFactory: ModelFactory = (config) => {
   }
 };
 
+/**
+ * BYO-key factory: builds the model from EXPLICIT credentials (a tenant's own key) instead of the
+ * host env, so a customer's builds run on their account — not the operator's. Same provider mapping
+ * as defaultModelFactory; the key is supplied at construction and never stored in EngineConfig (§13).
+ * The web layer reads the tenant's encrypted key, calls this, and passes the factory into the build.
+ */
+export function byoModelFactory(creds: { anthropicKey?: string; openaiKey?: string; openaiBaseURL?: string }): ModelFactory {
+  return (config) => {
+    switch (config.provider) {
+      case "anthropic": {
+        if (!creds.anthropicKey) throw new Error("byoModelFactory: this tenant has no Anthropic key on file");
+        return createAnthropic({ apiKey: creds.anthropicKey })(config.model);
+      }
+      case "opencode": {
+        if (!creds.openaiKey) throw new Error("byoModelFactory: this tenant has no OpenAI-compatible key on file");
+        return createOpenAICompatible({ name: "byo", baseURL: creds.openaiBaseURL ?? "https://opencode.ai/zen/go/v1", apiKey: creds.openaiKey })(config.model);
+      }
+      default:
+        throw new Error(`byoModelFactory: unsupported provider '${config.provider}'`);
+    }
+  };
+}
+
 export interface LiveBoltDriverOptions {
   /** Override model construction (tests inject a mock LLM). */
   modelFactory?: ModelFactory;
@@ -65,7 +88,7 @@ export interface LiveBoltDriverOptions {
  */
 export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
-  const systemPrompt = opts.systemPrompt ?? DRYDOCK_SYSTEM_PROMPT;
+  const systemPrompt = opts.systemPrompt ?? VIBEHARD_SYSTEM_PROMPT;
   return {
     name: "bolt.diy",
     async *run(prompt: string, config: EngineConfig): AsyncIterable<string> {

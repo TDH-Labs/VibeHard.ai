@@ -172,9 +172,9 @@ export async function refine(dir: string, change: string, opts: RefineOptions): 
     opts.onStep?.(m);
   };
 
-  const specPath = join(dir, ".drydock", "spec.json");
+  const specPath = join(dir, ".vibehard", "spec.json");
   if (!existsSync(specPath)) {
-    throw new Error(`no .drydock/spec.json in ${dir} — run \`drydock build\` first so there's a spec to refine`);
+    throw new Error(`no .vibehard/spec.json in ${dir} — run \`vibehard build\` first so there's a spec to refine`);
   }
   const trimmed = change.trim();
   if (!trimmed) throw new Error("refine: the change description is empty");

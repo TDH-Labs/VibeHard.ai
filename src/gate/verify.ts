@@ -101,7 +101,7 @@ export function dummyEnvValue(key: string): string {
   const k = key.toUpperCase();
   if (/(URL|URI|ENDPOINT|ORIGIN|HOST)/.test(k)) return "http://localhost:54321";
   if (/PORT/.test(k)) return "3000";
-  return "drydock-verify-placeholder";
+  return "vibehard-verify-placeholder";
 }
 
 /** Pure: dummy env map covering every key declared across the given dotenv sources
@@ -324,10 +324,10 @@ async function runBuild(projectPath: string, script: string): Promise<BuildOutco
   };
 }
 
-/** Read the rigor the front-half persisted (.drydock/spec.json). Null → unknown
+/** Read the rigor the front-half persisted (.vibehard/spec.json). Null → unknown
  *  (default rigor — 3 runs, no heavy clean-env check). */
 function readRigor(projectPath: string): Rigor | null {
-  const p = join(projectPath, ".drydock", "spec.json");
+  const p = join(projectPath, ".vibehard", "spec.json");
   if (!existsSync(p)) return null;
   try {
     return decideRigor(coerceSpec(JSON.parse(readFileSync(p, "utf8"))));
@@ -350,7 +350,7 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
   if (!pkg || !hasDeps(pkg)) return []; // nothing to install → not applicable
   let tmp: string;
   try {
-    tmp = mkdtempSync(join(tmpdir(), "drydock-clean-"));
+    tmp = mkdtempSync(join(tmpdir(), "vibehard-clean-"));
   } catch (e) {
     return [cleanFinding("copy", String(e))]; // §11 fail-closed: couldn't run the check
   }
@@ -420,7 +420,7 @@ export function dockerTag(projectPath: string): string {
       .replace(/^[-._]+|[-._]+$/g, "") // docker names can't start/end with a separator
       .slice(0, 40)
       .replace(/[-._]+$/, "") || "app";
-  return `drydock-verify-${base}`;
+  return `vibehard-verify-${base}`;
 }
 
 /** Build the app's Docker image (the deploy artifact). Returns a finding on failure, else null. */

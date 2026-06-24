@@ -16,16 +16,16 @@ export interface Notifier {
 }
 
 /** Pure: the human-readable summary a reviewer sees — what's blocked, what specialty it needs,
- *  and how to pick it up. No code slices (those live in `drydock review <id>`). */
+ *  and how to pick it up. No code slices (those live in `vibehard review <id>`). */
 export function formatOpenedMessage(ticket: EscalationTicket): string {
   const p = ticket.packet;
   const specialties = p.specialties.length ? p.specialties.join(", ") : "general";
   return [
-    `🔒 drydock review needed — ${p.blocking} blocking finding(s)`,
+    `🔒 vibehard review needed — ${p.blocking} blocking finding(s)`,
     `• ticket: ${ticket.id}`,
     `• specialties: ${specialties}`,
     `• app: ${p.workspacePath}`,
-    `• claim it: drydock claim ${ticket.id} <your-reviewer-id>`,
+    `• claim it: vibehard claim ${ticket.id} <your-reviewer-id>`,
   ].join("\n");
 }
 
