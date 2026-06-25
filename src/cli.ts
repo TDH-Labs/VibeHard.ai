@@ -18,6 +18,7 @@ import { designBlock } from "./design/presets.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
+import { diagnose, formatDiagnosis } from "./diagnose/diagnose.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -655,6 +656,19 @@ export async function main(argv: string[]): Promise<number> {
     const target = resolve(arg);
     console.log(`auto-fixing ${target} (gate → fix → re-gate, bounded) …`);
     return runAutoFixAndReport(target);
+  }
+
+  if (cmd === "diagnose") {
+    if (!arg) {
+      console.error("usage: vibehard diagnose <dir> [--build]");
+      return 2;
+    }
+    const wantBuild = argv.includes("--build");
+    const d = diagnose(resolve(arg), { build: wantBuild });
+    console.log(formatDiagnosis(d));
+    // exit non-zero when something is actionably wrong, so it's scriptable
+    const broken = d.deps.undeclaredImports.length > 0 || d.deps.missingFromLock.length > 0 || d.build?.ok === false;
+    return broken ? 1 : 0;
   }
 
   if (cmd === "refine") {

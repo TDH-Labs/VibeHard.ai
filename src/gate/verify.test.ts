@@ -7,6 +7,7 @@ import {
   dockerTag,
   dummyEnvValue,
   findEntry,
+  installStale,
   pythonStartCommand,
   isUp,
   parseEnvKeys,
@@ -30,6 +31,40 @@ async function scratch(files: Record<string, string>): Promise<string> {
   for (const [path, content] of Object.entries(files)) await Bun.write(join(d, path), content);
   return d;
 }
+
+describe("installStale (auto-fix loop's reinstall signal)", () => {
+  test("no node_modules → stale (fresh generated app)", async () => {
+    const d = await scratch({ "package.json": JSON.stringify({ dependencies: { zod: "^3" } }) });
+    expect(installStale(d)).toBe(true);
+  });
+
+  test("node_modules with no install stamp → stale (can't prove current)", async () => {
+    const d = await scratch({
+      "package.json": JSON.stringify({ dependencies: { zod: "^3" } }),
+      "node_modules/zod/index.js": "",
+    });
+    expect(installStale(d)).toBe(true);
+  });
+
+  test("package.json newer than the install stamp → stale (a dep was just added)", async () => {
+    const d = await scratch({
+      "node_modules/.package-lock.json": "{}",
+      "package.json": JSON.stringify({ dependencies: { zod: "^3", svix: "^1" } }),
+    });
+    // write the stamp FIRST, then bump package.json's mtime to "now" so it's newer
+    await Bun.write(join(d, "node_modules/.package-lock.json"), "{}");
+    await new Promise((r) => setTimeout(r, 12));
+    await Bun.write(join(d, "package.json"), JSON.stringify({ dependencies: { zod: "^3", svix: "^1" } }));
+    expect(installStale(d)).toBe(true);
+  });
+
+  test("install stamp newer than package.json → fresh (no reinstall)", async () => {
+    const d = await scratch({ "package.json": JSON.stringify({ dependencies: { zod: "^3" } }) });
+    await new Promise((r) => setTimeout(r, 12));
+    await Bun.write(join(d, "node_modules/.package-lock.json"), "{}");
+    expect(installStale(d)).toBe(false);
+  });
+});
 
 describe("summarizeVerify (pure)", () => {
   test("all runs healthy → no findings", () => {
