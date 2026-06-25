@@ -58,6 +58,24 @@ describe("parseBuildErrors", () => {
     expect(out[0]!.message).toContain("Can't resolve 'stripe'");
   });
 
+  test("raw `tsc --noEmit` output → one localized finding per type error (batched view)", async () => {
+    const d = await project({
+      "tsconfig.json": TSCONFIG,
+      "lib/attendance.ts": "export const x = 1",
+      "middleware.ts": "export {}",
+    });
+    const tscOut = [
+      "lib/attendance.ts(135,33): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
+      "middleware.ts(7,12): error TS2339: Property 'protect' does not exist on type 'Promise<SessionAuthWithRedirect>'.",
+      "node_modules/foo/index.d.ts(1,1): error TS1005: ';' expected.", // must be skipped
+    ].join("\n");
+    const out = parseBuildErrors(tscOut, d);
+    const files = out.map((f) => f.file).sort();
+    expect(files).toEqual(["lib/attendance.ts", "middleware.ts"]); // node_modules skipped
+    expect(out.find((f) => f.file === "middleware.ts")!.line).toBe(7);
+    expect(out.find((f) => f.file === "lib/attendance.ts")!.message).toContain("not assignable");
+  });
+
   test("unparseable log → no findings (caller falls back to the generic finding)", async () => {
     const d = await project({ "tsconfig.json": TSCONFIG });
     expect(parseBuildErrors("some unrecognized build noise", d)).toEqual([]);

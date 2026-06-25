@@ -5,7 +5,7 @@
  */
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
 import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
@@ -240,6 +240,42 @@ function normalizeLayout(target: string): void {
   } catch {
     /* unparseable tsconfig → leave it; the verify gate will still catch a real break */
   }
+}
+
+/** Deterministically scaffold the boilerplate the model keeps botching: the Tailwind/PostCSS
+ *  config (a duplicated/malformed postcss config held a build this cycle). Boilerplate is
+ *  identical every app, so write it in code rather than trust the LLM. Idempotent. */
+function scaffoldConfigs(target: string): void {
+  const pkgPath = join(target, "package.json");
+  if (!existsSync(pkgPath)) return;
+  let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  } catch {
+    return;
+  }
+  const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  const usesTailwind = !!deps.tailwindcss || !!deps["@tailwindcss/postcss"] || existsSync(join(target, "tailwind.config.ts")) || existsSync(join(target, "tailwind.config.js"));
+  if (!usesTailwind) return;
+  // collapse to ONE canonical config — duplicate/conflicting postcss files break the build
+  for (const f of ["postcss.config.js", "postcss.config.cjs", "postcss.config.ts", "postcss.config.json"]) {
+    const p = join(target, f);
+    if (existsSync(p)) rmSync(p);
+  }
+  const v4 = !!deps["@tailwindcss/postcss"] || /\b4\./.test(String(deps.tailwindcss ?? "").replace(/^[^\d]*/, "4."));
+  const config = v4
+    ? `export default {\n  plugins: {\n    "@tailwindcss/postcss": {},\n  },\n};\n`
+    : `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n`;
+  writeFileSync(join(target, "postcss.config.mjs"), config);
+  // a v3 config needs autoprefixer + postcss installed (config-only deps the import scan can't see)
+  if (!v4) {
+    const dd = (pkg.devDependencies ??= {});
+    let changed = false;
+    if (!deps.autoprefixer) (dd.autoprefixer = "^10.4.20"), (changed = true);
+    if (!deps.postcss) (dd.postcss = "^8.4.49"), (changed = true);
+    if (changed) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+  }
+  console.log("  ▸ scaffold: wrote a clean postcss.config.mjs (boilerplate is deterministic, not generated)");
 }
 
 async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
@@ -620,6 +656,7 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`\n── writing the code with ${provider}/${modelForStage("codegen")} → ${target} ──`);
       if (!(await buildFromArchitecture(target, arch, provider, modelForStage("codegen")))) return 1;
       normalizeLayout(target); // deterministic safety net: make the @/* alias match where files live
+      scaffoldConfigs(target); // deterministic boilerplate (postcss/tailwind) — never LLM-generated
       writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
     }
 

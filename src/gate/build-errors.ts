@@ -75,6 +75,9 @@ const CANNOT_RESOLVE = /(?:resolve|module)\s+['"]([^'"]+)['"]/gi;
 // Next.js / tsc print a file:line:col line, then "Type error: <message>". Captures ANY
 // type error (e.g. Next 15 async headers()/cookies() not awaited) at its real location.
 const TS_TYPE_ERROR = /(?:^|\n)\s*\.?\/?([\w./-]+\.[jt]sx?):(\d+):(\d+)\s*[\r\n]+\s*Type error:\s*([^\r\n]+)/g;
+// Raw `tsc --noEmit` format: `path/file.ts(line,col): error TS####: message`. Lets the
+// fixer enumerate EVERY type error at once (batched) instead of one-per-`next build`.
+const TSC_ERROR = /(?:^|\n)([\w./\\-]+\.[jt]sx?)\((\d+),\d+\):\s*error\s+TS\d+:\s*([^\r\n]+)/g;
 // these are handled by the specific export/resolve patterns above — don't also emit a
 // generic type-error finding for the same line.
 const COVERED_BY_SPECIFIC = /has no exported member|is not exported|Can't resolve|Cannot find module/i;
@@ -157,6 +160,18 @@ export function parseBuildErrors(rawLog: string, projectPath: string, ruleId = "
     if (!rel || !msg || COVERED_BY_SPECIFIC.test(msg)) continue;
     const file = existsSync(join(projectPath, rel)) ? rel : "package.json";
     add(file, `\`npm run build\` failed at ${rel}:${line} — Type error: ${msg}`, Number.isFinite(line) ? line : undefined);
+  }
+
+  // 4) raw `tsc --noEmit` errors (the BATCHED view) → one finding per real type error, in
+  //    a source file. Skip generated (.next/) and node_modules so the fixer is aimed at
+  //    files it can actually edit.
+  for (const m of log.matchAll(TSC_ERROR)) {
+    const rel = (m[1] ?? "").replace(/\\/g, "/").replace(/^\.\//, "");
+    const line = Number(m[2]);
+    const msg = (m[3] ?? "").trim();
+    if (!rel || !msg || rel.startsWith(".next/") || rel.includes("node_modules/") || COVERED_BY_SPECIFIC.test(msg)) continue;
+    if (!existsSync(join(projectPath, rel))) continue;
+    add(rel, `type error at ${rel}:${line} — ${msg}`, Number.isFinite(line) ? line : undefined);
   }
 
   return out;
