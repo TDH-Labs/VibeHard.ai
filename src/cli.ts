@@ -15,6 +15,7 @@ import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { designBlock } from "./design/presets.ts";
+import { scaffoldDesignSystem } from "./design/scaffold.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
@@ -662,6 +663,10 @@ export async function main(argv: string[]): Promise<number> {
       if (!(await buildFromArchitecture(target, arch, provider, modelForStage("codegen")))) return 1;
       normalizeLayout(target); // deterministic safety net: make the @/* alias match where files live
       scaffoldConfigs(target); // deterministic boilerplate (postcss/tailwind) — never LLM-generated
+      // Deterministic design system: write the chosen preset's theme + globals so the look is
+      // GUARANTEED premium, not left to the model (which diluted prompt-only presets to generic gray).
+      const ds = scaffoldDesignSystem(target);
+      if (ds.applied) console.log(`  ▸ scaffold: applied the "${ds.preset}" design system (themed tailwind + globals.css — premium by default)`);
       writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
     }
 
