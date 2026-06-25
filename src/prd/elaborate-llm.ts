@@ -6,12 +6,11 @@
  * derives the NFRs + buy-vs-build deterministically (§11 — the model never invents the
  * security posture). The deterministic `reviewPrd` decides "ready", not the model.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject, type Spec } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, generateTextResilient, type ModelFactory } from "../engine/bolt/driver.ts";
 import { coercePrdDraft } from "./prd.ts";
 import type { Elaborator } from "./elaborate.ts";
 
@@ -87,7 +86,7 @@ export function llmElaborator(opts: LlmElaboratorOptions = {}): Elaborator {
         ].join("\n")
       : `${base}\n\nReturn the PRD JSON.`;
 
-    const { text } = await generateText({ model: modelFactory(config), system: ELABORATE_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 14000 });
+    const { text } = await generateTextResilient({ model: modelFactory(config), system: ELABORATE_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 14000 });
     // Resilient: a malformed response coerces to a near-empty draft, which reviewPrd flags so
     // the loop retries rather than crashing the build (§ degrade, never throw).
     const obj = tryExtractJsonObject(text);

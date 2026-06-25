@@ -8,12 +8,11 @@
  * facts are DERIVED at render time (§11). The model proposes the design; the deterministic checks
  * + topological build order are ours.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, generateTextResilient, type ModelFactory } from "../engine/bolt/driver.ts";
 import type { Prd } from "../prd/index.ts";
 import type { Srs } from "../srs/index.ts";
 import { coerceArchitecture } from "./architecture.ts";
@@ -79,7 +78,7 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
         ].join("\n")
       : `SRS/PRD:\n${JSON.stringify(summary)}\n\nReturn the SAD JSON.`;
 
-    const { text, finishReason } = await generateText({ model: modelFactory(config), system: ARCHITECT_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 12000 });
+    const { text, finishReason } = await generateTextResilient({ model: modelFactory(config), system: ARCHITECT_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 12000 });
     // A "length" finishReason means the model truncated mid-JSON → unparseable → empty design,
     // which reviewArchitecture flags (no-workstreams) so the loop retries. The concise prompt keeps
     // the SAD within one response.
