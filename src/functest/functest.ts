@@ -116,6 +116,10 @@ export function llmFunctionalReviewer(opts: FunctionalReviewOptions = {}): Funct
         system: FUNCTEST_SYSTEM_PROMPT,
         prompt,
         maxOutputTokens: 16_000,
+        temperature: 0, // judge the SAME code the same way every round — sampling variance made the
+        // completeness verdict wobble (a feature flagged missing one round, present the next),
+        // which stops a finished build from converging (completeness is never green at the same
+        // time as the other gates). Greedy decoding makes the grade stable + reproducible.
       });
       lastLen = (text ?? "").length;
       const checks = coerceChecks(tryExtractJsonObject(text ?? ""));
