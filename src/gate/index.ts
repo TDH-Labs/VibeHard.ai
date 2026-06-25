@@ -16,13 +16,14 @@ import { complianceGate } from "./compliance.ts";
 import { piiGate } from "./pii.ts";
 import { prodReadinessGate } from "./prod-readiness.ts";
 import { verifyGate, fastVerifyGate } from "./verify.ts";
+import { completenessGate } from "./completeness.ts";
 
 /** The default gate chain. Source scanners run FIRST, on authored source; verify runs
  *  LAST because it builds the app (creating .next/dist/…) — keeping derived output out
  *  of the source scans (§11, §19). compliance and prod-readiness are
  *  classification/rigor-driven: a no-op unless the app's spec was persisted by the
  *  front-half, so they never fire on a project that didn't go through it. */
-export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, piiGate, prodReadinessGate, verifyGate];
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, complianceGate, piiGate, prodReadinessGate, verifyGate, completenessGate];
 
 /** The FAST chain for the inner fix loop: same gates, but verify is the cheap in-place-build
  *  proxy (seconds, not the minutes of clean-room + container + boot probes). Iterate on this;
