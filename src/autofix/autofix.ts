@@ -87,10 +87,13 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       note(`${stopReason}; escalating early`);
       break;
     }
-    // stuck #2 — two consecutive rounds without the blocking set shrinking.
+    // stuck #2 — three consecutive rounds without the blocking set shrinking. (Batched
+    // tsc fixing clears many errors per round, so real progress shows as a dropping count;
+    // allow one extra flat round before giving up vs. the old 2, since a round that swaps
+    // one localized error for the next is still forward motion on a big app's tail.)
     noProgress = blocking.length < prevCount ? 0 : noProgress + 1;
-    if (noProgress >= 2) {
-      stopReason = `no progress for 2 rounds (still ${blocking.length} blocking)`;
+    if (noProgress >= 3) {
+      stopReason = `no progress for 3 rounds (still ${blocking.length} blocking)`;
       note(`${stopReason}; escalating early`);
       break;
     }

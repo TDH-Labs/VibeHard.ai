@@ -83,12 +83,12 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /recurred|no progress/.test(l))).toBe(true);
   });
 
-  test("a plateau — 2 rounds without the blocking set shrinking → escalates EARLY (before NTE)", async () => {
+  test("a plateau — 3 rounds without the blocking set shrinking → escalates EARLY (before NTE)", async () => {
     const cf = countingFixer();
-    const r = await autoFix("/ws", { gate: plateauGate(), fixer: cf.fixer, budget: 5, now: ts });
+    const r = await autoFix("/ws", { gate: plateauGate(), fixer: cf.fixer, budget: 6, now: ts });
     expect(r.fixed).toBe(false);
-    expect(r.attempts).toBe(2); // escalated at the 2nd flat round, well before the 5 ceiling
-    expect(r.log.some((l) => /no progress for 2 rounds/.test(l))).toBe(true);
+    expect(r.attempts).toBe(3); // escalated at the 3rd flat round, well before the 6 ceiling
+    expect(r.log.some((l) => /no progress for 3 rounds/.test(l))).toBe(true);
   });
 
   test("steady progress that doesn't converge in time stops at the NTE ceiling (hard cap)", async () => {

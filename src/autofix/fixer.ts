@@ -21,6 +21,17 @@ import { DERIVED_DIRS } from "../gate/scan-scope.ts";
 import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
 import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
 import { detectUndeclaredImports } from "../diagnose/diagnose.ts";
+import { parseBuildErrors } from "../gate/build-errors.ts";
+
+/** Run `tsc --noEmit` to surface EVERY type error at once (the BATCHED view). `next build`
+ *  stops at the first error, so a big app's tail is discovered one-per-rebuild and exhausts
+ *  the attempt budget; this lets the fixer address them all in a single pass. */
+function collectTypeErrors(workspacePath: string): Finding[] {
+  if (!existsSync(join(workspacePath, "tsconfig.json"))) return [];
+  const r = Bun.spawnSync(["npx", "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe", timeout: 180_000 });
+  if ((r.exitCode ?? 0) === 0) return [];
+  return parseBuildErrors(`${r.stdout?.toString() ?? ""}${r.stderr?.toString() ?? ""}`, workspacePath);
+}
 
 /** Applies fixes for a set of (blocked) verdicts to the workspace, in place. */
 export type Fixer = (workspacePath: string, verdicts: GateVerdict[]) => Promise<void>;
@@ -158,7 +169,11 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     //    When we just deterministically installed a missing module, leave THIS round's
     //    verify (build/clean-verify) findings to the re-gate — don't let the LLM rewrite
     //    package.json in parallel and undo the deterministic install (the observed regression).
-    const codeFindings = blocking.filter((f) => f.tool !== "trivy" && !(installedMissing && f.tool === "verify"));
+    // Batched type errors: when the build is failing (and we're not deferring to a re-gate
+    // after a deterministic dep install), enumerate ALL type errors with tsc and hand the
+    // whole set to the LLM at once — so it fixes the tail in one pass, not one-per-rebuild.
+    const tscFindings = verifyFailing && !installedMissing ? collectTypeErrors(workspacePath) : [];
+    const codeFindings = [...blocking.filter((f) => f.tool !== "trivy" && !(installedMissing && f.tool === "verify")), ...tscFindings];
     if (codeFindings.length || majorBumped.length) {
       // Fix in the app's OWN language — a Python workspace (requirements.txt/pyproject)
       // gets the Python prompt, so the fixer's edits match the stack it's repairing.
