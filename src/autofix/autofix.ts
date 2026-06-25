@@ -6,7 +6,7 @@
  * without Docker or an LLM.
  */
 import { isBlocking, type Finding, type Gate } from "../types.ts";
-import { runGate, type PipelineResult } from "../gate/index.ts";
+import { runGate, GATES, FAST_GATES, type PipelineResult } from "../gate/index.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
 import { recordRound } from "../journal/journal.ts";
@@ -79,7 +79,8 @@ function captureResolutions(ws: string, stack: string | undefined, prev: Finding
 export type GateRunner = (workspacePath: string) => Promise<PipelineResult>;
 
 export interface AutoFixOptions {
-  gate?: GateRunner;
+  gate?: GateRunner; // the inner-loop (fast) runner; default = FAST_GATES (cheap in-place verify)
+  fullGate?: GateRunner; // the convergence (full) runner; default = GATES (real container verify)
   gates?: Gate[];
   fixer?: Fixer;
   /** Max fix→re-gate cycles before escalating (§18 retry budget). */
@@ -116,7 +117,15 @@ function fingerprint(f: Finding): string {
 }
 
 export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}): Promise<AutoFixResult> {
-  const gate: GateRunner = opts.gate ?? ((p) => runGate(p, opts.gates));
+  // Fast inner loop (verify = cheap in-place build), full verification ONCE at convergence.
+  const gate: GateRunner = opts.gate ?? ((p) => runGate(p, opts.gates ?? FAST_GATES));
+  const fullGate: GateRunner = opts.fullGate ?? opts.gate ?? ((p) => runGate(p, opts.gates ?? GATES));
+  // The cheap inner gate, then CONFIRM with the full suite when it passes — so a reported "pass"
+  // is always a TRUE pass (the full verifier still gates it; the proxy only speeds iteration).
+  const gateConfirmed: GateRunner = async (p) => {
+    const r = await gate(p);
+    return r.passed ? await fullGate(p) : r;
+  };
   const fixer: Fixer = opts.fixer ?? defaultFixer();
   const nte = opts.budget ?? DEFAULT_BUDGET;
   const log: string[] = [];
@@ -142,10 +151,12 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   let stopReason = `reached the ${nte}-attempt ceiling`;
 
   while (attempts < nte) {
-    const r = await gate(workspacePath);
+    // FAST inner loop (cheap verify proxy); a pass is confirmed by the full suite ONCE — the
+    // human-engineer pattern: iterate cheap, verify full only at convergence.
+    const r = await gateConfirmed(workspacePath);
     if (r.passed) {
-      captureResolutions(workspacePath, fleetStack, prevBlocking, new Set(), preFixHashes); // the last fix cleared everything
-      note(`gate green after ${attempts} fix attempt(s)`);
+      captureResolutions(workspacePath, fleetStack, prevBlocking, new Set(), preFixHashes);
+      note(`gate green (full verification) after ${attempts} fix attempt(s)`);
       return { fixed: true, attempts, finalVerdicts: r.verdicts, escalation: null, log };
     }
 
@@ -197,7 +208,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   }
 
   // Final disposition (a fix may have landed in the last iteration → re-gate to be sure).
-  let final = await gate(workspacePath);
+  let final = await gateConfirmed(workspacePath);
   if (final.passed) {
     note(`gate green after ${attempts} fix attempt(s)`);
     return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
@@ -220,7 +231,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
         note(`fixer errored: ${e instanceof Error ? e.message : String(e)} — stopping extra attempts`);
         break;
       }
-      final = await gate(workspacePath);
+      final = await gateConfirmed(workspacePath);
       if (final.passed) {
         note(`gate green after ${attempts} fix attempt(s) (no-human extension)`);
         return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
