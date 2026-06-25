@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fleetBlock, normalizeStack, promotable, recordCandidate } from "./fleet.ts";
+import { fleetBlock, normalizeStack, promotable, recordCandidate, recordResolution } from "./fleet.ts";
 
 // The store reads VIBEHARD_FLEET_DIR lazily per call, so a normal import + per-test env works.
 let FLEET: string;
@@ -38,6 +38,20 @@ describe("fleet store — learning (verifier-gated promotion)", () => {
     expect(promotable(3).some((c) => c.signal === "verify:some-new-class")).toBe(false); // 2 builds
     recordCandidate("next-supabase", "verify:some-new-class");
     expect(promotable(3).some((c) => c.signal === "verify:some-new-class")).toBe(true); // 3 → eligible
+  });
+});
+
+describe("fleet store — fix-capture (the keystone)", () => {
+  test("recordResolution attaches the (failure → files that cleared it) evidence to the candidate", () => {
+    recordCandidate("next-supabase", "verify:build-failed");
+    recordResolution("next-supabase", "verify:build-failed", { message: "'x' is not exported from '@/lib/y'", files: ["lib/y.ts"] });
+    recordResolution("next-supabase", "verify:build-failed", { message: "Module not found 'stripe'", files: ["package.json"] });
+    recordCandidate("next-supabase", "verify:build-failed");
+    recordCandidate("next-supabase", "verify:build-failed"); // 3 builds total → promotable
+    const c = promotable(3).find((x) => x.signal === "verify:build-failed");
+    expect(c).toBeDefined();
+    expect(c!.resolutions.length).toBe(2); // the evidence the induction step reads
+    expect(c!.resolutions[0]!.files).toContain("lib/y.ts");
   });
 });
 
