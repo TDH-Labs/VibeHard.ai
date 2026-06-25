@@ -119,14 +119,56 @@ export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
   const systemPrompt = opts.systemPrompt ?? VIBEHARD_SYSTEM_PROMPT;
   return {
     name: "bolt.diy",
+    // The streaming analog of generateTextResilient: a raw streamText has no timeout, so a
+    // stalled stream (TCP open, no bytes) hangs the whole fix loop forever — observed live: a
+    // 7-feature fix attempt sat 12 min on one dead stream. We guard with an IDLE watchdog (no
+    // token for N ms ⇒ the stream is dead, abort) and an OVERALL cap, then retry-on-transient.
+    // Retry-from-scratch is safe because the engine accumulates the FULL stream before
+    // materializing anything (engine.ts "accumulate-then-parse") — a failed attempt writes no
+    // files, so we buffer internally and yield once on success (one yield ⇒ clean restart).
     async *run(prompt: string, config: EngineConfig): AsyncIterable<string> {
-      const result = streamText({
-        model: modelFactory(config),
-        system: systemPrompt,
-        prompt,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-      });
-      for await (const chunk of result.textStream) yield chunk;
+      const idleMs = Number(process.env.VIBEHARD_STREAM_IDLE_MS) || 120_000; // no token for 2 min ⇒ dead
+      const overallMs = Number(process.env.VIBEHARD_STREAM_OVERALL_MS) || 900_000; // 15 min hard cap
+      const retries = 2;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        let idle: ReturnType<typeof setTimeout> | undefined;
+        const armIdle = () => {
+          if (idle) clearTimeout(idle);
+          idle = setTimeout(() => controller.abort(new Error(`stream idle ${idleMs}ms (no token received)`)), idleMs);
+        };
+        const overall = setTimeout(() => controller.abort(new Error(`stream exceeded ${overallMs}ms overall`)), overallMs);
+        let raw: string | null = null;
+        try {
+          armIdle();
+          // streamText does NOT reject textStream on a provider error — it ends the stream silently
+          // and reports via onError. Capture it so a failed call becomes a throw (→ retry), instead
+          // of a silent empty "success" that would ship an app with no files.
+          let streamErr: unknown;
+          const result = streamText({ model: modelFactory(config), system: systemPrompt, prompt, maxOutputTokens: MAX_OUTPUT_TOKENS, abortSignal: controller.signal, onError: ({ error }) => { streamErr = error; } });
+          let acc = "";
+          for await (const chunk of result.textStream) {
+            armIdle(); // each token resets the idle watchdog
+            acc += chunk;
+          }
+          if (streamErr) throw streamErr;
+          raw = acc;
+        } catch (e) {
+          lastErr = e;
+          const sig = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+          const transient = /abort|timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|idle|stream exceeded|\b(429|500|502|503|504)\b/i.test(sig);
+          if (!transient || attempt === retries) throw e;
+          await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // linear backoff, then retry from scratch
+          continue;
+        } finally {
+          if (idle) clearTimeout(idle);
+          clearTimeout(overall);
+        }
+        yield raw; // outside the try: a downstream consumer error must NOT be mistaken for a stream fault
+        return;
+      }
+      throw lastErr;
     },
   };
 }
