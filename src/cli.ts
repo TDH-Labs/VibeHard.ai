@@ -21,6 +21,7 @@ import { configForStage, modelForStage, modelPlan, providerOf } from "./config/m
 import { diagnose, formatDiagnosis } from "./diagnose/diagnose.ts";
 import { seedJournal } from "./journal/journal.ts";
 import { fleetBlock } from "./fleet/fleet.ts";
+import { approveConvention, pendingConventions, runInduction } from "./fleet/induct.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -701,6 +702,33 @@ export async function main(argv: string[]): Promise<number> {
     const target = resolve(arg);
     console.log(`auto-fixing ${target} (gate → fix → re-gate, bounded) …`);
     return runAutoFixAndReport(target);
+  }
+
+  if (cmd === "fleet") {
+    // The operator's view into fleet learning (the human-in-the-loop gate). Never user-facing.
+    const sub = argv[1];
+    if (sub === "induct") {
+      console.log("inducing conventions from promotable candidates (recurring failures + the fixes that cleared them) …");
+      const proposed = await runInduction();
+      console.log(`\n${proposed.length} new proposal(s) staged for review:`);
+      for (const c of proposed) console.log(`  • ${c.id} [${c.phase}] — addresses ${c.addresses}\n      ${c.rule}`);
+      const pend = pendingConventions();
+      console.log(`\n${pend.length} total pending. Approve with: vibehard fleet approve <id>`);
+      return 0;
+    }
+    if (sub === "list") {
+      const pend = pendingConventions();
+      if (!pend.length) console.log("nothing pending review.");
+      for (const c of pend) console.log(`pending: ${c.id} [${c.phase}] — ${c.rule}`);
+      return 0;
+    }
+    if (sub === "approve") {
+      const c = approveConvention(argv[2] ?? "");
+      console.log(c ? `✓ approved '${c.id}' — now LIVE (injected into builds) + a regression fixture was dropped.` : `no pending convention with id '${argv[2]}'`);
+      return c ? 0 : 1;
+    }
+    console.error("usage: vibehard fleet induct | list | approve <id>");
+    return 2;
   }
 
   if (cmd === "diagnose") {
