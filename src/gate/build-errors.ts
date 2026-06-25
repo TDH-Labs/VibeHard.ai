@@ -79,6 +79,16 @@ const TS_TYPE_ERROR = /(?:^|\n)\s*\.?\/?([\w./-]+\.[jt]sx?):(\d+):(\d+)\s*[\r\n]
 // generic type-error finding for the same line.
 const COVERED_BY_SPECIFIC = /has no exported member|is not exported|Can't resolve|Cannot find module/i;
 
+// An INTERNAL module (@/…, ./…) that the build can't resolve = a file imported but never
+// generated. webpack prints the importing file on the line just above the error.
+const INTERNAL_NOT_FOUND = /(?:^|\n)\s*\.?\/?([\w./-]+\.[jt]sx?)\s*[\r\n]+\s*Module not found: Can't resolve\s+['"]((?:@\/|\.\.?\/)[^'"]+)['"]/g;
+
+/** Where an unresolved internal module SHOULD live, for an actionable "create this file"
+ *  message: `@/lib/supabase/server` → `lib/supabase/server.ts`. */
+function intendedPath(module: string): string {
+  return module.replace(/^@\//, "").replace(/^\.\.?\//, "") + ".ts";
+}
+
 const ANSI = /\[[0-9;]*m/g;
 
 /** Parse a build log into localized findings. Empty when nothing structured matched
@@ -112,12 +122,30 @@ export function parseBuildErrors(rawLog: string, projectPath: string, ruleId = "
     }
   }
 
-  // 2) unresolved module — keep "Can't resolve 'X'" verbatim so the deterministic
+  // 2) unresolved NPM PACKAGE — keep "Can't resolve 'X'" verbatim so the deterministic
   //    missing-deps installer (missingdeps.ts) still recognizes it.
   for (const m of log.matchAll(CANNOT_RESOLVE)) {
     const module = m[1] ?? "";
     if (!module || module.startsWith(".") || module.startsWith("@/") || module.startsWith("/")) continue;
     add("package.json", `\`npm run build\` failed — Module not found: Can't resolve '${module}'. If it's a real package, it must be added as a dependency; if not, fix the import.`);
+  }
+
+  // 2b) unresolved INTERNAL module = a file imported but never generated. Point the fixer
+  //     at it explicitly (was previously skipped → collapsed to a generic "build failed",
+  //     so the fixer never knew which file to create). De-dupe by module; name an importer.
+  const missingInternal = new Map<string, string>(); // module → an importing file
+  for (const m of log.matchAll(INTERNAL_NOT_FOUND)) {
+    const importer = (m[1] ?? "").replace(/^\.\//, "");
+    const module = m[2] ?? "";
+    if (module && !resolveLocalModule(module, projectPath) && !missingInternal.has(module)) missingInternal.set(module, importer);
+  }
+  for (const [module, importer] of missingInternal) {
+    const exists = existsSync(join(projectPath, importer));
+    add(
+      exists ? importer : "package.json",
+      `\`npm run build\` failed — Module not found: '${module}' is imported (e.g. in ${importer}) but no such file exists. ` +
+        `CREATE the file at ${intendedPath(module)} exporting what its importers use (follow the project's conventions for that module), or fix the import path. Several files import it — they must all resolve.`,
+    );
   }
 
   // 3) any other type error → its real file:line (e.g. Next 15 async headers()/cookies()

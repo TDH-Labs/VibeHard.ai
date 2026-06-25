@@ -124,6 +124,27 @@ describe("CLASS: internal helper arity mismatch (define-vs-call disagreement)", 
   });
 });
 
+describe("CLASS: internal module imported but never generated (the blind spot)", () => {
+  test("localizes each missing internal module to its importer with a 'create the file' message", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vibehard-harness-"));
+    try {
+      // the importers exist; the @/lib/supabase/* modules they import do NOT
+      mkdirSync(join(tmp, "components"), { recursive: true });
+      mkdirSync(join(tmp, "app/dashboard/attendance"), { recursive: true });
+      writeFileSync(join(tmp, "components/ComposeMessage.tsx"), "export {}\n");
+      writeFileSync(join(tmp, "app/dashboard/attendance/page.tsx"), "export {}\n");
+      writeFileSync(join(tmp, "tsconfig.json"), JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }));
+      const findings = parseBuildErrors(log("internal-module-missing.log"), tmp);
+      expect(findings).toHaveLength(2); // one per missing module, NOT a generic package.json finding
+      const files = findings.map((f) => f.file).sort();
+      expect(files).toEqual(["app/dashboard/attendance/page.tsx", "components/ComposeMessage.tsx"]);
+      expect(findings.every((f) => /CREATE the file at lib\/supabase\//.test(f.message))).toBe(true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 // Heavy: actually installs from the registry. Run with VIBEHARD_INTEGRATION=1.
 integration("CLASS: undeclared dependency — deterministic install (live)", () => {
   test(
