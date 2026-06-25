@@ -9,6 +9,7 @@ import { isBlocking, type Finding, type Gate } from "../types.ts";
 import { runGate, type PipelineResult } from "../gate/index.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
+import { recordRound } from "../journal/journal.ts";
 
 export type GateRunner = (workspacePath: string) => Promise<PipelineResult>;
 
@@ -101,6 +102,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     seen.add(signature);
     prevCount = blocking.length;
     attempts++;
+    recordRound(workspacePath, attempts, blocked, blocking); // as-built journal: what this round faced
     note(`attempt ${attempts}/${nte}: blocked by ${blocked} — applying fixes`);
     try {
       await fixer(workspacePath, r.verdicts);
