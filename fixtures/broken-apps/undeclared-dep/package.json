@@ -1,0 +1,9 @@
+{
+  "name": "undeclared-dep-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": { "build": "tsc --noEmit" },
+  "dependencies": {
+    "next": "15.5.18"
+  }
+}

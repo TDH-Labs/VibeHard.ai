@@ -1,0 +1,9 @@
+{
+  "name": "missing-export-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": { "build": "tsc --noEmit" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}

@@ -19,6 +19,7 @@ import { liveBoltDriver, type ModelFactory } from "../engine/bolt/driver.ts";
 import { translateFinding } from "../translate/index.ts";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
 import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
+import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
 
 /** Applies fixes for a set of (blocked) verdicts to the workspace, in place. */
 export type Fixer = (workspacePath: string, verdicts: GateVerdict[]) => Promise<void>;
@@ -32,14 +33,15 @@ export interface DefaultFixerOptions {
 
 const DERIVED = new Set<string>(DERIVED_DIRS);
 
-/** Read authored source (excluding derived dirs) up to a total byte cap, for context. */
-function readAuthoredFiles(root: string, cap: number): Array<{ rel: string; content: string }> {
+/** List authored source files (excluding derived dirs), skipping only the truly
+ *  oversized (lockfiles, generated bundles). No total cap here — the caller orders
+ *  by relevance and applies the budget, so a relevant file is never dropped merely
+ *  for sorting after an irrelevant one. */
+function listAuthoredFiles(root: string): Array<{ rel: string; content: string }> {
   const out: Array<{ rel: string; content: string }> = [];
-  let total = 0;
   const walk = (dir: string): void => {
     try {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
-        if (total >= cap) return;
         const abs = join(dir, e.name);
         if (e.isDirectory()) {
           if (!DERIVED.has(e.name)) walk(abs);
@@ -50,8 +52,7 @@ function readAuthoredFiles(root: string, cap: number): Array<{ rel: string; cont
           } catch {
             continue;
           }
-          if (content.length > 16_000) continue; // skip oversized/lockfiles
-          total += content.length;
+          if (content.length > 40_000) continue; // skip lockfiles / generated bundles
           out.push({ rel: relative(root, abs), content });
         }
       }
@@ -60,6 +61,43 @@ function readAuthoredFiles(root: string, cap: number): Array<{ rel: string; cont
     }
   };
   walk(root);
+  return out;
+}
+
+/** Pull the files + symbols the findings point at, so the fixer SEES what it must
+ *  change. A build error like "'supabaseAdmin' is not exported from '…/admin'" needs
+ *  the module AND every importer in the prompt together — reconciling a cross-file
+ *  mismatch is impossible when half of it is outside the window. */
+export function findingTargets(root: string, findings: Finding[]): { files: Set<string>; symbols: string[] } {
+  const files = new Set<string>();
+  const symbols = new Set<string>();
+  for (const f of findings) {
+    if (f.file && f.file !== "package.json" && f.file !== "Dockerfile" && existsSync(join(root, f.file))) files.add(f.file);
+    for (const m of (f.message ?? "").matchAll(/'([A-Za-z_$][A-Za-z0-9_$]{1,})'/g)) {
+      const s = m[1]!;
+      if (!s.includes("/") && !s.includes(".") && !s.includes("@")) symbols.add(s); // an identifier, not a path/module
+    }
+  }
+  return { files, symbols: [...symbols] };
+}
+
+/** Order authored files relevance-first (finding-named files + files mentioning a
+ *  broken symbol, then the rest) and include them under the byte budget. Priority
+ *  files lead, so the files the fix actually touches are never truncated away. */
+export function readFixSources(root: string, findings: Finding[], cap: number): Array<{ rel: string; content: string }> {
+  const all = listAuthoredFiles(root);
+  const { files, symbols } = findingTargets(root, findings);
+  const symbolRe = symbols.length ? new RegExp(`\\b(?:${symbols.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`) : null;
+  const isPriority = (f: { rel: string; content: string }): boolean => files.has(f.rel) || (symbolRe ? symbolRe.test(f.content) : false);
+
+  const ordered = [...all.filter(isPriority), ...all.filter((f) => !isPriority(f))];
+  const out: Array<{ rel: string; content: string }> = [];
+  let total = 0;
+  for (const f of ordered) {
+    if (total >= cap) break;
+    total += f.content.length;
+    out.push(f);
+  }
   return out;
 }
 
@@ -83,8 +121,8 @@ function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped:
     }
     lines.push("");
   }
-  lines.push("Current project files (authored source):");
-  for (const { rel, content } of readAuthoredFiles(workspacePath, cap)) {
+  lines.push("Current project files (authored source — the files the issues point at come first):");
+  for (const { rel, content } of readFixSources(workspacePath, findings, cap)) {
     lines.push(`\n--- ${rel} ---\n${content}`);
   }
   return lines.join("\n");
@@ -93,7 +131,7 @@ function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped:
 /** The production fixer: deterministic dep-bumps + an LLM pass for the rest. */
 export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
   const config: EngineConfig = opts.config ?? configForStage("fix"); // strong CODE model — fixing is code-critical
-  const cap = opts.sourceCap ?? 60_000;
+  const cap = opts.sourceCap ?? 120_000; // priority-ordered: targets lead, so this fits a mid-size app's relevant files
 
   return async (workspacePath, verdicts) => {
     const blocking = verdicts.flatMap((v) => v.findings).filter(isBlocking);
@@ -104,9 +142,20 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     const depResult = depFindings.length ? applyDepBumps(workspacePath, depFindings) : null;
     const majorBumped = depResult?.majorBumped ?? [];
 
-    // 2) The LLM pass — for code findings AND to adapt the code to any breaking major
+    // 2) Imported-but-UNDECLARED packages the build couldn't resolve → deterministic
+    //    `npm install` (version from the registry, §11). This also re-syncs the lockfile,
+    //    so it closes both "Module not found: 'pkg'" and clean-room lockfile drift. The
+    //    LLM proved unreliable here (missed deps, never synced the lock → the loop held).
+    const missing = parseMissingModules(blocking);
+    const missingResult = missing.length ? applyMissingDeps(workspacePath, missing) : null;
+    const installedMissing = (missingResult?.installed.length ?? 0) > 0;
+
+    // 3) The LLM pass — for code findings AND to adapt the code to any breaking major
     //    upgrade just applied. The gate (next re-gate) verifies whatever it produces (§11).
-    const codeFindings = blocking.filter((f) => f.tool !== "trivy");
+    //    When we just deterministically installed a missing module, leave THIS round's
+    //    verify (build/clean-verify) findings to the re-gate — don't let the LLM rewrite
+    //    package.json in parallel and undo the deterministic install (the observed regression).
+    const codeFindings = blocking.filter((f) => f.tool !== "trivy" && !(installedMissing && f.tool === "verify"));
     if (codeFindings.length || majorBumped.length) {
       // Fix in the app's OWN language — a Python workspace (requirements.txt/pyproject)
       // gets the Python prompt, so the fixer's edits match the stack it's repairing.

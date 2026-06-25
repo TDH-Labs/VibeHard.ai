@@ -21,13 +21,14 @@
  * `synthEnv`) are separated from the I/O (spawning node/npm) and unit-tested; the
  * launches are integration-tested.
  */
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { coerceSpec, decideRigor, type Rigor } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
+import { parseBuildErrors } from "./build-errors.ts";
 
 const RUNS = 3; // default when rigor is unknown; see verifyRuns
 const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
@@ -249,15 +250,23 @@ export interface BuildOutcome {
   log?: string;
 }
 
-/** Pure: a build outcome → Finding[]. A non-zero install or build blocks the deploy. */
-export function summarizeBuild(outcome: BuildOutcome): Finding[] {
+/** Pure: a build outcome → Finding[]. A non-zero install or build blocks the deploy.
+ *  When `projectPath` is given and the log names specific causes (an unexported symbol,
+ *  an unresolved module), emit one PRECISE finding per cause pointing at the real file —
+ *  so the fixer is aimed at what to change, not handed `package.json` + a log tail. */
+export function summarizeBuild(outcome: BuildOutcome, projectPath?: string): Finding[] {
   if (outcome.exitCode === 0) return [];
+  const ruleId = outcome.stage === "install" ? "install-failed" : "build-failed";
+  if (outcome.stage === "build" && projectPath && outcome.log) {
+    const localized = parseBuildErrors(outcome.log, projectPath, ruleId);
+    if (localized.length) return localized;
+  }
   const what = outcome.stage === "install" ? "`npm install`" : "`npm run build`";
   const tail = outcome.log?.trim() ? ` — error: ${outcome.log.trim().slice(-600)}` : "";
   return [
     {
       tool: "verify",
-      ruleId: outcome.stage === "install" ? "install-failed" : "build-failed",
+      ruleId,
       severity: "high",
       file: "package.json",
       message: `${what} exited ${outcome.exitCode} — the app does not build, so it cannot be deployed${tail}`,
@@ -271,14 +280,33 @@ function hasDeps(pkg: Pkg): boolean {
   );
 }
 
-/** Install deps when they are declared but node_modules is absent — a freshly
- *  GENERATED app has source but no installed deps, and you can neither build nor
- *  launch it without them (a node app would die with "Cannot find module"). Both
- *  verify paths need this. Returns null on success/nothing-to-do, or an install
- *  BuildOutcome on failure. */
+/** True when node_modules is missing OR STALE relative to package.json — i.e. the
+ *  declared deps were changed since the last install. npm stamps a hidden lockfile
+ *  (`node_modules/.package-lock.json`) at the end of every install; if package.json
+ *  is newer than that stamp, the install on disk no longer satisfies what's declared.
+ *  This is the auto-fix loop's load-bearing signal: when the fixer adds a missing
+ *  dependency to package.json, the NEXT verify must re-install so the new dep is on
+ *  disk before the re-build — otherwise the build keeps failing "Module not found"
+ *  on a dep that IS declared, and the fixer oscillates forever (no change to make). */
+export function installStale(projectPath: string): boolean {
+  if (!existsSync(join(projectPath, "node_modules"))) return true;
+  try {
+    const stamp = statSync(join(projectPath, "node_modules", ".package-lock.json")).mtimeMs;
+    return statSync(join(projectPath, "package.json")).mtimeMs > stamp;
+  } catch {
+    return true; // no install stamp → can't prove the deps on disk are current → reinstall
+  }
+}
+
+/** Install deps when they are declared but not installed — or no longer match
+ *  package.json. A freshly GENERATED app has source but no installed deps, and the
+ *  auto-fix loop ADDS deps to package.json between gate runs; both cases need a
+ *  (re)install or you can neither build nor launch (a node app dies "Cannot find
+ *  module" / a build fails "Module not found"). Both verify paths need this. Returns
+ *  null on success/nothing-to-do, or an install BuildOutcome on failure. */
 function ensureInstalled(projectPath: string, env: Record<string, string | undefined>): BuildOutcome | null {
   const pkg = readPkg(projectPath);
-  if (!pkg || !hasDeps(pkg) || existsSync(join(projectPath, "node_modules"))) return null;
+  if (!pkg || !hasDeps(pkg) || !installStale(projectPath)) return null;
   const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], {
     cwd: projectPath,
     env,
@@ -370,7 +398,11 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
     if (pkg.scripts?.build) {
       const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
       if ((build.exitCode ?? 1) !== 0) {
-        return [cleanFinding("build", `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`)];
+        const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`;
+        // localize against projectPath (the source the fixer edits) — the same relative
+        // files exist in the clean copy, so the resolved paths are valid for both.
+        const localized = parseBuildErrors(log, projectPath, "clean-verify-failed");
+        return localized.length ? localized : [cleanFinding("build", log)];
       }
     }
     return [];
@@ -562,7 +594,7 @@ export async function runVerify(
   }
 
   if (plan.kind === "build") {
-    findings.push(...summarizeBuild(await runBuild(projectPath, plan.script)));
+    findings.push(...summarizeBuild(await runBuild(projectPath, plan.script), projectPath));
     return verdictOf("verify", findings, ranAt);
   }
 
