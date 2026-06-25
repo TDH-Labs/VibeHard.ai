@@ -22,6 +22,7 @@ import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
 import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
 import { detectUndeclaredImports } from "../diagnose/diagnose.ts";
 import { parseBuildErrors } from "../gate/build-errors.ts";
+import { readJournal } from "../journal/journal.ts";
 
 /** Run `tsc --noEmit` to surface EVERY type error at once (the BATCHED view). `next build`
  *  stops at the first error, so a big app's tail is discovered one-per-rebuild and exhausts
@@ -132,6 +133,13 @@ function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped:
       lines.push(`- [${f.severity}] ${e.title} — ${f.message} (${f.tool}:${f.ruleId} @ ${f.file}:${f.line ?? "?"})`);
     }
     lines.push("");
+  }
+  // The as-built journal of PRIOR rounds — so you don't repeat a fix that already failed.
+  // If a finding recurs here, your last attempt didn't work: change APPROACH, don't retry it.
+  const journal = readJournal(workspacePath);
+  if (journal.trim()) {
+    lines.push("Prior attempts this build (from the as-built journal — do NOT repeat a fix that already failed; if an issue recurs, try a different approach):");
+    lines.push(journal, "");
   }
   lines.push("Current project files (authored source — the files the issues point at come first):");
   for (const { rel, content } of readFixSources(workspacePath, findings, cap)) {

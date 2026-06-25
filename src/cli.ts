@@ -19,6 +19,7 @@ import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
 import { diagnose, formatDiagnosis } from "./diagnose/diagnose.ts";
+import { seedJournal } from "./journal/journal.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
 import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
@@ -659,6 +660,10 @@ export async function main(argv: string[]): Promise<number> {
       scaffoldConfigs(target); // deterministic boilerplate (postcss/tailwind) — never LLM-generated
       writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
     }
+
+    // Seed the as-built journal (idempotent) — "intended" from planning; the gate→fix loop
+    // then appends what actually happened. The fixer reads it to avoid repeating failed fixes.
+    seedJournal(target, { name: spec.name, summary: spec.summary, stack: typeof arch.stack === "string" ? arch.stack : JSON.stringify(arch.stack ?? "Next.js + Supabase") });
 
     // 6. back-half: security checks (gates) → auto-fix → hold-for-review (always run — the verifier)
     console.log("\n── running the security checks (gates) + auto-fixing … ──");
