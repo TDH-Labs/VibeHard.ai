@@ -13,12 +13,17 @@
  * Advisory (never blocks): a report the operator + user read. `coerceChecks` is the trust boundary;
  * the LLM proposes, a human disposes.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { readAppSources } from "../gate/rls.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, generateTextResilient, type ModelFactory } from "../engine/bolt/driver.ts";
 import type { EngineConfig } from "../types.ts";
+
+/** Thrown when the reviewer was ASKED to judge real features over real sources but the model
+ *  produced no usable output (empty/unparseable, even after a retry). Distinct from a legitimate
+ *  N/A (no features / no sources → []), so a caller like the completeness gate can fail CLOSED
+ *  on "couldn't verify" instead of mistaking it for "nothing to flag" (a false pass). */
+export class FunctionalReviewUnavailable extends Error {}
 
 export type CheckStatus = "works" | "partial" | "missing";
 
@@ -96,15 +101,27 @@ export function llmFunctionalReviewer(opts: FunctionalReviewOptions = {}): Funct
   const config = opts.config ?? configForStage("functest");
   return async (features, workspace) => {
     const cleaned = features.map((f) => f.trim()).filter(Boolean);
-    if (!cleaned.length) return [];
+    if (!cleaned.length) return []; // legitimate N/A — nothing to review
     const sources = await readAppSources(workspace);
-    if (!sources.length) return [];
-    const { text } = await generateText({
-      model: modelFactory(config),
-      system: FUNCTEST_SYSTEM_PROMPT,
-      prompt: `Features the app must have:\n${cleaned.map((f) => `- ${f}`).join("\n")}\n\nThe app's code:\n\n${sourceBlock(sources)}`,
-      maxOutputTokens: 4000,
-    });
-    return coerceChecks(tryExtractJsonObject(text));
+    if (!sources.length) return []; // legitimate N/A — no app code to read
+    const prompt = `Features the app must have:\n${cleaned.map((f) => `- ${f}`).join("\n")}\n\nThe app's code:\n\n${sourceBlock(sources)}`;
+    // The light tier is a REASONING model — it spends output tokens THINKING before emitting the
+    // JSON. At 4k that budget was eaten by reasoning → empty text → coerceChecks([]) → a caller
+    // reading [] as "nothing missing" → FALSE PASS (observed: same source judged "7 missing" then
+    // "all present" on consecutive runs). Give it real headroom, and retry once before giving up.
+    let lastLen = 0;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { text } = await generateTextResilient({
+        model: modelFactory(config),
+        system: FUNCTEST_SYSTEM_PROMPT,
+        prompt,
+        maxOutputTokens: 16_000,
+      });
+      lastLen = (text ?? "").length;
+      const checks = coerceChecks(tryExtractJsonObject(text ?? ""));
+      if (checks.length) return checks;
+    }
+    // Asked to judge real features over real sources, got nothing usable twice → fail LOUD, not [].
+    throw new FunctionalReviewUnavailable(`functional reviewer produced no usable checks for ${cleaned.length} feature(s) over ${sources.length} source file(s) (model=${config.model}; last response ${lastLen} chars)`);
   };
 }

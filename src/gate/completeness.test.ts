@@ -47,4 +47,20 @@ describe("completeness gate", () => {
   test("no spec (didn't go through planning) → N/A, no block", async () => {
     expect((await runCompleteness(ws(undefined), { reviewer: async () => [] })).status).toBe("pass");
   });
+
+  test("reviewer with no app code to read → N/A, no block (empty result, not a failure)", async () => {
+    const v = await runCompleteness(ws(["x"]), { reviewer: async () => [] });
+    expect(v.status).toBe("pass");
+  });
+
+  test("FAILS CLOSED when the reviewer can't produce a verdict (no false pass on infra failure)", async () => {
+    const reviewer: FunctionalReviewer = async () => {
+      throw new Error("functional reviewer produced no usable checks (model=deepseek-v4-flash)");
+    };
+    const v = await runCompleteness(ws(["billing", "attendance"]), { reviewer });
+    expect(v.status).toBe("block"); // couldn't verify ⇒ must NOT pass
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]!.ruleId).toBe("completeness-unverified"); // distinct from feature-missing
+    expect(v.findings[0]!.message).toMatch(/NOT a code change|infra/i); // tells the fixer it's not a feature to build
+  });
 });
