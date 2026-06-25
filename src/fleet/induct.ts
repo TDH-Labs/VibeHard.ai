@@ -47,6 +47,31 @@ export function coerceConvention(raw: unknown, c: Candidate): Convention | null 
   return { id, stack: c.stack, phase, rule, addresses: c.signal, builds: c.builds };
 }
 
+// Path/identifier tokens that are FRAMEWORK, not app-specific — never a sign of a leaked specific.
+const FRAMEWORK_TOKENS = new Set(["app", "lib", "components", "component", "api", "page", "layout", "route", "actions", "action", "supabase", "client", "server", "admin", "hooks", "utils", "util", "types", "type", "middleware", "tsx", "jsx", "index", "config", "src", "public", "styles", "auth", "dashboard", "stripe", "next", "react"]);
+
+/** App-specific domain tokens that appear in this candidate's evidence file paths. */
+function appSpecificTokens(c: Candidate): string[] {
+  const toks = new Set<string>();
+  for (const r of c.resolutions ?? []) {
+    for (const f of r.files) {
+      for (const seg of f.split(/[/.\[\]_-]+/)) {
+        const s = seg.toLowerCase();
+        if (s.length >= 4 && /^[a-z]+$/.test(s) && !FRAMEWORK_TOKENS.has(s)) toks.add(s);
+      }
+    }
+  }
+  return [...toks];
+}
+
+/** ABSTRACTABILITY filter (universal-vs-specific): a universal rule can be stated with NO
+ *  app-specifics. If the proposed rule echoes a domain token from this one app's evidence
+ *  (a component/file/domain name), it leaked specifics — reject it as too app-specific. */
+export function isAbstract(rule: string, c: Candidate): boolean {
+  const r = rule.toLowerCase();
+  return !appSpecificTokens(c).some((t) => new RegExp(`\\b${t}\\b`).test(r));
+}
+
 export interface Inductor {
   (candidate: Candidate): Promise<Convention | null>;
 }
@@ -94,7 +119,9 @@ export async function runInduction(opts: InductorOptions & { threshold?: number;
   for (const c of promotable(opts.threshold)) {
     if (have.has(c.signal)) continue; // already proposed for this signal
     const conv = await inductor(c);
-    if (conv) {
+    // verifier-gated diversity (promotable) got us here; the abstractability filter rejects a
+    // proposal that leaked this app's specifics — i.e. a SPECIFIC lesson, not a universal one.
+    if (conv && isAbstract(conv.rule, c)) {
       pending.push(conv);
       proposed.push(conv);
       have.add(conv.id);

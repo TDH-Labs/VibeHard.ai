@@ -27,6 +27,17 @@ function workspaceStack(ws: string): string | undefined {
   }
 }
 
+/** A stable id for THIS app (its spec name) — so the fleet can count DISTINCT apps a failure hit
+ *  (diversity), not just occurrences. Same app retried ≠ a universal signal. */
+function workspaceAppId(ws: string): string | undefined {
+  try {
+    const name = (JSON.parse(readFileSync(join(ws, ".vibehard", "spec.json"), "utf8")) as { name?: string }).name;
+    return name ? name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Content hashes of authored source — to see which files a fix changed (fix-capture). */
 function fileHashes(root: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -121,6 +132,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   // The GATE still disposes every round (§11); this only decides when to stop trying.
   const seen = new Set<string>(); // blocking-set signatures already encountered
   const fleetStack = workspaceStack(workspacePath); // for scoping fleet candidates
+  const fleetAppId = workspaceAppId(workspacePath); // for diversity (distinct apps a failure hit)
   const recordedSignals = new Set<string>(); // fleet candidates recorded ONCE per build, not per round
   let prevBlocking: Finding[] = []; // findings before the last fix — to attribute what that fix cleared
   let preFixHashes = new Map<string, string>(); // source before the last fix
@@ -169,7 +181,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       const sig = `${f.tool}:${f.ruleId}`;
       if (!recordedSignals.has(sig)) {
         recordedSignals.add(sig);
-        recordCandidate(fleetStack, sig);
+        recordCandidate(fleetStack, sig, fleetAppId);
       }
     }
     note(`attempt ${attempts}/${nte}: blocked by ${blocked} — applying fixes`);

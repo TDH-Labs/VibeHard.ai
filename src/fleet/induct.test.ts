@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { approveConvention, coerceConvention, pendingConventions, runInduction } from "./induct.ts";
+import { approveConvention, coerceConvention, isAbstract, pendingConventions, runInduction } from "./induct.ts";
 import { loadConventions, recordCandidate, recordResolution, type Candidate } from "./fleet.ts";
 
 let FLEET: string;
@@ -21,7 +21,7 @@ afterEach(() => {
   delete process.env.VIBEHARD_FIXTURES_DIR;
 });
 
-const cand = (over: Partial<Candidate> = {}): Candidate => ({ key: "next-supabase::verify:x", stack: "next-supabase", signal: "verify:x", builds: 3, resolutions: [], ...over });
+const cand = (over: Partial<Candidate> = {}): Candidate => ({ key: "next-supabase::verify:x", stack: "next-supabase", signal: "verify:x", builds: 3, apps: [], resolutions: [], ...over });
 
 describe("coerceConvention (trust boundary)", () => {
   test("valid proposal → a Convention scoped/addressed from the candidate", () => {
@@ -36,6 +36,25 @@ describe("coerceConvention (trust boundary)", () => {
     const c = coerceConvention({ rule: "A sufficiently long actionable rule about X." }, cand())!;
     expect(c.phase).toBe("codegen");
     expect(c.id.length).toBeGreaterThan(0);
+  });
+});
+
+describe("abstractability filter (universal vs specific)", () => {
+  const withEvidence = cand({ resolutions: [{ message: "x", files: ["app/attendance/AttendanceGrid.tsx", "lib/billing.ts"] }] });
+  test("a rule echoing this app's domain tokens (attendance/billing) is rejected as too specific", () => {
+    expect(isAbstract("Make sure the attendance grid syncs before billing runs.", withEvidence)).toBe(false);
+  });
+  test("a genuinely abstract rule (no app-specifics) passes", () => {
+    expect(isAbstract("Await async dynamic APIs before calling methods on them.", withEvidence)).toBe(true);
+  });
+  test("runInduction drops a proposal that leaked app-specifics", async () => {
+    recordResolution("next-supabase", "verify:spec-leak", { message: "x", files: ["app/attendance/Roster.tsx"] });
+    recordCandidate("next-supabase", "verify:spec-leak", "a");
+    recordCandidate("next-supabase", "verify:spec-leak", "b");
+    recordCandidate("next-supabase", "verify:spec-leak", "c");
+    const leaky = async () => ({ id: "leaky", stack: "next-supabase", phase: "codegen" as const, rule: "Sync the roster grid for attendance.", addresses: "verify:spec-leak", builds: 3 });
+    const proposed = await runInduction({ inductor: leaky });
+    expect(proposed.some((p) => p.id === "leaky")).toBe(false); // rejected — not abstract
   });
 });
 

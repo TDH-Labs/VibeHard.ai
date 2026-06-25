@@ -46,7 +46,8 @@ export interface Candidate {
   key: string;
   stack: string;
   signal: string; // a gate finding signature, e.g. "rls:rls-service-key-bypass"
-  builds: number;
+  builds: number; // total occurrences
+  apps: string[]; // DISTINCT apps it occurred in — diversity is the universal-vs-specific signal
   resolutions: Resolution[]; // verifier-gated evidence: fixes that made the gate go green
 }
 
@@ -107,13 +108,17 @@ export function fleetBlock(rawStack?: string, phase: Phase = "codegen"): string 
 
 /** Record a gate-failure signal from a build — the learning INPUT. Idempotent per build is the
  *  caller's job; here every call bumps the recurrence count. */
-export function recordCandidate(rawStack: string | undefined, signal: string): void {
+export function recordCandidate(rawStack: string | undefined, signal: string, appId?: string): void {
   const stack = normalizeStack(rawStack);
   const cands = read<Candidate[]>(candidatesPath(), []);
   const key = `${stack}::${signal}`;
-  const c = cands.find((x) => x.key === key);
-  if (c) c.builds += 1;
-  else cands.push({ key, stack, signal, builds: 1, resolutions: [] });
+  let c = cands.find((x) => x.key === key);
+  if (!c) {
+    c = { key, stack, signal, builds: 0, apps: [], resolutions: [] };
+    cands.push(c);
+  }
+  c.builds += 1;
+  if (appId && !c.apps.includes(appId)) c.apps.push(appId); // count DISTINCT apps (diversity)
   write(candidatesPath(), cands);
 }
 
@@ -125,7 +130,7 @@ export function recordResolution(rawStack: string | undefined, signal: string, e
   const key = `${stack}::${signal}`;
   let c = cands.find((x) => x.key === key);
   if (!c) {
-    c = { key, stack, signal, builds: 1, resolutions: [] };
+    c = { key, stack, signal, builds: 1, apps: [], resolutions: [] };
     cands.push(c);
   }
   if (!c.resolutions) c.resolutions = [];
@@ -137,7 +142,13 @@ export function recordResolution(rawStack: string | undefined, signal: string, e
  *  is LLM-inducing the rule wording for these + a human/regression check; this surfaces them.) */
 export function promotable(threshold = PROMOTION_THRESHOLD): Candidate[] {
   const have = new Set(loadConventions().map((c) => c.addresses));
-  return read<Candidate[]>(candidatesPath(), []).filter((c) => c.builds >= threshold && !have.has(c.signal));
+  return read<Candidate[]>(candidatesPath(), []).filter((c) => {
+    // DIVERSITY gate: when we tracked which apps it hit, require it recurred across that many
+    // DISTINCT apps — a failure in one app retried N times is likely SPECIFIC, not universal.
+    // (Falls back to raw occurrence count only when app identity wasn't recorded.)
+    const diversity = c.apps && c.apps.length ? c.apps.length : c.builds;
+    return diversity >= threshold && !have.has(c.signal);
+  });
 }
 
 /** Commit a reviewed, verifier-validated convention into the store (LLM proposes, this disposes). */
