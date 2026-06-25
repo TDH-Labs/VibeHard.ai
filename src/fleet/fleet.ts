@@ -118,6 +118,7 @@ export function recordCandidate(rawStack: string | undefined, signal: string, ap
     cands.push(c);
   }
   c.builds += 1;
+  if (!c.apps) c.apps = []; // legacy candidates (written before the diversity field) have none
   if (appId && !c.apps.includes(appId)) c.apps.push(appId); // count DISTINCT apps (diversity)
   write(candidatesPath(), cands);
 }
