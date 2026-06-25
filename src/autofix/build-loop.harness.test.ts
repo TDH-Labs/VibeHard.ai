@@ -73,6 +73,23 @@ describe("CLASS: Next 15 async headers()/cookies() (general type error)", () => 
   });
 });
 
+describe("CLASS: server-action type mismatch (data-returning fn on a form action)", () => {
+  test("the build log localizes to the component file:line", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vibehard-harness-"));
+    try {
+      mkdirSync(join(tmp, "components/admin"), { recursive: true });
+      writeFileSync(join(tmp, "components/admin/UserListActions.tsx"), "export {}\n");
+      const findings = parseBuildErrors(log("action-type-mismatch.log"), tmp);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.file).toBe("components/admin/UserListActions.tsx");
+      expect(findings[0]!.line).toBe(16);
+      expect(findings[0]!.message).toContain("not assignable");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 // Heavy: actually installs from the registry. Run with VIBEHARD_INTEGRATION=1.
 integration("CLASS: undeclared dependency — deterministic install (live)", () => {
   test(
