@@ -59,6 +59,15 @@ describe("fleet store — diversity (universal vs specific)", () => {
   });
 });
 
+describe("fleet store — schema robustness", () => {
+  test("recordCandidate tolerates a legacy candidate with no 'apps' field (no crash, migrates it)", () => {
+    // a store written BEFORE the diversity field existed
+    writeFileSync(join(FLEET, "candidates.json"), JSON.stringify([{ key: "next-supabase::verify:old", stack: "next-supabase", signal: "verify:old", builds: 2, resolutions: [] }]));
+    expect(() => recordCandidate("next-supabase", "verify:old", "app-x")).not.toThrow();
+    expect(promotable(99)).toBeDefined; // store still readable
+  });
+});
+
 describe("fleet store — fix-capture (the keystone)", () => {
   test("recordResolution attaches the (failure → files that cleared it) evidence to the candidate", () => {
     recordCandidate("next-supabase", "verify:build-failed");
