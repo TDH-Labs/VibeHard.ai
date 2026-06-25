@@ -9,12 +9,40 @@
  * (§13). The model factory is injectable so tests run against a mock LLM (no
  * network, no key) — same discipline as mocking the gates' container boundary.
  */
-import { streamText, type LanguageModel } from "ai";
+import { generateText, streamText, type LanguageModel } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { EngineConfig } from "../../types.ts";
 import type { BoltDriver } from "./engine.ts";
 import { VIBEHARD_SYSTEM_PROMPT } from "./prompt.ts";
+
+/**
+ * `generateText` with a generous EXPLICIT timeout + retry-on-transient. The planning stages
+ * (PRD/SRS/architecture) generate large outputs (12–16k tokens) on a reasoning model, and a
+ * single slow/dropped request was throwing an uncaught `TimeoutError` that PANICKED the whole
+ * build — losing all prior planning. A transient LLM hiccup must never crash an autonomous run:
+ * here we bound each attempt and retry transient failures (timeout/network/429/5xx) with backoff.
+ */
+export async function generateTextResilient(
+  args: Parameters<typeof generateText>[0],
+  opts: { retries?: number; timeoutMs?: number } = {},
+): Promise<Awaited<ReturnType<typeof generateText>>> {
+  const retries = opts.retries ?? 2;
+  const timeoutMs = opts.timeoutMs ?? 240_000; // 4 min — a big reasoning generation can be slow
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await generateText({ ...args, abortSignal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      lastErr = e;
+      const sig = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|\b(429|500|502|503|504)\b/i.test(sig);
+      if (!transient || attempt === retries) throw e;
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // linear backoff
+    }
+  }
+  throw lastErr;
+}
 
 /** Build the AI-SDK model for an EngineConfig. The one place provider specifics live. */
 export type ModelFactory = (config: EngineConfig) => LanguageModel;

@@ -6,12 +6,11 @@
  * environment, security posture, and compliance from the substrate (§11 — the model never
  * invents platform facts). The deterministic `reviewSrs` decides "ready", not the model.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, generateTextResilient, type ModelFactory } from "../engine/bolt/driver.ts";
 import { coerceSrsDraft } from "./srs.ts";
 import type { Specifier } from "./elaborate.ts";
 
@@ -84,7 +83,7 @@ export function llmSpecifier(opts: LlmSpecifierOptions = {}): Specifier {
       ? [base, "", "Your previous SRS draft had these BLOCKING gaps — fix every one:", ...blocking.map((g) => `- ${g.message}`), "", "Return the corrected SRS JSON."].join("\n")
       : `${base}\n\nReturn the SRS JSON.`;
 
-    const { text, finishReason } = await generateText({ model: modelFactory(config), system: SRS_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 16000 });
+    const { text, finishReason } = await generateTextResilient({ model: modelFactory(config), system: SRS_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 16000 });
     const obj = tryExtractJsonObject(text);
     // A "length" finishReason means the model truncated mid-JSON → unparseable → empty draft;
     // the concise module-level prompt keeps the document within one response. Resilient either
