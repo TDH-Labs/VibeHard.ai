@@ -28,9 +28,11 @@ const storePath = (): string => join(dir(), "conventions.json");
 const candidatesPath = (): string => join(dir(), "candidates.json");
 export const PROMOTION_THRESHOLD = 3;
 
+export type Phase = "planning" | "codegen" | "both";
 export interface Convention {
   id: string;
   stack: string; // normalized scope, e.g. "next-supabase" — prevents a Python lesson poisoning a Next build
+  phase?: Phase; // where it's injected — architect (planning), codegen, or both. Default: codegen.
   rule: string; // the abstract convention (never a user's code)
   addresses: string; // the gate/failure signal it prevents (e.g. "verify:build-failed")
   builds: number; // how many independent builds validated it
@@ -56,14 +58,14 @@ export interface Candidate {
 // how many independent AcmeCare variations validated it. (When the induction step lands, it grows
 // this set automatically; until then this is the hand-curated head start.)
 const SEED: Convention[] = [
-  { id: "no-clerk", stack: "next-supabase", rule: "Use Supabase Auth, never Clerk/Auth0/NextAuth — a third-party auth provider breaks the auth.uid() link RLS depends on and pulls in webhooks/SDKs that fight the gates.", addresses: "rls + verify:build-failed", builds: 6 },
-  { id: "next15-async-apis", stack: "next-supabase", rule: "Next 15: await headers()/cookies()/draftMode(); a route's params/searchParams are Promises — type them Promise<…> and await. Calling .get on an un-awaited headers() is the #1 build break.", addresses: "verify:build-failed (Property 'get' on Promise<ReadonlyHeaders>)", builds: 5 },
-  { id: "supabase-exact-files", stack: "next-supabase", rule: "Create exactly lib/supabase/{client,server,admin}.ts and import by those exact paths everywhere; no flat lib/supabase.ts. Every @/lib/supabase/* import must be a file you actually created.", addresses: "verify:build-failed (Module not found @/lib/supabase/*)", builds: 4 },
-  { id: "stripe-omit-apiversion", stack: "next-supabase", rule: "Integration SDKs (Stripe etc.): OMIT a hardcoded apiVersion — let the installed SDK default. Webhooks read the raw body + constructEventAsync. Never guess post-cutoff version literals.", addresses: "verify:build-failed (apiVersion not assignable)", builds: 3 },
-  { id: "rls-service-key-admin-only", stack: "next-supabase", rule: "The service-role client bypasses RLS — use it only on admin-only server paths; user features go through the request-scoped RLS client (auth.uid()).", addresses: "rls:rls-service-key-bypass", builds: 4 },
-  { id: "server-actions-not-in-pages", stack: "next-supabase", rule: "A page.tsx exports only its default + Next's allowed members — never a server action. Put actions in actions.ts (\"use server\") or keep them unexported in the same file.", addresses: "verify:build-failed (does not match required types of a Next.js Page)", builds: 2 },
-  { id: "internal-api-consistency", stack: "next-supabase", rule: "A helper's definition and every call site must agree on arg count/shape, and every imported name must actually be exported — decide each signature once and use it consistently.", addresses: "verify:build-failed (Expected N arguments / is not exported)", builds: 3 },
-  { id: "postcss-boilerplate", stack: "next-supabase", rule: "Tailwind/PostCSS config is boilerplate: exactly one postcss.config.mjs exporting { plugins } — never duplicate it or hand-roll variants.", addresses: "verify:build-failed (postcss plugins key)", builds: 3 },
+  { id: "no-clerk", stack: "next-supabase", phase: "both", builds: 6, addresses: "rls + verify:build-failed (clerk)", rule: "Authentication MUST be Supabase Auth — never Clerk, Auth0, NextAuth/Auth.js, Firebase Auth, or custom auth. A third-party provider breaks the auth.uid() link RLS depends on and pulls in webhooks/SDKs (svix, clerk middleware) that fight the gates. Social logins (Google/GitHub/Apple/…) come free via supabase.auth.signInWithOAuth({ provider }) + an app/auth/callback route that calls exchangeCodeForSession." },
+  { id: "next15-async-apis", stack: "next-supabase", phase: "codegen", builds: 5, addresses: "verify:build-failed (Property 'get' on Promise<ReadonlyHeaders>)", rule: "Next 15 async dynamic APIs MUST be awaited: `const c = await cookies(); c.get('x')` (NOT cookies().get). headers()/draftMode() too. A page/route's params and searchParams are Promises — type them Promise<...> and await. Calling .get/.has on an un-awaited headers()/cookies() is the #1 build break." },
+  { id: "supabase-clients", stack: "next-supabase", phase: "codegen", builds: 4, addresses: "verify:build-failed (Module not found @/lib/supabase/* ; is not exported)", rule: "Create EXACTLY three Supabase client files and import them by these exact paths everywhere — no flat lib/supabase.ts, and every @/lib/supabase/* import must be a file you actually created: (1) lib/supabase/client.ts → export function createClient() using @supabase/ssr createBrowserClient (client components); (2) lib/supabase/server.ts → export async function createClient() using createServerClient + an async cookies adapter (request-scoped, RLS-enforced; the default for server code); (3) lib/supabase/admin.ts → ONE service-role accessor with ONE name, imported by that same name everywhere." },
+  { id: "rls-service-key-admin-only", stack: "next-supabase", phase: "both", builds: 4, addresses: "rls:rls-service-key-bypass", rule: "The service-role client BYPASSES Row-Level Security — use it ONLY on clearly admin-only server paths (webhooks, background jobs, an admin dashboard gated on an admin role). For ANY normal user feature use the request-scoped createClient() so the database enforces per-user/per-tenant access via auth.uid(). Reaching user data with the service-role key is a blocking RLS finding." },
+  { id: "server-actions", stack: "next-supabase", phase: "codegen", builds: 3, addresses: "verify:build-failed (does not match required types of a Next.js Page ; Promise<Result> not assignable to void)", rule: "A page.tsx/layout.tsx exports ONLY its default + Next's allowed members (metadata, generateMetadata, generateStaticParams, route config) — NEVER export a server action or other function from it (blocking 'does not match the required types of a Next.js Page'). Put actions in a separate actions.ts with a top-of-file \"use server\", or keep them as non-exported async functions (each with \"use server\" first line) used by that file's own forms. A fn passed to <form action={fn}> must be (formData: FormData) => Promise<void>; to return data use useActionState." },
+  { id: "stripe-sdks", stack: "next-supabase", phase: "codegen", builds: 3, addresses: "verify:build-failed (apiVersion not assignable)", rule: "Integration SDKs (Stripe etc.): you don't know the SDK's current pinned API version, so OMIT a hardcoded apiVersion and let the installed SDK default — `new Stripe(process.env.STRIPE_SECRET_KEY!)`. Webhooks: read the RAW body with await req.text() and verify with stripe.webhooks.constructEventAsync(raw, sig, secret). Prefer library defaults over guessing post-cutoff version literals." },
+  { id: "internal-api-consistency", stack: "next-supabase", phase: "codegen", builds: 3, addresses: "verify:build-failed (Expected N arguments ; is not exported)", rule: "A helper's DEFINITION and EVERY call site must agree on argument count and shape, and every imported name must actually be exported by its module. Decide each helper's signature once and use it consistently. Mismatched arity ('Expected 1 arguments, but got 3') and missing exports are blocking build errors." },
+  { id: "postcss-boilerplate", stack: "next-supabase", phase: "codegen", builds: 3, addresses: "verify:build-failed (postcss plugins key)", rule: "Tailwind/PostCSS config is boilerplate: exactly one postcss.config.mjs exporting { plugins } — never duplicate it (two configs conflict) or hand-roll variants." },
 ];
 
 function read<T>(path: string, fallback: T): T {
@@ -94,10 +96,13 @@ export function loadConventions(stack?: string): Convention[] {
 
 /** The block injected into codegen's SYSTEM prompt (the recipe). Empty when nothing applies.
  *  NEVER write this into a workspace or a user-facing artifact — system prompt only. */
-export function fleetBlock(rawStack?: string): string {
-  const cs = loadConventions(normalizeStack(rawStack));
+export function fleetBlock(rawStack?: string, phase: Phase = "codegen"): string {
+  const cs = loadConventions(normalizeStack(rawStack)).filter((c) => {
+    const p = c.phase ?? "codegen";
+    return p === phase || p === "both";
+  });
   if (!cs.length) return "";
-  return ["", "<learned_conventions>", "  Conventions VibeHard has LEARNED from prior builds (each cleared a gate and recurred). Follow them like the rules above:", ...cs.map((c) => `  - ${c.rule}`), "</learned_conventions>"].join("\n");
+  return ["", "<learned_conventions>", "  Conventions VibeHard has LEARNED from prior builds (each cleared a gate, validated across builds). Follow them exactly:", ...cs.map((c, i) => `  ${i + 1}. ${c.rule}`), "</learned_conventions>"].join("\n");
 }
 
 /** Record a gate-failure signal from a build — the learning INPUT. Idempotent per build is the

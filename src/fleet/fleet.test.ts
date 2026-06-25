@@ -21,9 +21,15 @@ afterEach(() => {
 
 describe("fleet store — benefit", () => {
   test("seeds with learned conventions and injects them into the codegen block", () => {
-    const block = fleetBlock("Next.js + Supabase + Tailwind");
+    const block = fleetBlock("Next.js + Supabase + Tailwind", "codegen");
     expect(block).toContain("learned_conventions");
-    expect(block).toContain("Supabase Auth, never Clerk");
+    expect(block).toContain("await cookies()"); // a codegen convention (Next 15 async)
+  });
+
+  test("phase scoping — the architect gets PLANNING conventions (no Clerk), not codegen syntax rules", () => {
+    const planning = fleetBlock("Next.js + Supabase", "planning");
+    expect(planning).toContain("Supabase Auth"); // no-clerk is phase "both"
+    expect(planning).not.toContain("postcss.config"); // a codegen-only rule must not bleed into planning
   });
   test("stack scoping prevents a python lesson poisoning a next build", () => {
     expect(normalizeStack("FastAPI + Supabase + Python")).toBe("python-fastapi");

@@ -59,30 +59,10 @@ You are VibeHard, an expert AI assistant and exceptional senior software develop
   - Never write the same file to two locations (e.g. \`lib/x.ts\` AND \`src/lib/x.ts\`).
 </project_layout>
 
-<framework_conventions>
-  Target Next.js 15 (App Router) with React 19. These conventions are TYPE-CHECKED by the build gate (\`next build\` runs \`tsc\`); getting them wrong is a blocking build failure. Follow them exactly:
-
-  1. ASYNC DYNAMIC APIs — in Next 15 these return Promises and MUST be \`await\`ed:
-     - \`headers()\`, \`cookies()\`, \`draftMode()\` from \`next/headers\`:
-         \`const cookieStore = await cookies(); const token = cookieStore.get('sb');\`  (NOT \`cookies().get(...)\`)
-     - A page/layout/route's \`params\` and \`searchParams\` are Promises — type them as \`Promise<...>\` and await:
-         \`export default async function Page({ params }: { params: Promise<{ id: string }> }) { const { id } = await params; }\`
-     Calling \`.get\`/\`.has\` directly on \`headers()\`/\`cookies()\` without \`await\` is the #1 build break ("Property 'get' does not exist on type 'Promise<ReadonlyHeaders>'").
-
-  2. SUPABASE clients — create EXACTLY these three files (no more, no other names) and import them by these EXACT paths everywhere. Every \`@/lib/supabase/...\` you import MUST be a file you actually created — an import of \`@/lib/supabase/client\` or \`@/lib/supabase/server\` with no such file is a blocking "Module not found" failure. Do NOT also create a flat \`lib/supabase.ts\`.
-     - \`lib/supabase/client.ts\` → \`export function createClient()\` using \`@supabase/ssr\`'s \`createBrowserClient\` — for CLIENT components ("use client").
-     - \`lib/supabase/server.ts\` → \`export async function createClient()\` using \`createServerClient\` + an async cookies adapter (cookies() is async, see above) — request-scoped, RLS-enforced; the DEFAULT for server components, route handlers, and server actions.
-     - \`lib/supabase/admin.ts\` → ONE service-role accessor with ONE name (\`createAdminClient()\` OR a singleton \`supabaseAdmin\`), imported by that SAME name everywhere. NEVER mix the two names — the missing one is a blocking "is not exported" failure.
-     - The service-role client BYPASSES Row-Level Security, so use it ONLY in clearly admin-only, server-side paths (webhook handlers, background jobs, an admin dashboard already gated on an admin role). For ANY normal user feature, use the request-scoped \`createClient()\` so the database enforces per-user/per-tenant access. Reaching user data with the service-role key is a blocking RLS finding (\`rls-service-key-bypass\`) — the gate cannot prove that path isn't serving one user another user's data.
-
-  3. SERVER ACTIONS — two rules:
-     (a) A \`page.tsx\`/\`layout.tsx\` file may ONLY export its default component plus Next's allowed members (\`metadata\`, \`generateMetadata\`, \`generateStaticParams\`, route config). It MUST NOT \`export\` server actions or any other function — that is a blocking build failure ("does not match the required types of a Next.js Page"). Put server actions either in a separate \`actions.ts\` file with a top-of-file \`"use server"\` directive (and import them), or as NON-exported \`async function\`s in the same file (each with \`"use server"\` as its first line) used only by that file's own forms.
-     (b) A function passed directly to \`<form action={fn}>\` MUST have signature \`(formData: FormData) => Promise<void>\` and return nothing. If the action needs to return data/validation state, do NOT pass it to \`action={}\` directly — use \`useActionState(fn, initialState)\` with signature \`(prevState, formData) => Promise<State>\`. Passing a data-returning function to a form \`action\` prop is a blocking type error ("Promise<Result> is not assignable to 'void | Promise<void>'").
-
-  4. STRIPE (and other integration SDKs) — you do NOT know the SDK's current pinned API version; a hardcoded \`apiVersion: '2024-06-20'\` is a blocking type error ("not assignable to type '<the installed literal>'"). So OMIT the \`apiVersion\` option entirely and let the installed SDK use its own default: \`new Stripe(process.env.STRIPE_SECRET_KEY!)\`. For webhooks: read the RAW body with \`await req.text()\` (never parsed JSON) and verify with \`stripe.webhooks.constructEventAsync(rawBody, sig, secret)\`. Same principle for any third-party SDK — prefer the library's defaults over guessing version-specific literals you can't know.
-
-  5. INTERNAL API CONSISTENCY — a helper's DEFINITION and EVERY call site must agree on argument count and shape. If \`sendEmail\` is defined \`(opts: { to; subject; html }) => …\`, every caller passes ONE object — never \`sendEmail(to, subject, html)\`. Mismatched arity/shape ("Expected 1 arguments, but got 3") and importing a name a module doesn't export are blocking build errors. Decide each helper's signature once and use it consistently across the whole app.
-</framework_conventions>
+<!-- Framework conventions (Next 15 async APIs, Supabase client files, server actions, integration
+     SDKs, internal API consistency) are no longer hardcoded here: they live in the FLEET LEARNING
+     STORE and are injected at build time, so they stay a single source of truth that the platform
+     grows over time. See src/fleet/fleet.ts (fleetBlock). -->
 
 <security_standards>
   Generated code passes through a deterministic security gate before it can deploy. Write code that passes on the first try:

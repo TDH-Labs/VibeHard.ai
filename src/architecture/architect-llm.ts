@@ -17,6 +17,7 @@ import type { Prd } from "../prd/index.ts";
 import type { Srs } from "../srs/index.ts";
 import { coerceArchitecture } from "./architecture.ts";
 import type { Architect } from "./architect.ts";
+import { fleetBlock } from "../fleet/fleet.ts";
 
 const ARCHITECT_SYSTEM_PROMPT = `# Role
 You are an expert Software Architect. You turn a Software Requirements Specification (SRS) — which flows from a PRD and Spec — into a Software Architecture Document (SAD): the stack, the components (WORKSTREAMS, each owning files with a dependency graph), and the architectural decisions. Output a single JSON object — no prose, no markdown fence.
@@ -41,7 +42,6 @@ You are an expert Software Architect. You turn a Software Requirements Specifica
 - TRACEABILITY (§6): every SRS functional requirement id (FR-1, FR-2…) MUST appear in the "covers" of at least one workstream. A single component may cover several FRs.
 - The workstream dependency graph MUST be acyclic (typical order: data/schema → server/api → ui). Every workstream owns >=1 file. "dependsOn" may only name other workstreams in the list.
 - DEPLOYMENT CONSTRAINT (hard): the data layer MUST be Supabase (Postgres + Row-Level Security) — the security boundary the platform verifies live before deploy. Do NOT use MongoDB, Firebase, MySQL, DynamoDB, PlanetScale, SQLite, or a self-managed Postgres (pg/Prisma/TypeORM/Knex/Drizzle). Deploy as EITHER a Vercel app (Next.js / Vite / static) OR a single Dockerfile container (e.g. FastAPI on Fly).
-- AUTH CONSTRAINT (hard): authentication MUST be **Supabase Auth**. Do NOT choose Clerk, Auth0, NextAuth/Auth.js, Firebase Auth, or a custom auth scheme — a third-party auth provider breaks the link to \`auth.uid()\` that the RLS the platform verifies depends on, and pulls in webhooks/SDKs that fight the gates. Social logins (Google/GitHub/etc.) come free via Supabase \`signInWithOAuth\`. State this in the stack and the auth decision.
 - §2 pattern: give the rationale (from the SRS constraints) AND state the trade-offs explicitly. §4 dataArchitecture.schema: a concise SQL DDL for the core entities (derive from the SRS data model; include the RLS-relevant owner columns).
 - BE CONCISE so the whole JSON fits in one response: short phrases, a focused DDL, 3-7 workstreams. A truncated document is a failed document.
 - If given previous gaps, FIX every one (break a cycle, add files or covers, move the data layer to Supabase, supply the missing pattern rationale, …).`;
@@ -78,7 +78,9 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
         ].join("\n")
       : `SRS/PRD:\n${JSON.stringify(summary)}\n\nReturn the SAD JSON.`;
 
-    const { text, finishReason } = await generateTextResilient({ model: modelFactory(config), system: ARCHITECT_SYSTEM_PROMPT, prompt: user, maxOutputTokens: 12000 });
+    // Inject the fleet's PLANNING-phase learned conventions (e.g. Supabase Auth, never Clerk).
+    const system = ARCHITECT_SYSTEM_PROMPT + fleetBlock(undefined, "planning");
+    const { text, finishReason } = await generateTextResilient({ model: modelFactory(config), system, prompt: user, maxOutputTokens: 12000 });
     // A "length" finishReason means the model truncated mid-JSON → unparseable → empty design,
     // which reviewArchitecture flags (no-workstreams) so the loop retries. The concise prompt keeps
     // the SAD within one response.
