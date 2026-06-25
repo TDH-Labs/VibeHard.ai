@@ -20,6 +20,7 @@ import { translateFinding } from "../translate/index.ts";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
 import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
 import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
+import { detectUndeclaredImports } from "../diagnose/diagnose.ts";
 
 /** Applies fixes for a set of (blocked) verdicts to the workspace, in place. */
 export type Fixer = (workspacePath: string, verdicts: GateVerdict[]) => Promise<void>;
@@ -142,11 +143,13 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     const depResult = depFindings.length ? applyDepBumps(workspacePath, depFindings) : null;
     const majorBumped = depResult?.majorBumped ?? [];
 
-    // 2) Imported-but-UNDECLARED packages the build couldn't resolve → deterministic
-    //    `npm install` (version from the registry, §11). This also re-syncs the lockfile,
-    //    so it closes both "Module not found: 'pkg'" and clean-room lockfile drift. The
-    //    LLM proved unreliable here (missed deps, never synced the lock → the loop held).
-    const missing = parseMissingModules(blocking);
+    // 2) Imported-but-UNDECLARED packages → deterministic `npm install` (version from the
+    //    registry, §11; also re-syncs the lockfile). The build only names ONE missing module
+    //    per failure, so a build with several undeclared deps would need one rebuild PER dep
+    //    and exhaust the attempt budget. So when the build is failing, install the named one
+    //    AND every statically-undeclared import in ONE pass — closing the whole class at once.
+    const verifyFailing = blocking.some((f) => f.tool === "verify");
+    const missing = [...new Set([...parseMissingModules(blocking), ...(verifyFailing ? detectUndeclaredImports(workspacePath) : [])])];
     const missingResult = missing.length ? applyMissingDeps(workspacePath, missing) : null;
     const installedMissing = (missingResult?.installed.length ?? 0) > 0;
 
