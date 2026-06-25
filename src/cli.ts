@@ -286,8 +286,9 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // building/validating a Python app.
   // #12: inject the chosen design preset (VIBEHARD_DESIGN) into the frontend codegen so every screen
   // inherits a consistent, professional look. Python (FastAPI API) has no UI, so no design block.
-  // Inject the FLEET learning store (private; system-prompt only — never shipped to the user).
-  const systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock()) + fleetBlock(arch.stack);
+  // Inject the FLEET learning store's codegen conventions (private; system-prompt only — never
+  // shipped to the user). This is now the single source for what used to be hardcoded conventions.
+  const systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock()) + fleetBlock(arch.stack, "codegen");
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
   // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the
   // prior-tiers snapshot) is mapped to names for the brief — identical to sequential codegen.
