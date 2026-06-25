@@ -1,0 +1,15 @@
+> acmecare-replacement@0.1.0 build
+> next build
+   ▲ Next.js 15.5.18
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 3.3s
+   Linting and checking validity of types ...
+Failed to compile.
+./app/api/webhooks/clerk/route.ts:15:32
+Type error: Property 'get' does not exist on type 'Promise<ReadonlyHeaders>'.
+  13 |   const headerPayload = headers();
+  14 |
+> 15 |   const svixId = headerPayload.get('svix-id');
+     |                                ^
+  16 |   const svixTimestamp = headerPayload.get('svix-timestamp');
+Next.js build worker exited with code: 1 and signal: null

@@ -1,0 +1,14 @@
+> acmecare-replacement@0.1.0 build
+> next build
+   ▲ Next.js 15.5.18
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+Failed to compile.
+./components/admin/UserListActions.tsx:16:8
+Type error: Type 'Promise<ActionResult>' is not assignable to type 'VoidOrUndefinedOnly | Promise<VoidOrUndefinedOnly>'.
+  14 |   return (
+  15 |     <form action={deactivateUser}>
+> 16 |       <button type="submit">Deactivate</button>
+     |        ^
+Next.js build worker exited with code: 1 and signal: null

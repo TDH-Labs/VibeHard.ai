@@ -1,0 +1,11 @@
+> acmecare-replacement@0.1.0 build
+> next build
+   ▲ Next.js 15.5.18
+   Creating an optimized production build ...
+Attempted import error: 'supabaseAdmin' is not exported from '@/lib/supabase/admin' (imported as 'supabaseAdmin').
+Attempted import error: 'supabaseAdmin' is not exported from '@/lib/supabase/admin' (imported as 'supabaseAdmin').
+   Linting and checking validity of types ...
+Failed to compile.
+./app/actions/billing.ts:7:10
+Type error: Module '"@/lib/supabase/admin"' has no exported member 'supabaseAdmin'.
+Next.js build worker exited with code: 1 and signal: null

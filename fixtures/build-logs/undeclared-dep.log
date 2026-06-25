@@ -1,0 +1,9 @@
+> acmecare-replacement@0.1.0 build
+> next build
+   ▲ Next.js 15.5.18
+   Creating an optimized production build ...
+Failed to compile.
+./lib/stripe.ts
+Module not found: Can't resolve 'stripe'
+> Build failed because of webpack errors
+Next.js build worker exited with code: 1 and signal: null
