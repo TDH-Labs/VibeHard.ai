@@ -53,6 +53,24 @@ describe("completeness gate", () => {
     expect(v.status).toBe("pass");
   });
 
+  test("does NOT block a 'missing' verdict when the feature IS implemented on disk (false-negative guard)", async () => {
+    const d = ws(["immunization and health records"]);
+    mkdirSync(join(d, "app", "(dashboard)", "children", "[id]", "health-records"), { recursive: true });
+    writeFileSync(join(d, "app", "(dashboard)", "children", "[id]", "health-records", "page.tsx"), "export default function P(){return null}");
+    const reviewer: FunctionalReviewer = async () => [{ feature: "immunization and health records", status: "missing", note: "no top-level route" }];
+    const v = await runCompleteness(d, { reviewer });
+    expect(v.status).toBe("pass"); // a route named for the feature exists → not actually missing
+  });
+
+  test("STILL blocks a 'missing' verdict when nothing on disk matches the feature (real gap)", async () => {
+    const d = ws(["payroll exports"]);
+    mkdirSync(join(d, "app"), { recursive: true });
+    writeFileSync(join(d, "app", "page.tsx"), "export default function P(){return null}");
+    const reviewer: FunctionalReviewer = async () => [{ feature: "payroll exports", status: "missing", note: "absent" }];
+    const v = await runCompleteness(d, { reviewer });
+    expect(v.status).toBe("block"); // no payroll/exports file anywhere → genuinely missing
+  });
+
   test("FAILS CLOSED when the reviewer can't produce a verdict (no false pass on infra failure)", async () => {
     const reviewer: FunctionalReviewer = async () => {
       throw new Error("functional reviewer produced no usable checks (model=deepseek-v4-flash)");
