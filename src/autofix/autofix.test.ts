@@ -1,8 +1,33 @@
-import { describe, expect, test } from "bun:test";
-import { autoFix, type GateRunner } from "./autofix.ts";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { autoFix, defaultBudgetFor, type GateRunner } from "./autofix.ts";
 import type { Fixer } from "./fixer.ts";
 import type { GateVerdict, Severity } from "../types.ts";
 import type { PipelineResult } from "../gate/index.ts";
+
+const budgetTmps: string[] = [];
+afterEach(() => {
+  for (const d of budgetTmps.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+function wsWithFeatures(n?: number): string {
+  const d = mkdtempSync(join(tmpdir(), "vibehard-budget-"));
+  budgetTmps.push(d);
+  if (n !== undefined) {
+    mkdirSync(join(d, ".vibehard"), { recursive: true });
+    writeFileSync(join(d, ".vibehard", "spec.json"), JSON.stringify({ features: Array.from({ length: n }, (_, i) => `feature ${i}`) }));
+  }
+  return d;
+}
+
+describe("defaultBudgetFor — attempt ceiling scales with feature count", () => {
+  test("a 10-feature app gets headroom to build them one-per-round; no spec → flat base", () => {
+    expect(defaultBudgetFor(wsWithFeatures(10))).toBe(30); // 10 base + 2×10
+    expect(defaultBudgetFor(wsWithFeatures(0))).toBe(10);
+    expect(defaultBudgetFor(wsWithFeatures(undefined))).toBe(10); // no spec
+  });
+});
 
 const ts = "2026-06-21T00:00:00.000Z";
 const blockVerdict: GateVerdict = {
