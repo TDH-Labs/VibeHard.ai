@@ -73,6 +73,24 @@ function countingFixer(): { fixer: Fixer; calls: () => number } {
 }
 
 describe("autoFix loop", () => {
+  test("a fixer that throws ONCE (transient stream stall) is retried, not escalated", async () => {
+    let n = 0;
+    const fixer: Fixer = async () => {
+      n++;
+      if (n === 1) throw new Error("engine driver failed: stream idle 120000ms (no token received)");
+    };
+    const r = await autoFix("/ws", { gate: scriptedGate([BLOCK, PASS]), fixer });
+    expect(r.fixed).toBe(true); // the retry recovered the round
+    expect(r.escalation).toBeNull();
+    expect(n).toBe(2); // threw once, retried, succeeded
+  });
+
+  test("a fixer that throws TWICE escalates (a genuinely stuck fixer, not a blip)", async () => {
+    const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: async () => { throw new Error("persistent provider outage"); } });
+    expect(r.fixed).toBe(false);
+    expect(r.escalation).not.toBeNull();
+  });
+
   test("already green → no fix attempts", async () => {
     const cf = countingFixer();
     const r = await autoFix("/ws", { gate: scriptedGate([PASS]), fixer: cf.fixer });
