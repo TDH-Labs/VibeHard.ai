@@ -35,11 +35,17 @@ export interface Convention {
   addresses: string; // the gate/failure signal it prevents (e.g. "verify:build-failed")
   builds: number; // how many independent builds validated it
 }
+/** Evidence that a fix CLEARED a gate finding — the other half of an inducible lesson. */
+export interface Resolution {
+  message: string; // the localized finding that was resolved
+  files: string[]; // the files whose change cleared it (the "fix that worked")
+}
 export interface Candidate {
   key: string;
   stack: string;
   signal: string; // a gate finding signature, e.g. "rls:rls-service-key-bypass"
   builds: number;
+  resolutions: Resolution[]; // verifier-gated evidence: fixes that made the gate go green
 }
 
 /** Seed learnings — validated by the gates over this development cycle. The store starts USEFUL,
@@ -102,7 +108,23 @@ export function recordCandidate(rawStack: string | undefined, signal: string): v
   const key = `${stack}::${signal}`;
   const c = cands.find((x) => x.key === key);
   if (c) c.builds += 1;
-  else cands.push({ key, stack, signal, builds: 1 });
+  else cands.push({ key, stack, signal, builds: 1, resolutions: [] });
+  write(candidatesPath(), cands);
+}
+
+/** Attach the VERIFIER-GATED evidence that a fix cleared this finding (gate went block→pass).
+ *  This is the keystone of induction — the (failure → solution) pair, not just "it failed". */
+export function recordResolution(rawStack: string | undefined, signal: string, ev: Resolution): void {
+  const stack = normalizeStack(rawStack);
+  const cands = read<Candidate[]>(candidatesPath(), []);
+  const key = `${stack}::${signal}`;
+  let c = cands.find((x) => x.key === key);
+  if (!c) {
+    c = { key, stack, signal, builds: 1, resolutions: [] };
+    cands.push(c);
+  }
+  if (!c.resolutions) c.resolutions = [];
+  if (c.resolutions.length < 5) c.resolutions.push({ message: ev.message.slice(0, 200), files: ev.files.slice(0, 8) });
   write(candidatesPath(), cands);
 }
 

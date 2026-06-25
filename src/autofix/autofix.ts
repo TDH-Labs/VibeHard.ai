@@ -10,9 +10,13 @@ import { runGate, type PipelineResult } from "../gate/index.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
 import { recordRound } from "../journal/journal.ts";
-import { recordCandidate } from "../fleet/fleet.ts";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { recordCandidate, recordResolution } from "../fleet/fleet.ts";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+import { DERIVED_DIRS } from "../gate/scan-scope.ts";
+
+const DERIVED = new Set<string>(DERIVED_DIRS);
+const sigOf = (f: Finding): string => `${f.tool}:${f.ruleId}`;
 
 /** Read the build's stack from its architecture.json, to scope fleet candidates. */
 function workspaceStack(ws: string): string | undefined {
@@ -20,6 +24,44 @@ function workspaceStack(ws: string): string | undefined {
     return (JSON.parse(readFileSync(join(ws, ".vibehard", "architecture.json"), "utf8")) as { stack?: string }).stack;
   } catch {
     return undefined;
+  }
+}
+
+/** Content hashes of authored source — to see which files a fix changed (fix-capture). */
+function fileHashes(root: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const abs = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!DERIVED.has(e.name)) walk(abs);
+      } else if (/\.(tsx?|jsx?|mjs|cjs|css|json)$/.test(e.name)) {
+        try {
+          out.set(relative(root, abs), Bun.hash(readFileSync(abs)).toString());
+        } catch {
+          /* unreadable → skip */
+        }
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/** KEYSTONE OF INDUCTION: a finding present before a fix and GONE after = the fix cleared it
+ *  (verifier-gated). Record the (failure → the files that changed) pair as fleet evidence. */
+function captureResolutions(ws: string, stack: string | undefined, prev: Finding[], currentSigs: Set<string>, preFixHashes: Map<string, string>): void {
+  if (!prev.length) return;
+  const now = fileHashes(ws);
+  const changed = [...now].filter(([p, h]) => preFixHashes.get(p) !== h).map(([p]) => p);
+  for (const f of prev) {
+    if (!currentSigs.has(sigOf(f))) recordResolution(stack, sigOf(f), { message: f.message, files: changed });
   }
 }
 
@@ -80,6 +122,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   const seen = new Set<string>(); // blocking-set signatures already encountered
   const fleetStack = workspaceStack(workspacePath); // for scoping fleet candidates
   const recordedSignals = new Set<string>(); // fleet candidates recorded ONCE per build, not per round
+  let prevBlocking: Finding[] = []; // findings before the last fix — to attribute what that fix cleared
+  let preFixHashes = new Map<string, string>(); // source before the last fix
   let prevCount = Infinity;
   let noProgress = 0;
   let attempts = 0;
@@ -88,11 +132,14 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   while (attempts < nte) {
     const r = await gate(workspacePath);
     if (r.passed) {
+      captureResolutions(workspacePath, fleetStack, prevBlocking, new Set(), preFixHashes); // the last fix cleared everything
       note(`gate green after ${attempts} fix attempt(s)`);
       return { fixed: true, attempts, finalVerdicts: r.verdicts, escalation: null, log };
     }
 
     const blocking = r.verdicts.flatMap((v) => v.findings).filter(isBlocking);
+    const currentSigs = new Set(blocking.map(sigOf));
+    captureResolutions(workspacePath, fleetStack, prevBlocking, currentSigs, preFixHashes); // what the last fix cleared
     const signature = blocking.map(fingerprint).sort().join("|");
     const blocked = r.verdicts.filter((v) => v.status === "block").map((v) => `${v.gate}(${v.blocking})`).join(", ");
 
@@ -126,6 +173,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       }
     }
     note(`attempt ${attempts}/${nte}: blocked by ${blocked} — applying fixes`);
+    preFixHashes = fileHashes(workspacePath); // snapshot so the NEXT gate can attribute what this fix cleared
+    prevBlocking = blocking;
     try {
       await fixer(workspacePath, r.verdicts);
     } catch (e) {
