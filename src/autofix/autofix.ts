@@ -5,7 +5,7 @@
  * control flow; the gate runner and fixer are injectable so the loop is unit-tested
  * without Docker or an LLM.
  */
-import { isBlocking, type Finding, type Gate } from "../types.ts";
+import { isBlocking, type Finding, type Gate, type GateVerdict } from "../types.ts";
 import { runGate, GATES, FAST_GATES, type PipelineResult } from "../gate/index.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
@@ -125,6 +125,20 @@ export function defaultBudgetFor(workspacePath: string): number {
   }
 }
 
+/** Apply the fixer, retrying the round ONCE on a throw. The driver already retries a transient
+ *  stream stall internally, so a throw that reaches here is usually a brief provider outage — and
+ *  since a stall is now caught by the idle watchdog (a throw, not a 12-min hang), it must not end
+ *  the whole budget or force a human handoff over a 2-minute hiccup. A second failure rethrows, so
+ *  the caller still escalates a genuinely-stuck fixer. */
+async function applyFixWithRetry(fixer: Fixer, workspacePath: string, verdicts: GateVerdict[], note: (m: string) => void): Promise<void> {
+  try {
+    await fixer(workspacePath, verdicts);
+  } catch (e) {
+    note(`the fixer errored: ${e instanceof Error ? e.message : String(e)} — retrying the round once (often a transient stream stall)`);
+    await fixer(workspacePath, verdicts); // a second throw propagates → the caller escalates
+  }
+}
+
 /** Stable identity of a finding, for round-over-round progress + cycle detection. */
 function fingerprint(f: Finding): string {
   return `${f.tool}:${f.ruleId}:${f.file}:${f.line ?? "?"}`;
@@ -213,9 +227,9 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     preFixHashes = fileHashes(workspacePath); // snapshot so the NEXT gate can attribute what this fix cleared
     prevBlocking = blocking;
     try {
-      await fixer(workspacePath, r.verdicts);
+      await applyFixWithRetry(fixer, workspacePath, r.verdicts, note);
     } catch (e) {
-      stopReason = `the fixer errored: ${e instanceof Error ? e.message : String(e)}`;
+      stopReason = `the fixer errored twice: ${e instanceof Error ? e.message : String(e)}`;
       note(`${stopReason} — escalating`);
       break;
     }
@@ -240,9 +254,9 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       const blocked = final.verdicts.filter((v) => v.status === "block").map((v) => `${v.gate}(${v.blocking})`).join(", ");
       note(`extra attempt ${i + 1}/${extra} (no human): blocked by ${blocked} — applying fixes`);
       try {
-        await fixer(workspacePath, final.verdicts);
+        await applyFixWithRetry(fixer, workspacePath, final.verdicts, note);
       } catch (e) {
-        note(`fixer errored: ${e instanceof Error ? e.message : String(e)} — stopping extra attempts`);
+        note(`fixer errored twice: ${e instanceof Error ? e.message : String(e)} — stopping extra attempts`);
         break;
       }
       final = await gateConfirmed(workspacePath);
