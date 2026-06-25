@@ -47,6 +47,18 @@ describe("fleet store — learning (verifier-gated promotion)", () => {
   });
 });
 
+describe("fleet store — diversity (universal vs specific)", () => {
+  test("the SAME app retried 3× is NOT promotable (likely specific); 3 DISTINCT apps IS (universal)", () => {
+    recordCandidate("next-supabase", "verify:maybe-specific", "app-alpha");
+    recordCandidate("next-supabase", "verify:maybe-specific", "app-alpha");
+    recordCandidate("next-supabase", "verify:maybe-specific", "app-alpha"); // 3 builds, 1 app
+    expect(promotable(3).some((c) => c.signal === "verify:maybe-specific")).toBe(false);
+    recordCandidate("next-supabase", "verify:maybe-specific", "app-beta");
+    recordCandidate("next-supabase", "verify:maybe-specific", "app-gamma"); // now 3 distinct apps
+    expect(promotable(3).some((c) => c.signal === "verify:maybe-specific")).toBe(true);
+  });
+});
+
 describe("fleet store — fix-capture (the keystone)", () => {
   test("recordResolution attaches the (failure → files that cleared it) evidence to the candidate", () => {
     recordCandidate("next-supabase", "verify:build-failed");
