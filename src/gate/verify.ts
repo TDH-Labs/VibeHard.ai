@@ -625,3 +625,15 @@ export async function runVerify(
 }
 
 export const verifyGate = { name: "verify", run: (p: string) => runVerify(p) };
+
+/** FAST proxy of verify, for the inner fix loop: just the in-place build (`npm run build` =
+ *  the compile/type check, which catches the vast majority of failures) WITHOUT the heavy
+ *  clean-room install, container build, or N boot probes. Iterating against this is seconds,
+ *  not minutes; the FULL runVerify runs ONCE at convergence to confirm no regression + the real
+ *  artifact. A pure launched app (no build script) can't be cheaply proxied → full verify. */
+export async function runVerifyFast(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
+  const pkg = readPkg(projectPath);
+  if (!pkg?.scripts?.build) return runVerify(projectPath, ranAt);
+  return verdictOf("verify", summarizeBuild(await runBuild(projectPath, "build"), projectPath), ranAt);
+}
+export const fastVerifyGate = { name: "verify", run: (p: string) => runVerifyFast(p) };

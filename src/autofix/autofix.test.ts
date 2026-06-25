@@ -83,6 +83,25 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /recurred|no progress/.test(l))).toBe(true);
   });
 
+  test("fast pass → FULL verification runs; a full-only failure (clean-room/container) is fixed then re-verified", async () => {
+    const cf = countingFixer();
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([PASS]), // the cheap inner loop: always green
+      fullGate: scriptedGate([BLOCK, PASS]), // the full pass: catches something the proxy can't, then green
+      fixer: cf.fixer,
+      budget: 5,
+      now: ts,
+    });
+    expect(r.fixed).toBe(true);
+    expect(cf.calls()).toBeGreaterThanOrEqual(1); // the full-only finding got fixed before declaring pass
+  });
+
+  test("the cheap inner loop never declares success on a fast pass alone — full verify must also pass", async () => {
+    // fast always green, but full ALWAYS blocks → must NOT report fixed (no false 'pass')
+    const r = await autoFix("/ws", { gate: scriptedGate([PASS]), fullGate: scriptedGate([BLOCK]), fixer: async () => {}, budget: 3, now: ts });
+    expect(r.fixed).toBe(false); // correctness preserved: the full verifier still gates the pass
+  });
+
   test("a plateau — 3 rounds without the blocking set shrinking → escalates EARLY (before NTE)", async () => {
     const cf = countingFixer();
     const r = await autoFix("/ws", { gate: plateauGate(), fixer: cf.fixer, budget: 6, now: ts });
