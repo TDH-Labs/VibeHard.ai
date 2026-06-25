@@ -45,8 +45,18 @@ export interface Candidate {
 /** Seed learnings — validated by the gates over this development cycle. The store starts USEFUL,
  *  then grows by promotion. (These are abstract conventions; the hardcoded prompt holds the base
  *  set, the store holds what the fleet adds over time.) */
+// SEEDED from this development cycle's validated (gate-failure → solution-that-passed) pairs —
+// the bootstrap. Each was confirmed by a build clearing the gate after applying it; `builds` is
+// how many independent AcmeCare variations validated it. (When the induction step lands, it grows
+// this set automatically; until then this is the hand-curated head start.)
 const SEED: Convention[] = [
   { id: "no-clerk", stack: "next-supabase", rule: "Use Supabase Auth, never Clerk/Auth0/NextAuth — a third-party auth provider breaks the auth.uid() link RLS depends on and pulls in webhooks/SDKs that fight the gates.", addresses: "rls + verify:build-failed", builds: 6 },
+  { id: "next15-async-apis", stack: "next-supabase", rule: "Next 15: await headers()/cookies()/draftMode(); a route's params/searchParams are Promises — type them Promise<…> and await. Calling .get on an un-awaited headers() is the #1 build break.", addresses: "verify:build-failed (Property 'get' on Promise<ReadonlyHeaders>)", builds: 5 },
+  { id: "supabase-exact-files", stack: "next-supabase", rule: "Create exactly lib/supabase/{client,server,admin}.ts and import by those exact paths everywhere; no flat lib/supabase.ts. Every @/lib/supabase/* import must be a file you actually created.", addresses: "verify:build-failed (Module not found @/lib/supabase/*)", builds: 4 },
+  { id: "stripe-omit-apiversion", stack: "next-supabase", rule: "Integration SDKs (Stripe etc.): OMIT a hardcoded apiVersion — let the installed SDK default. Webhooks read the raw body + constructEventAsync. Never guess post-cutoff version literals.", addresses: "verify:build-failed (apiVersion not assignable)", builds: 3 },
+  { id: "rls-service-key-admin-only", stack: "next-supabase", rule: "The service-role client bypasses RLS — use it only on admin-only server paths; user features go through the request-scoped RLS client (auth.uid()).", addresses: "rls:rls-service-key-bypass", builds: 4 },
+  { id: "server-actions-not-in-pages", stack: "next-supabase", rule: "A page.tsx exports only its default + Next's allowed members — never a server action. Put actions in actions.ts (\"use server\") or keep them unexported in the same file.", addresses: "verify:build-failed (does not match required types of a Next.js Page)", builds: 2 },
+  { id: "internal-api-consistency", stack: "next-supabase", rule: "A helper's definition and every call site must agree on arg count/shape, and every imported name must actually be exported — decide each signature once and use it consistently.", addresses: "verify:build-failed (Expected N arguments / is not exported)", builds: 3 },
   { id: "postcss-boilerplate", stack: "next-supabase", rule: "Tailwind/PostCSS config is boilerplate: exactly one postcss.config.mjs exporting { plugins } — never duplicate it or hand-roll variants.", addresses: "verify:build-failed (postcss plugins key)", builds: 3 },
 ];
 
