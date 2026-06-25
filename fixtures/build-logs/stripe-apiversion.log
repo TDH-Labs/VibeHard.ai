@@ -1,0 +1,12 @@
+> acmecare-replacement@0.1.0 build
+> next build
+   ▲ Next.js 15.5.18
+   Creating an optimized production build ...
+   Linting and checking validity of types ...
+Failed to compile.
+./lib/stripe.ts:4:3
+Type error: Type '"2024-06-20"' is not assignable to type '"2025-02-24.acacia"'.
+  3 | export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+> 4 |   apiVersion: '2024-06-20',
+    |   ^
+Next.js build worker exited with code: 1 and signal: null
