@@ -104,12 +104,26 @@ export interface AutoFixResult {
   log: string[];
 }
 
-/** NTE — the hard not-to-exceed on fix→re-gate cycles. A flat ceiling on purpose: every
- *  loop is real wall-clock + token spend, so this caps maximum exposure. Progress-based
- *  stopping (below) usually exits earlier — converged, or escalated because it's stuck —
- *  so this only bites a slow-but-converging cascade (e.g. a major framework upgrade),
- *  where 10 is cheap insurance against clipping a fix that was still landing. */
+/** NTE — the hard not-to-exceed on fix→re-gate cycles. A ceiling on purpose: every loop is real
+ *  wall-clock + token spend, so this caps maximum exposure. Progress-based stopping (below) usually
+ *  exits earlier — converged, or escalated because it's stuck — so this only bites a slow-but-
+ *  converging cascade, where the headroom is cheap insurance against clipping a fix still landing. */
 const DEFAULT_BUDGET = 10;
+
+/** The budget must SCALE with how many features the build owes: the completeness gate makes the
+ *  loop build one missing feature per round, and each feature is ~1 build round + ~1 round to fix
+ *  the build errors it introduces. A flat 10 can't build a 10-feature app one-at-a-time (it ran
+ *  dry at 7/10). So: base (general fixes) + 2 per spec feature. Still a not-to-exceed — the
+ *  progress detectors stop a stuck build long before this. */
+export function defaultBudgetFor(workspacePath: string): number {
+  try {
+    const spec = JSON.parse(readFileSync(join(workspacePath, ".vibehard", "spec.json"), "utf8")) as { features?: unknown[] };
+    const n = Array.isArray(spec.features) ? spec.features.length : 0;
+    return DEFAULT_BUDGET + 2 * n;
+  } catch {
+    return DEFAULT_BUDGET; // no spec (didn't go through planning) → the flat base
+  }
+}
 
 /** Stable identity of a finding, for round-over-round progress + cycle detection. */
 function fingerprint(f: Finding): string {
@@ -127,7 +141,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     return r.passed ? await fullGate(p) : r;
   };
   const fixer: Fixer = opts.fixer ?? defaultFixer();
-  const nte = opts.budget ?? DEFAULT_BUDGET;
+  const nte = opts.budget ?? defaultBudgetFor(workspacePath);
   const log: string[] = [];
   const note = (m: string): void => {
     log.push(m);
