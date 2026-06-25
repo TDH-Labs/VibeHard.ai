@@ -67,6 +67,39 @@ describe("liveBoltDriver", () => {
     expect(sent).toContain("build a users api"); // the user's prompt
   });
 
+  test("retries a TRANSIENT stream failure, then yields the full result (no infinite hang)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        if (calls === 1) throw new Error("fetch failed"); // a dead/stalled stream on the first attempt
+        const chunks: LanguageModelV3StreamPart[] = [
+          { type: "text-start", id: "1" },
+          { type: "text-delta", id: "1", delta: ARTIFACT },
+          { type: "text-end", id: "1" },
+          { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: USAGE },
+        ];
+        return { stream: simulateReadableStream({ initialDelayInMs: 0, chunkDelayInMs: 0, chunks }) };
+      },
+    });
+    const driver = liveBoltDriver({ modelFactory: () => model });
+    expect(await collectText(driver)).toBe(ARTIFACT); // recovered: full artifact, materialization safe
+    expect(calls).toBe(2); // failed once, retried from scratch, succeeded
+  });
+
+  test("does NOT retry a non-transient failure (e.g. bad credentials) — fails fast", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        throw new Error("invalid x-api-key");
+      },
+    });
+    const driver = liveBoltDriver({ modelFactory: () => model });
+    await expect(collectText(driver)).rejects.toThrow(/invalid x-api-key/);
+    expect(calls).toBe(1); // not transient → no wasted retries
+  });
+
   test("the model factory receives the EngineConfig (provider routing stays ours)", async () => {
     const calls: EngineConfig[] = [];
     const factory = (c: EngineConfig): LanguageModel => {
