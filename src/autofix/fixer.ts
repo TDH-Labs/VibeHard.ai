@@ -191,10 +191,23 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
         workspacePath,
         config,
       );
+      let filesWritten = 0;
+      let streamError = "";
       try {
-        for await (const _ of session.prompt(buildFixPrompt(workspacePath, codeFindings, majorBumped, cap))) void _;
+        for await (const ev of session.prompt(buildFixPrompt(workspacePath, codeFindings, majorBumped, cap))) {
+          if (ev.type === "file-changed") filesWritten++;
+          else if (ev.type === "error") streamError = ev.message;
+        }
       } finally {
         await session.dispose();
+      }
+      // A fix pass that materialized ZERO files did nothing — and silently "succeeding" lets the
+      // loop burn the whole attempt budget re-gating an unchanged workspace (observed: a 7-feature
+      // ask returned no bolt actions, plateauing after a 12-min no-op). Surface it so the loop
+      // escalates with a real reason instead of mistaking emptiness for a completed attempt. The
+      // actionable signal: the ask was likely too large for one pass — fix fewer findings per round.
+      if (!filesWritten) {
+        throw new Error(`the fix model produced no file changes for ${codeFindings.length} finding(s)${streamError ? ` (engine error: ${streamError})` : ""} — the ask may be too large for one pass; reduce the findings addressed per attempt`);
       }
     }
   };
