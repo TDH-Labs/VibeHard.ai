@@ -1048,7 +1048,13 @@ export async function main(argv: string[]): Promise<number> {
     const provider = providerOf();
     const model = modelForStage("functest");
     console.log(`functional review: checking the app implements ${features.length} feature(s) …`);
-    const checks = await llmFunctionalReviewer({ config: { provider, model } })(features, target);
+    let checks;
+    try {
+      checks = await llmFunctionalReviewer({ config: { provider, model } })(features, target);
+    } catch (e) {
+      console.error(`couldn't review: ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
     if (!checks.length) {
       console.log("couldn't review (no readable app code).");
       return 1;

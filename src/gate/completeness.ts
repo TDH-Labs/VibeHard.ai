@@ -37,8 +37,19 @@ export async function runCompleteness(projectPath: string, opts: CompletenessOpt
   if (!features.length) return verdictOf("completeness", [], ranAt);
 
   const reviewer = opts.reviewer ?? llmFunctionalReviewer();
-  const checks = await reviewer(features, projectPath);
-  if (!checks.length) return verdictOf("completeness", [], ranAt); // reviewer unavailable (no key) → don't block
+  let checks;
+  try {
+    checks = await reviewer(features, projectPath);
+  } catch (e) {
+    // The reviewer was asked to judge real features but produced nothing usable (model outage, or
+    // a reasoning model that emitted no JSON even after retry). For a CORRECTNESS gate, "couldn't
+    // verify" must NOT pass — that's how a build silently ships incomplete. Fail CLOSED with a
+    // DISTINCT ruleId so the auto-fix loop treats this as an infra retry/hold, not a feature to
+    // build (there's no missing feature to generate here — the judgment itself failed).
+    const message = `Could not verify feature completeness — the functional reviewer returned no usable result (${e instanceof Error ? e.message : String(e)}). This is a reviewer/infra problem, NOT a code change: re-run the gate; if it persists a human must check the reviewer model/credentials before this build is declared complete. Failing closed so an unverifiable build is never called "done".`;
+    return verdictOf("completeness", [{ tool: "completeness", ruleId: "completeness-unverified", severity: "high", file: "app/", message }], ranAt);
+  }
+  if (!checks.length) return verdictOf("completeness", [], ranAt); // genuine N/A (no app sources to read) → don't block
 
   // Only an entirely-MISSING feature blocks. The message is a build order, not a critique — so the
   // fixer's next pass generates it against the tables planning already modeled.
