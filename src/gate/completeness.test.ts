@@ -1,0 +1,50 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runCompleteness } from "./completeness.ts";
+import type { FunctionalReviewer } from "../functest/functest.ts";
+
+const tmps: string[] = [];
+afterEach(() => {
+  for (const d of tmps.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+function ws(features?: string[]): string {
+  const d = mkdtempSync(join(tmpdir(), "vibehard-compl-"));
+  tmps.push(d);
+  if (features) {
+    mkdirSync(join(d, ".vibehard"), { recursive: true });
+    writeFileSync(join(d, ".vibehard", "spec.json"), JSON.stringify({ name: "app", features }));
+  }
+  return d;
+}
+
+describe("completeness gate", () => {
+  test("blocks on a MISSING feature, with an actionable build order", async () => {
+    const reviewer: FunctionalReviewer = async () => [
+      { feature: "child enrollment", status: "works", note: "full CRUD" },
+      { feature: "attendance check-in/out", status: "missing", note: "no page exists" },
+    ];
+    const v = await runCompleteness(ws(["child enrollment", "attendance check-in/out"]), { reviewer });
+    expect(v.status).toBe("block");
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]!.ruleId).toBe("feature-missing");
+    expect(v.findings[0]!.message).toContain("attendance check-in/out");
+    expect(v.findings[0]!.message).toMatch(/BUILD it/);
+  });
+
+  test("a 'partial' feature is NOT blocked (too subjective to gate on)", async () => {
+    const reviewer: FunctionalReviewer = async () => [{ feature: "billing", status: "partial", note: "list only" }];
+    const v = await runCompleteness(ws(["billing"]), { reviewer });
+    expect(v.status).toBe("pass");
+  });
+
+  test("all features present → pass", async () => {
+    const reviewer: FunctionalReviewer = async () => [{ feature: "x", status: "works", note: "" }];
+    expect((await runCompleteness(ws(["x"]), { reviewer })).status).toBe("pass");
+  });
+
+  test("no spec (didn't go through planning) → N/A, no block", async () => {
+    expect((await runCompleteness(ws(undefined), { reviewer: async () => [] })).status).toBe("pass");
+  });
+});
