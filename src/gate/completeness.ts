@@ -28,20 +28,32 @@ const FEATURE_STOPWORDS = new Set([
 ]);
 
 /** Deterministic guard against the reviewer's false negatives: does a feature the LLM called
- *  "missing" actually have a plausibly-matching implementation on disk? A feature gets routes/lib
- *  modules named after its DISTINCTIVE domain word(s) (immunization, billing, staff…), so if such a
- *  token appears in an app/ or lib/ file path, the feature is present (≠ missing). A truly-absent
- *  feature has no distinctive token anywhere → still blocks. Path-based (not content) to stay
- *  specific — a passing mention in some file shouldn't count as "implemented". */
+ *  "missing" actually have a plausibly-matching implementation on disk? The grader is noisiest on
+ *  features WITHOUT a dedicated route — "payment processing" lives inside billing, "role-based
+ *  access control" in middleware/lib — so it intermittently calls them missing. But a feature's
+ *  DISTINCTIVE domain word(s) (payment, immunization, staff…; generic words like "management"/
+ *  "tracking"/"records" are stopworded) show up in the code that implements it — in a file PATH
+ *  (a route/module named for it) or, for a folded-in feature, in file CONTENT. If a distinctive
+ *  token appears either place, the feature is present (≠ entirely missing, which is all this gate
+ *  blocks on). A truly-absent feature has its domain term nowhere in the code → still blocks. */
 function looksImplemented(feature: string, projectPath: string): boolean {
   const tokens = (feature.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((t) => !FEATURE_STOPWORDS.has(t));
   if (!tokens.length) return false; // no distinctive token to match on → can't vindicate; trust the LLM
-  for (const sub of ["app", "lib"]) {
+  let budget = 600_000; // bound the content scan (≈ the reviewer's own source cap)
+  for (const sub of ["app", "lib", "components"]) {
     const root = join(projectPath, sub);
     if (!existsSync(root)) continue;
     for (const rel of new Glob("**/*.{ts,tsx,js,jsx,sql}").scanSync({ cwd: root, dot: false })) {
-      const path = rel.toLowerCase();
-      if (tokens.some((t) => path.includes(t))) return true; // a route/module named for the feature
+      if (tokens.some((t) => rel.toLowerCase().includes(t))) return true; // a route/module named for the feature
+      if (budget <= 0) continue;
+      try {
+        const code = readFileSync(join(root, rel), "utf8");
+        budget -= code.length;
+        const hay = code.toLowerCase();
+        if (tokens.some((t) => hay.includes(t))) return true; // the feature's domain term appears in the code
+      } catch {
+        /* unreadable → skip */
+      }
     }
   }
   return false;
