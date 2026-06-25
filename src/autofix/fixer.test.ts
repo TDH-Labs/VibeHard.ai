@@ -46,6 +46,25 @@ describe("defaultFixer — no-op generation guard", () => {
     await expect(fixer(workspace(), [blockingVerdict()])).rejects.toThrow(/no file changes/);
   });
 
+  test("builds ONE missing feature per round even when the gate reports many (tractable asks)", async () => {
+    const bolt =
+      '<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/billing/page.tsx">export default function P(){return null}</boltAction></boltArtifact>';
+    const model = mockModel(bolt);
+    const features = ["billing and invoicing", "attendance check-in/out", "meal tracking"].map((feature) => ({
+      tool: "completeness",
+      ruleId: "feature-missing",
+      severity: "high" as const,
+      file: "app/",
+      message: `The app is missing a feature the user explicitly asked for: "${feature}".`,
+    }));
+    const verdict = verdictOf("completeness", features, "2026-01-01T00:00:00Z");
+    await defaultFixer({ modelFactory: () => model })(workspace(), [verdict]);
+    // The model was asked to build exactly ONE of the three missing features this round.
+    const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    const asked = ["billing and invoicing", "attendance check-in/out", "meal tracking"].filter((f) => sent.includes(f));
+    expect(asked).toHaveLength(1);
+  });
+
   test("succeeds (no throw) when the model emits a bolt file action that materializes", async () => {
     const bolt =
       '<boltArtifact id="fix" title="fix">' +

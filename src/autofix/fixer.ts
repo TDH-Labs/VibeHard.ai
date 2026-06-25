@@ -181,7 +181,18 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     // after a deterministic dep install), enumerate ALL type errors with tsc and hand the
     // whole set to the LLM at once — so it fixes the tail in one pass, not one-per-rebuild.
     const tscFindings = verifyFailing && !installedMissing ? collectTypeErrors(workspacePath) : [];
-    const codeFindings = [...blocking.filter((f) => f.tool !== "trivy" && !(installedMissing && f.tool === "verify")), ...tscFindings];
+    const allCodeFindings = [...blocking.filter((f) => f.tool !== "trivy" && !(installedMissing && f.tool === "verify")), ...tscFindings];
+
+    // Build ONE missing feature per round. The completeness gate honestly reports EVERY missing
+    // feature at once, but asking the model to build them all in a single pass returns no usable
+    // output (observed: 7 features → empty, a 12-min no-op). A feature is a large generation;
+    // one-per-round keeps each ask small enough to actually materialize, and the loop re-gates and
+    // picks up the next missing feature on the following round. Other findings are NOT capped.
+    const featureFindings = allCodeFindings.filter((f) => f.tool === "completeness" && f.ruleId === "feature-missing");
+    const codeFindings =
+      featureFindings.length > 1
+        ? [...allCodeFindings.filter((f) => !(f.tool === "completeness" && f.ruleId === "feature-missing")), featureFindings[0]!]
+        : allCodeFindings;
     if (codeFindings.length || majorBumped.length) {
       // Fix in the app's OWN language — a Python workspace (requirements.txt/pyproject)
       // gets the Python prompt, so the fixer's edits match the stack it's repairing.
