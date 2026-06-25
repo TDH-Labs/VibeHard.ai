@@ -90,6 +90,40 @@ describe("CLASS: server-action type mismatch (data-returning fn on a form action
   });
 });
 
+describe("CLASS: Stripe apiVersion mismatch (post-cutoff SDK knowledge)", () => {
+  test("localizes to lib/stripe.ts:line with the type error", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vibehard-harness-"));
+    try {
+      mkdirSync(join(tmp, "lib"), { recursive: true });
+      writeFileSync(join(tmp, "lib/stripe.ts"), "export {}\n");
+      const findings = parseBuildErrors(log("stripe-apiversion.log"), tmp);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.file).toBe("lib/stripe.ts");
+      expect(findings[0]!.line).toBe(4);
+      expect(findings[0]!.message).toContain("not assignable");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("CLASS: internal helper arity mismatch (define-vs-call disagreement)", () => {
+  test("localizes to the call site with the arity error", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "vibehard-harness-"));
+    try {
+      mkdirSync(join(tmp, "app/api/stripe/webhook"), { recursive: true });
+      writeFileSync(join(tmp, "app/api/stripe/webhook/route.ts"), "export {}\n");
+      const findings = parseBuildErrors(log("internal-arity.log"), tmp);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.file).toBe("app/api/stripe/webhook/route.ts");
+      expect(findings[0]!.line).toBe(145);
+      expect(findings[0]!.message).toContain("Expected 1 arguments");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 // Heavy: actually installs from the registry. Run with VIBEHARD_INTEGRATION=1.
 integration("CLASS: undeclared dependency — deterministic install (live)", () => {
   test(

@@ -1,0 +1,12 @@
+> procare-replacement@0.1.0 build
+> next build
+   ▲ Next.js 15.5.18
+   Creating an optimized production build ...
+   Linting and checking validity of types ...
+Failed to compile.
+./app/api/stripe/webhook/route.ts:145:13
+Type error: Expected 1 arguments, but got 3.
+  143 |     try {
+> 145 |       await sendEmail(parent.email, subject, html);
+      |             ^
+Next.js build worker exited with code: 1 and signal: null
