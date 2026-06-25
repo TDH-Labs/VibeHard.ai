@@ -10,6 +10,18 @@ import { runGate, type PipelineResult } from "../gate/index.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
 import { recordRound } from "../journal/journal.ts";
+import { recordCandidate } from "../fleet/fleet.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** Read the build's stack from its architecture.json, to scope fleet candidates. */
+function workspaceStack(ws: string): string | undefined {
+  try {
+    return (JSON.parse(readFileSync(join(ws, ".vibehard", "architecture.json"), "utf8")) as { stack?: string }).stack;
+  } catch {
+    return undefined;
+  }
+}
 
 export type GateRunner = (workspacePath: string) => Promise<PipelineResult>;
 
@@ -66,6 +78,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   //   • plateau — 2 consecutive rounds without the blocking set getting smaller.
   // The GATE still disposes every round (§11); this only decides when to stop trying.
   const seen = new Set<string>(); // blocking-set signatures already encountered
+  const fleetStack = workspaceStack(workspacePath); // for scoping fleet candidates
+  const recordedSignals = new Set<string>(); // fleet candidates recorded ONCE per build, not per round
   let prevCount = Infinity;
   let noProgress = 0;
   let attempts = 0;
@@ -103,6 +117,14 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     prevCount = blocking.length;
     attempts++;
     recordRound(workspacePath, attempts, blocked, blocking); // as-built journal: what this round faced
+    for (const f of blocking) {
+      // fleet learning: which gate failures this build hit — recorded ONCE per build per signal.
+      const sig = `${f.tool}:${f.ruleId}`;
+      if (!recordedSignals.has(sig)) {
+        recordedSignals.add(sig);
+        recordCandidate(fleetStack, sig);
+      }
+    }
     note(`attempt ${attempts}/${nte}: blocked by ${blocked} — applying fixes`);
     try {
       await fixer(workspacePath, r.verdicts);
