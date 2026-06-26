@@ -137,7 +137,9 @@ export function coerceDataModel(raw: unknown, warnings?: string[]): DataModel {
     membershipEntity,
     tenantField,
     roleField: ident(o.roleField) || "role",
-    adminRole: typeof o.adminRole === "string" && o.adminRole.trim() ? o.adminRole.trim() : "admin",
+    // adminRole is a VALUE interpolated into emitted SQL — restrict to a safe charset (letters/digits/
+    // space/_/-) so untrusted model JSON can't break out of a SQL string literal. Escaped again at emit.
+    adminRole: (typeof o.adminRole === "string" ? o.adminRole.replace(/[^A-Za-z0-9 _-]/g, "").trim() : "") || "admin",
     entities,
   };
 }

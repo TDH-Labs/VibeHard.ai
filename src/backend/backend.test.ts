@@ -235,3 +235,30 @@ describe("C1 — coerce surfaces silent downgrades as warnings (loud, not silent
     expect(warnings).toEqual([]);
   });
 });
+
+describe("C2 — adminRole can't inject SQL (value-position escaping)", () => {
+  test("coerceDataModel strips quotes/semicolons from adminRole at the trust boundary", () => {
+    const m = coerceDataModel({ adminRole: "admin'; drop table x; --", entities: [{ name: "A", access: "tenant", fields: [] }] });
+    expect(m.adminRole).not.toMatch(/['";]/); // dangerous chars gone
+    expect(m.adminRole.startsWith("admin")).toBe(true); // the safe part survives
+  });
+
+  test("a quote that reaches the generator is ESCAPED (migration still applies; no break-out)", async () => {
+    const model: DataModel = {
+      tenantEntity: "Org",
+      membershipEntity: "Member",
+      tenantField: "orgId",
+      roleField: "role",
+      adminRole: "ad'min", // a raw model (not via coerce) with a quote → the emitter must escape it
+      entities: [
+        { name: "Org", access: "tenant-admin", fields: [{ name: "name", type: "text", nullable: false }] },
+        { name: "Member", access: "owner", fields: [{ name: "orgId", type: "uuid", nullable: false, references: "Org" }] },
+      ],
+    };
+    const dir = ws();
+    generateBackend(dir, model);
+    expect((await runMigrate(dir)).status).toBe("pass"); // the quote did NOT break the SQL
+    const auth = readFileSync(join(dir, "supabase/migrations/0002_auth.sql"), "utf8");
+    expect(auth).toContain("'ad''min'"); // doubled-quote escape, not the break-out form 'ad'min'
+  });
+});
