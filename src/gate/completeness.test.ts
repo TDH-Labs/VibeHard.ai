@@ -56,10 +56,14 @@ describe("completeness gate", () => {
   test("does NOT block a 'missing' verdict when the feature IS implemented on disk (false-negative guard)", async () => {
     const d = ws(["immunization and health records"]);
     mkdirSync(join(d, "app", "(dashboard)", "children", "[id]", "health-records"), { recursive: true });
-    writeFileSync(join(d, "app", "(dashboard)", "children", "[id]", "health-records", "page.tsx"), "export default function P(){return null}");
+    // a REAL (folded-in) implementation, not a stub — substantive logic the gate can trust as "present"
+    writeFileSync(
+      join(d, "app", "(dashboard)", "children", "[id]", "health-records", "page.tsx"),
+      `import { createClient } from "@/lib/supabase/server";\nexport default async function HealthRecords({ params }: { params: { id: string } }) {\n  const sb = createClient();\n  const { data } = await sb.from("immunizations").select("*").eq("child_id", params.id);\n  return (<section><h1>Immunization records</h1><ul>{data?.map((r) => <li key={r.id}>{r.vaccine}</li>)}</ul></section>);\n}\n`,
+    );
     const reviewer: FunctionalReviewer = async () => [{ feature: "immunization and health records", status: "missing", note: "no top-level route" }];
     const v = await runCompleteness(d, { reviewer });
-    expect(v.status).toBe("pass"); // a route named for the feature exists → not actually missing
+    expect(v.status).toBe("pass"); // a real route implementing the feature exists → not actually missing
   });
 
   test("STILL blocks a 'missing' verdict when nothing on disk matches the feature (real gap)", async () => {
@@ -80,5 +84,33 @@ describe("completeness gate", () => {
     expect(v.findings).toHaveLength(1);
     expect(v.findings[0]!.ruleId).toBe("completeness-unverified"); // distinct from feature-missing
     expect(v.findings[0]!.message).toMatch(/NOT a code change|infra/i); // tells the fixer it's not a feature to build
+  });
+});
+
+import { looksImplemented } from "./completeness.ts";
+describe("B2 — looksImplemented requires a real implementation, not a named stub", () => {
+  const projectWith = (rel: string, content: string): string => {
+    const d = mkdtempSync(join(tmpdir(), "vibehard-b2-"));
+    tmps.push(d);
+    mkdirSync(join(d, "app", "billing"), { recursive: true });
+    writeFileSync(join(d, rel), content);
+    return d;
+  };
+
+  test("a stub file NAMED for the feature does NOT vindicate it (the finding stands)", () => {
+    const dir = projectWith("app/billing/page.tsx", "export default function Billing() { return null; }\n");
+    expect(looksImplemented("billing payment processing", dir)).toBe(false);
+  });
+
+  test("a real implementation (DB call + form + JSX, substantial) DOES vindicate it", () => {
+    const real = `import { createClient } from "@/lib/supabase/server";
+export default async function Billing() {
+  const sb = createClient();
+  const { data } = await sb.from("invoices").select("*");
+  async function pay(formData: FormData) { "use server"; /* charge */ }
+  return (<form onSubmit={pay}><h1>Billing</h1><ul>{data?.map((i) => <li key={i.id}>{i.amount}</li>)}</ul><button>Pay</button></form>);
+}\n`;
+    const dir = projectWith("app/billing/page.tsx", real);
+    expect(looksImplemented("billing payment processing", dir)).toBe(true);
   });
 });

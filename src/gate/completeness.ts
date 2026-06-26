@@ -36,7 +36,16 @@ const FEATURE_STOPWORDS = new Set([
  *  (a route/module named for it) or, for a folded-in feature, in file CONTENT. If a distinctive
  *  token appears either place, the feature is present (≠ entirely missing, which is all this gate
  *  blocks on). A truly-absent feature has its domain term nowhere in the code → still blocks. */
-function looksImplemented(feature: string, projectPath: string): boolean {
+/** A file shows REAL behavior (not a named stub): it has an implementation signal (a DB call, an async
+ *  handler, a form, hooks, JSX elements, a route export) AND a non-trivial body. This is what stops a
+ *  fixer from clearing a "missing" finding by dropping an empty file named for the feature (audit B2). */
+const IMPL_SIGNAL = /\bawait\b|\buseState\b|\buseEffect\b|onSubmit|<form|fetch\(|\.from\(|createClient|server-only|use server|export\s+async\s+function\s+(?:GET|POST|PUT|PATCH|DELETE)|<[A-Z][A-Za-z0-9]/;
+function substantive(code: string): boolean {
+  const stripped = code.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ").trim();
+  return stripped.length >= 200 && IMPL_SIGNAL.test(code); // real logic + real size, not a one-liner stub
+}
+
+export function looksImplemented(feature: string, projectPath: string): boolean {
   const tokens = (feature.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((t) => !FEATURE_STOPWORDS.has(t));
   if (!tokens.length) return false; // no distinctive token to match on → can't vindicate; trust the LLM
   let budget = 600_000; // bound the content scan (≈ the reviewer's own source cap)
@@ -44,16 +53,18 @@ function looksImplemented(feature: string, projectPath: string): boolean {
     const root = join(projectPath, sub);
     if (!existsSync(root)) continue;
     for (const rel of new Glob("**/*.{ts,tsx,js,jsx,sql}").scanSync({ cwd: root, dot: false })) {
-      if (tokens.some((t) => rel.toLowerCase().includes(t))) return true; // a route/module named for the feature
-      if (budget <= 0) continue;
+      if (budget <= 0) break;
+      let code: string;
       try {
-        const code = readFileSync(join(root, rel), "utf8");
-        budget -= code.length;
-        const hay = code.toLowerCase();
-        if (tokens.some((t) => hay.includes(t))) return true; // the feature's domain term appears in the code
+        code = readFileSync(join(root, rel), "utf8");
       } catch {
-        /* unreadable → skip */
+        continue; // unreadable → skip
       }
+      budget -= code.length;
+      const matched = tokens.some((t) => rel.toLowerCase().includes(t)) || tokens.some((t) => code.toLowerCase().includes(t));
+      // A token match ONLY vindicates if the matching file actually IMPLEMENTS something — a file
+      // merely named for the feature, or one that just mentions the word, is not "present".
+      if (matched && substantive(code)) return true;
     }
   }
   return false;
