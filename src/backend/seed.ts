@@ -117,7 +117,9 @@ function seedScript(model: DataModel, rows = 4): string {
     `  // 2) a demo admin login — the auth-user metadata trips the bootstrap trigger → a membership row`,
     `  let adminUserId: string | null = null;`,
     `  const adminEmail = 'admin@demo.test', adminPassword = 'Demo!passw0rd';`,
-    `  const { data: u, error: ue } = await sb.auth.admin.createUser({ email: adminEmail, password: adminPassword, email_confirm: true, user_metadata: { tenantId, role: ${JSON.stringify(model.adminRole)}, name: 'Demo Admin' } });`,
+    // tenant + role go in app_metadata (service-role only) — the bootstrap trigger trusts ONLY that,
+    // never user_metadata (which a real client could forge at signup). Display name is non-privileged.
+    `  const { data: u, error: ue } = await sb.auth.admin.createUser({ email: adminEmail, password: adminPassword, email_confirm: true, app_metadata: { tenantId, role: ${JSON.stringify(model.adminRole)} }, user_metadata: { name: 'Demo Admin' } });`,
     `  if (ue) console.error('admin', ue.message); else adminUserId = u.user.id;`,
     `  await new Promise((r) => setTimeout(r, 800));`,
     "",
