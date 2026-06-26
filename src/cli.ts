@@ -1270,14 +1270,27 @@ export async function main(argv: string[]): Promise<number> {
       console.error("usage: vibehard git-connect <dir> [owner/repo-name]");
       return 2;
     }
-    const { gitProviderFromEnv, webhookSecretFromEnv } = await import("./git/webhook-server.ts");
+    const { webhookSecretFromEnv } = await import("./git/webhook-server.ts");
     const { provisionGitRepo } = await import("./git/provision.ts");
-    const repoName = argv[1] as string | undefined;
+    const { gitHubProvider } = await import("./git/provider.ts");
+    const repoName = argv[2] as string | undefined;
     const webhookUrl = process.env.VIBEHARD_WEBHOOK_URL;
     const webhookSecret = webhookUrl ? (() => { try { return webhookSecretFromEnv(); } catch { return undefined; } })() : undefined;
 
+    // Provisioning needs a credential that can CREATE repos under a personal
+    // account. GitHub App installation tokens can't (org-only), and fine-grained
+    // PATs lack repo-creation. Prefer the gh CLI's classic OAuth token (full
+    // `repo` scope), fall back to GITHUB_PAT.
+    const ghToken = (() => {
+      try { return Bun.spawnSync(["gh", "auth", "token"]).stdout.toString().trim() || undefined; }
+      catch { return undefined; }
+    })();
+    const provisionToken = ghToken ?? process.env.GITHUB_PAT;
+    if (!provisionToken) throw new Error("no provisioning credential — run `gh auth login` or set GITHUB_PAT in .env");
+    const getToken = async () => provisionToken;
+    const provider = gitHubProvider(getToken);
+
     console.log(`\nConnecting ${resolve(arg)} to GitHub…`);
-    const { provider, getToken } = await gitProviderFromEnv();
     const result = await provisionGitRepo(arg, provider, {
       repoName,
       webhookUrl,

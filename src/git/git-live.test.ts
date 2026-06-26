@@ -7,6 +7,9 @@ import { verifyWebhookSignature, interpretPushWebhook } from "./webhook.ts";
 import { appJwt, installationToken, installationTokenProvider, appCredentialsFromEnv, type FetchLike } from "./app-auth.ts";
 import { gitHubProvider, fakeGitProvider } from "./provider.ts";
 import { ciWorkflowYaml, generateCiWorkflow } from "./ci.ts";
+import { provisionGitRepo } from "./provision.ts";
+import { bunGitRunner } from "./repo.ts";
+import { mkdirSync } from "node:fs";
 
 const tmps: string[] = [];
 afterEach(() => {
@@ -200,5 +203,19 @@ describe("CI workflow — gates as a required GitHub check, generate-then-own", 
     const r = generateCiWorkflow(dir);
     expect(r.skippedUserOwned).toBe(true);
     expect(readFileSync(p, "utf8")).toBe("name: my-own-ci\n");
+  });
+});
+
+// ───────────────── provision guard: never hijack an enclosing repo ─────────────────
+describe("provisionGitRepo — refuses a subdirectory of an existing repo", () => {
+  test("a nested dir throws instead of sweeping the parent repo into a commit", async () => {
+    const parent = appDir();
+    bunGitRunner(["init"], parent); // parent is now a git repo
+    const nested = join(parent, "subapp");
+    mkdirSync(nested, { recursive: true });
+
+    // Pointing git-connect at a subdir would otherwise run `git add -A` + remote-add
+    // + push against the PARENT repo — clobbering its origin and leaking a token.
+    await expect(provisionGitRepo(nested, fakeGitProvider())).rejects.toThrow(/inside an existing git repo/);
   });
 });

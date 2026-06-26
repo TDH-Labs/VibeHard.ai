@@ -121,6 +121,25 @@ export async function provisionGitRepo(
   const branch = opts.branch ?? "vibehard/build";
   const baseBranch = opts.baseBranch ?? "main";
 
+  // 0. The app dir must be its OWN repo root — never a subdirectory of a larger
+  // repo. Otherwise `git add -A` + remote-add + push would hijack the enclosing
+  // repo (sweep unrelated work into a commit, clobber its origin, leak a token
+  // into its .git/config). If the dir isn't a repo yet, make it one in place.
+  const topResult = bunGitRunner(["rev-parse", "--show-toplevel"], absPath);
+  if (topResult.exitCode === 0) {
+    const toplevel = resolve(topResult.stdout.trim());
+    if (toplevel !== absPath) {
+      throw new Error(
+        `${absPath} is inside an existing git repo (${toplevel}), not its own repo root.\n` +
+        `  git-connect would hijack that repo. Point it at a standalone app directory,\n` +
+        `  or 'git init' a fresh dir for the build first.`,
+      );
+    }
+  } else {
+    const init = bunGitRunner(["init"], absPath);
+    if (init.exitCode !== 0) throw new Error(`git init ${absPath}: ${init.stderr}`);
+  }
+
   // 1. ensure the repo exists
   const inferredName = absPath.split("/").at(-1) ?? "vibehard-app";
   const repoArg = opts.repoName ?? inferredName;
