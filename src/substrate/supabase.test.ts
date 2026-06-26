@@ -182,7 +182,9 @@ describe("applyMigrations", () => {
     const p = new SupabaseBackendProvider({ env, executorFactory: () => fx.exec, fetchImpl: fetchOf({}) });
     const r = await p.applyMigrations(h, [{ id: "m1", sql: "-- m1" }, { id: "m2", sql: "-- m2" }], ["m1"]);
     expect(r).toMatchObject({ ok: true, appliedNow: ["m2"] });
-    expect(fx.ran).toEqual(["-- m2"]);
+    expect(fx.ran[0]).toContain("_vibehard_migrations"); // the ledger is ensured first
+    expect(fx.ran.some((s) => s.includes("-- m2") && s.includes("insert into _vibehard_migrations") && s.includes("begin"))).toBe(true); // m2 applied + recorded in one txn
+    expect(fx.ran.some((s) => s.includes("-- m1"))).toBe(false); // m1 (already applied) is skipped
     expect(fx.ended()).toBe(true);
   });
   test("a nothing-to-do run opens no connection", async () => {
@@ -199,6 +201,20 @@ describe("applyMigrations", () => {
     expect(r.appliedNow).toEqual(["m1"]); // m3 never attempted
     expect(r.error).toContain("m2");
     expect(fx.ended()).toBe(true); // finally still closed it
+  });
+
+  test("F2: resume is IDEMPOTENT — a lost record does not double-apply a non-idempotent migration (real pglite)", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    const executor = { exec: async (sql: string) => { await db.exec(sql); }, end: async () => {} };
+    const p = new SupabaseBackendProvider({ env, executorFactory: () => executor, fetchImpl: fetchOf({}) });
+    const migs = [{ id: "0001", sql: `create table t (id int primary key); alter table t enable row level security; create policy p on t for all using (true);` }];
+    expect((await p.applyMigrations(h, migs, [])).appliedNow).toEqual(["0001"]);
+    // resume with the SAME empty record (side-file lost) → create policy must NOT re-run → no error, skipped via the ledger
+    const r2 = await p.applyMigrations(h, migs, []);
+    expect(r2.ok).toBe(true);
+    expect(r2.appliedNow).toEqual([]);
+    await db.close();
   });
 });
 
