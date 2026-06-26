@@ -9,10 +9,19 @@
 seaworthy before it sails. Builds on **Harbor** (the skill/room substrate).
 
 ## Status
-Greenfield. The core claim is already **proven** (in `~/dev/gate-proof/`): a gate
-chain using real scanners blocks vulnerable AI-generated apps and passes fixed
-ones. This project ports that proof into a typed TypeScript library and grows it
-into the product.
+What is **verified by executing tests** (not asserted): the gate chain blocks
+vulnerable AI-generated apps and passes fixed ones; the deterministic backend
+generator's tenant isolation is *proven* by an enforcement gate that runs real
+cross-tenant queries against embedded Postgres and asserts denial (`src/gate/
+rls-enforce.ts`); the security remediation in [`REMEDIATION.md`](./REMEDIATION.md)
+(P0+P1) is complete, each fix backed by a test that would fail if the bug were
+still live.
+
+What is **not yet done**: no generated app has been deployed to real
+infrastructure and attacked in production. That live deploy + cross-tenant
+attack is the pipeline's acceptance test (REMEDIATION.md → E1) and is pending
+credentials. Until it's green, treat "production-ready" as the design goal the
+gates enforce, not a demonstrated outcome on a live app.
 
 👉 **Read [`PROJECT_BRIEF.md`](./PROJECT_BRIEF.md) first** — it's the self-contained
 brief (problem, architecture, stack, assets, and the first task). Everything you
