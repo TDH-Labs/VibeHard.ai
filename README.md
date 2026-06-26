@@ -17,11 +17,17 @@ rls-enforce.ts`); the security remediation in [`REMEDIATION.md`](./REMEDIATION.m
 (P0+P1) is complete, each fix backed by a test that would fail if the bug were
 still live.
 
-What is **not yet done**: no generated app has been deployed to real
-infrastructure and attacked in production. That live deploy + cross-tenant
-attack is the pipeline's acceptance test (REMEDIATION.md → E1) and is pending
-credentials. Until it's green, treat "production-ready" as the design goal the
-gates enforce, not a demonstrated outcome on a live app.
+**E1 — the live acceptance test — is GREEN** (2026-06-26). The generated backend was
+applied to a real Supabase project, two tenants were seeded with private data, and
+a cross-tenant attack ran against the live REST API: every tenant-scoped table
+showed each tenant seeing ONLY its own row (zero overlap) and an anonymous caller
+seeing nothing. The database refused the attack in *production*, not just in the
+test harness (`scripts/e1-live.ts`). Tenant isolation is now demonstrated end to
+end on a live deploy, not only asserted by the gates.
+
+Still aspirational: a polished, continuously-running hosted product (auth UI,
+managed sandbox infra, billing). "Production-ready" for the security boundary is
+demonstrated; the full product surface is in progress.
 
 👉 **Read [`PROJECT_BRIEF.md`](./PROJECT_BRIEF.md) first** — it's the self-contained
 brief (problem, architecture, stack, assets, and the first task). Everything you
