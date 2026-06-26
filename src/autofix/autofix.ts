@@ -9,6 +9,7 @@ import { isBlocking, type Finding, type Gate, type GateVerdict } from "../types.
 import { runGate, GATES, FAST_GATES, type PipelineResult } from "../gate/index.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
+import { captureSurface, tamperReason } from "./anti-tamper.ts";
 import { recordRound } from "../journal/journal.ts";
 import { recordCandidate, recordResolution } from "../fleet/fleet.ts";
 import { readFileSync, readdirSync } from "node:fs";
@@ -173,6 +174,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   const recordedSignals = new Set<string>(); // fleet candidates recorded ONCE per build, not per round
   let prevBlocking: Finding[] = []; // findings before the last fix — to attribute what that fix cleared
   let preFixHashes = new Map<string, string>(); // source before the last fix
+  let tampered: string | null = null; // set if a fix cleared a gate by removing protected surface
+  let lastVerdicts: GateVerdict[] = []; // the real findings to escalate against on a tamper-reject
   let prevCount = Infinity;
   let noProgress = 0;
   let attempts = 0;
@@ -226,6 +229,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     note(`attempt ${attempts}/${nte}: blocked by ${blocked} — applying fixes`);
     preFixHashes = fileHashes(workspacePath); // snapshot so the NEXT gate can attribute what this fix cleared
     prevBlocking = blocking;
+    lastVerdicts = r.verdicts; // escalate against the REAL findings if the fix turns out to be tampering
+    const beforeSurface = captureSurface(workspacePath, blocking); // protected surface that must not shrink
     try {
       await applyFixWithRetry(fixer, workspacePath, r.verdicts, note);
     } catch (e) {
@@ -233,6 +238,22 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       note(`${stopReason} — escalating`);
       break;
     }
+    // ANTI-TAMPER (audit CRITICAL-1): a fix may not clear a gate by deleting the flagged file/table.
+    // If it shrank protected surface, REJECT the round and escalate — a gamed green is never accepted.
+    tampered = tamperReason(beforeSurface, captureSurface(workspacePath, blocking));
+    if (tampered) {
+      stopReason = `fix REJECTED as tampering — ${tampered}`;
+      note(`${stopReason}; escalating (a gate made green by removing protected code is not a fix)`);
+      break;
+    }
+  }
+
+  // A TAMPERED round never gets to claim a pass — skip the re-gate (the tamper may have greened it) and
+  // escalate the REAL findings the fixer was supposed to resolve. Fail closed against a gamed verifier.
+  if (tampered) {
+    note(`escalating — ${stopReason}`);
+    const escalation = await buildEscalationPacket(lastVerdicts, workspacePath, { reason: `auto-fix rejected a tampering fix: ${stopReason}`, now: opts.now });
+    return { fixed: false, attempts, finalVerdicts: lastVerdicts, escalation, log };
   }
 
   // Final disposition (a fix may have landed in the last iteration → re-gate to be sure).
