@@ -60,14 +60,25 @@ export interface DataModel {
 
 const ident = (s: unknown): string => (typeof s === "string" ? s.trim() : "").replace(/[^A-Za-z0-9_]/g, "");
 
+/** Resolve an FK reference to one of OUR entity names. LLMs write it as "Entity", "table.column", or
+ *  "schema.table.column" (e.g. "users.id") — `ident` alone mangles the dotted forms to nonsense and
+ *  the FK gets silently dropped, which both loses integrity constraints AND defeats owner-scoped RLS.
+ *  Supabase's `auth.users.*` is linked via authUserId, not an app FK, so it resolves to nothing. */
+function resolveRef(raw: unknown, entityNames: Set<string>): string | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  if (/^auth\s*\./i.test(raw.trim())) return undefined; // the Supabase auth schema — not one of our tables
+  const segs = raw.split(".").map((x) => x.replace(/[^A-Za-z0-9_]/g, "")).filter(Boolean);
+  if (segs.length === 1 && entityNames.has(segs[0]!)) return segs[0]; // bare "Entity"
+  if (segs.length >= 2 && entityNames.has(segs[segs.length - 2]!)) return segs[segs.length - 2]; // table.column → table
+  return segs.find((x) => entityNames.has(x)); // last-ditch: any segment naming an entity
+}
+
 function coerceField(raw: unknown, entityNames: Set<string>): Field | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const name = ident(r.name);
   if (!name) return null;
-  const references = r.references ? ident(r.references) : undefined;
-  // A reference must point at a real entity, else drop the FK (keep it as a plain uuid column? safer to drop ref).
-  const validRef = references && entityNames.has(references) ? references : undefined;
+  const validRef = resolveRef(r.references, entityNames);
   let type = FIELD_TYPES.includes(r.type as FieldType) ? (r.type as FieldType) : "text";
   if (validRef) type = "uuid"; // a FK is always a uuid
   return {

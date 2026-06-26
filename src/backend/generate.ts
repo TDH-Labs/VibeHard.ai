@@ -79,6 +79,28 @@ function fkClause(f: Field): string {
   return f.references ? `  ${q(f.name)} uuid${f.nullable ? "" : " not null"} references ${q(f.references)}(${q("id")}) on delete cascade` : columnSql(f);
 }
 
+/** Columns the generator synthesizes for EVERY table — a model field of the same name collides with
+ *  them. Real LLM data models almost always list an explicit `id`, which duplicates our primary key
+ *  ("column id specified more than once" on apply); `createdAt` is ours too. Compared case-folded. */
+const RESERVED_COLUMNS = new Set(["id", "createdat"]);
+
+/** Drop model fields that would collide with a generator-owned column, and any duplicate field names
+ *  (the LLM occasionally repeats one). Run before everything else so the migrations, RLS, seed, and
+ *  dashboard all see one clean, conflict-free model. */
+function normalizeFields(model: DataModel): DataModel {
+  const entities = model.entities.map((e) => {
+    const seen = new Set<string>();
+    const fields = e.fields.filter((f) => {
+      const k = f.name.toLowerCase();
+      if (RESERVED_COLUMNS.has(k) || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    return { ...e, fields };
+  });
+  return { ...model, entities };
+}
+
 /** Ensure the membership entity carries the columns the RLS helpers + bootstrap rely on. */
 function withMembershipColumns(model: DataModel): DataModel {
   if (!model.membershipEntity) return model;
@@ -124,6 +146,12 @@ function migrationAuthHelpers(model: DataModel): string {
     `  select ${tf} from ${m} where ${q("authUserId")} = auth.uid() limit 1`,
     `$$;`,
     "",
+    `-- the caller's membership-row id — lets a table owned INDIRECTLY (a user_id FK) scope by ownership`,
+    `-- without carrying authUserId itself, and without re-entering the membership table's RLS.`,
+    `create or replace function auth_member_id() returns uuid language sql stable security definer set search_path = public as $$`,
+    `  select ${q("id")} from ${m} where ${q("authUserId")} = auth.uid() limit 1`,
+    `$$;`,
+    "",
     `create or replace function auth_is_member() returns boolean language sql stable security definer set search_path = public as $$`,
     `  select exists (select 1 from ${m} where ${q("authUserId")} = auth.uid())`,
     `$$;`,
@@ -146,13 +174,27 @@ function migrationAuthHelpers(model: DataModel): string {
   ].join("\n");
 }
 
+/** The SQL boolean for "this row belongs to the current user", from how the entity links to the
+ *  membership table — so an owner policy NEVER references a column the table doesn't have (the live
+ *  bug: `bookings`/`payments` are owner-scoped via a `user_id` FK, not their own `authUserId`).
+ *  Returns null when no ownership link exists → the caller falls back to a safe scope. */
+function ownerPredicate(e: Entity, model: DataModel): string | null {
+  const has = (name: string) => e.fields.some((f) => f.name === name);
+  // The membership table itself, or any table that carries authUserId → owned directly.
+  if (e.name === model.membershipEntity || has("authUserId")) return `${q("authUserId")} = auth.uid()`;
+  if (!model.membershipEntity) return null;
+  // Otherwise owned INDIRECTLY: an explicit ownerField, else a FK to the membership table.
+  const link = (e.ownerField && has(e.ownerField) ? e.ownerField : null) ?? e.fields.find((f) => f.references === model.membershipEntity)?.name ?? null;
+  return link ? `${q(link)} = auth_member_id()` : null;
+}
+
 /** The RLS policy block for one entity, from its declared access. Only `FOR ALL ... USING ... WITH
  *  CHECK` and `FOR SELECT ... USING` are emitted — never the invalid multi-command FOR clause. */
 function policiesFor(e: Entity, model: DataModel): string[] {
   const t = q(e.name);
   const out = [`alter table ${t} enable row level security;`];
   const tf = q(e.tenantField ?? model.tenantField);
-  const owner = q(e.ownerField ?? "authUserId");
+  const hasTenantCol = e.fields.some((f) => f.name === (e.tenantField ?? model.tenantField));
   const tenantScoped = !!model.membershipEntity;
 
   if (e.name === model.tenantEntity) {
@@ -162,9 +204,15 @@ function policiesFor(e: Entity, model: DataModel): string[] {
     return out;
   }
   switch (e.access) {
-    case "owner":
-      out.push(`create policy ${q(e.name + "_owner_all")} on ${t} for all using (${owner} = auth.uid()) with check (${owner} = auth.uid());`);
+    case "owner": {
+      const pred = ownerPredicate(e, model);
+      if (pred) out.push(`create policy ${q(e.name + "_owner_all")} on ${t} for all using (${pred}) with check (${pred});`);
+      // No ownership link → fall back to a scope that APPLIES: tenant isolation if the table has the
+      // tenant column, else authenticated-only — never a policy that references a missing column.
+      else if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
+      else out.push(`create policy ${q(e.name + "_auth_all")} on ${t} for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
       break;
+    }
     case "tenant":
       if (tenantScoped) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
       else out.push(`create policy ${q(e.name + "_auth_all")} on ${t} for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
@@ -270,7 +318,7 @@ export interface GenerateResult {
 
 /** Generate the backend from the model into `target`. Idempotent + generate-then-own. */
 export function generateBackend(target: string, rawModel: DataModel): GenerateResult {
-  const model = withMembershipColumns(rawModel);
+  const model = withMembershipColumns(normalizeFields(rawModel));
   const files: Array<{ rel: string; content: string }> = [
     { rel: "supabase/migrations/0001_init.sql", content: migrationInit(model) },
   ];

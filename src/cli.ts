@@ -315,6 +315,17 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
       console.log(`  ▸ experience: generated a demo seed (scripts/seed.ts)${dash.written ? " + an overview dashboard (/dashboard)" : ""}`);
       systemPrompt +=
         "\n\nBACKEND + DASHBOARD + SEED ALREADY GENERATED — do NOT rewrite them. The database migrations (supabase/migrations/*), Row-Level Security, the auth route (app/api/auth/signin), the auth bootstrap, the middleware, the Supabase clients (lib/supabase/{client,server,admin}.ts), a landing overview page (app/dashboard/page.tsx), and a demo seed (scripts/seed.ts) ALREADY EXIST and are verified. Do NOT create or modify any of those. Build ONLY the OTHER feature pages + server actions that USE them — import the clients from '@/lib/supabase/server' (RLS-enforced), read table/column names from supabase/migrations, and link from the existing /dashboard.";
+      // The prompt alone doesn't stop a planned `database-schema`/`auth` workstream from re-authoring
+      // these — the live run proved codegen wrote COMPETING migrations (00001_initial_schema.sql) that
+      // collide with ours. Prune every generated-backend path from the workstreams (by prefix, so a
+      // differently-named migration is caught too); a workstream left empty is skipped, not generated.
+      const isBackendFile = (f: string) => {
+        const p = f.replace(/^\.?\//, "");
+        return /^supabase\/migrations\//.test(p) || /^lib\/supabase\//.test(p) || /^app\/api\/auth\//.test(p) || p === "middleware.ts" || p === "scripts/seed.ts" || p === "app/dashboard/page.tsx";
+      };
+      arch = { ...arch, workstreams: arch.workstreams.map((w) => ({ ...w, files: w.files.filter((f) => !isBackendFile(f)) })) };
+      const emptied = arch.workstreams.filter((w) => w.files.length === 0).map((w) => w.name);
+      if (emptied.length) console.log(`  ▸ backend: ${emptied.length} planned workstream(s) now owned by the generator — skipping codegen for: ${emptied.join(", ")}`);
     }
   }
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
@@ -324,6 +335,10 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
     buildOrder(arch),
     concurrency,
     (ws, built) => {
+      if (ws.files.length === 0) {
+        console.log(`\n  ▸ workstream: ${ws.name} — backend-owned, nothing to generate`);
+        return Promise.resolve(true); // kept in the dependency graph, but the generator already wrote its files
+      }
       console.log(`\n  ▸ workstream: ${ws.name} — ${ws.files.length} file(s)`);
       return streamGeneration(target, workstreamBrief(arch, ws, built.map((w) => w.name)), provider, model, systemPrompt, ws.name);
     },
