@@ -19,8 +19,9 @@ import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
 
-/** Minimal Supabase environment so a real Supabase migration can execute off-platform. */
-const SUPABASE_STUBS = `
+/** Minimal Supabase environment so a real Supabase migration can execute off-platform. Exported so the
+ *  RLS-enforcement harness (rls-enforce.ts) applies migrations in the IDENTICAL environment. */
+export const SUPABASE_STUBS = `
 -- Standard Supabase roles (migrations GRANT to / reference these; they exist on a real project).
 DO $$ BEGIN
   CREATE ROLE anon NOLOGIN;
@@ -57,7 +58,7 @@ CREATE OR REPLACE FUNCTION uuid_generate_v4() RETURNS uuid LANGUAGE sql AS $$ SE
 
 /** Strip statements pglite can't honor but that are no-ops for schema validity (extension installs we
  *  shim above). We DON'T rewrite real DDL — only neutralize known-safe-to-stub lines. */
-function neutralize(sql: string): string {
+export function neutralize(sql: string): string {
   return sql.replace(/CREATE EXTENSION[^;]*;/gi, "-- (extension shimmed by the migrate gate)");
 }
 
