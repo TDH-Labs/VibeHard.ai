@@ -8,9 +8,30 @@
  * §11 fail-closed invariant, a scan that did NOT run returns a CRITICAL
  * `scan-failed` (which blocks) — never a silent pass.
  */
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
+
+const LOCKFILES = ["package-lock.json", "bun.lockb", "bun.lock", "yarn.lock", "pnpm-lock.yaml"];
+
+/** trivy `fs` scans LOCKFILES; a project with declared deps but NO lockfile resolves nothing, so trivy
+ *  returns no findings — a SILENT clean pass that never assessed the transitive (install-time) tree
+ *  (audit M5). Surface that gap as a non-blocking advisory so "depvuln passed" isn't misread as "no
+ *  vulnerable deps" when the truth is "deps weren't fully resolved". */
+export function scanGapFindings(projectPath: string): Finding[] {
+  const pkgPath = join(projectPath, "package.json");
+  if (!existsSync(pkgPath)) return [];
+  let deps = 0;
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).length;
+  } catch {
+    return [];
+  }
+  if (deps === 0 || LOCKFILES.some((l) => existsSync(join(projectPath, l)))) return [];
+  return [{ tool: "depvuln", ruleId: "depscan-incomplete", severity: "medium", file: "package.json", message: `dependency scan INCOMPLETE: ${deps} dependencies are declared but there is no lockfile, so transitive (install-time) CVEs were not assessed. Run an install to generate a lockfile, then re-gate.` }];
+}
 
 const TRIVY_IMAGE = "aquasec/trivy:0.58.1";
 /** Persist trivy's vuln DB across runs so it's downloaded once, not every scan. */
@@ -103,12 +124,10 @@ export async function runDepVuln(
     "-v", `${TRIVY_CACHE_VOLUME}:/root/.cache/trivy`,
     TRIVY_IMAGE, "fs", "--quiet", "--format", "json", "--scanners", "vuln", "/src",
   ]);
-  const findings = interpretTrivy(
-    proc.stdout?.toString() ?? "",
-    proc.exitCode ?? -1,
-    proc.stderr?.toString() ?? "",
-    absPath,
-  );
+  const findings = [
+    ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),
+    ...scanGapFindings(absPath), // make a no-lockfile (incomplete) scan VISIBLE, not a silent pass
+  ];
   return verdictOf("depvuln", findings, ranAt);
 }
 
