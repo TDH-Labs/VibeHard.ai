@@ -142,3 +142,65 @@ describe("generateBackend — deterministic, correct-by-construction", () => {
     expect(r2.written).toContain("supabase/migrations/0001_init.sql"); // still-owned → regenerated
   });
 });
+
+// Regression: the three generator bugs the LIVE end-to-end run surfaced (a real architect-LLM model
+// that the hand-built MODEL above never exercised). All were invisible until the migration executed.
+describe("real-LLM model shape — the live-validation regressions", () => {
+  // Shaped exactly like the gym SaaS the architect emitted: every entity lists an explicit `id`;
+  // FKs are written "table.column" (not bare entity); ownership is INDIRECT via a user_id FK; and the
+  // membership entity's id points at Supabase's auth.users.id.
+  const raw = {
+    tenantEntity: "tenants",
+    membershipEntity: "users",
+    tenantField: "tenant_id",
+    roleField: "role",
+    adminRole: "admin",
+    entities: [
+      { name: "tenants", access: "tenant-admin", fields: [{ name: "id", type: "uuid" }, { name: "name", type: "text" }] },
+      { name: "users", access: "owner", fields: [{ name: "id", type: "uuid", references: "auth.users.id" }, { name: "tenant_id", type: "uuid", references: "tenants.id" }, { name: "email", type: "text" }, { name: "role", type: "text" }] },
+      { name: "memberships", access: "owner", fields: [{ name: "id", type: "uuid" }, { name: "user_id", type: "uuid", references: "users.id" }, { name: "tenant_id", type: "uuid", references: "tenants.id" }, { name: "status", type: "text" }] },
+      { name: "classes", access: "tenant", fields: [{ name: "id", type: "uuid" }, { name: "tenant_id", type: "uuid", references: "tenants.id" }, { name: "name", type: "text" }] },
+      { name: "bookings", access: "owner", fields: [{ name: "id", type: "uuid" }, { name: "class_id", type: "uuid", references: "classes.id" }, { name: "user_id", type: "uuid", references: "users.id" }, { name: "status", type: "text" }] },
+    ],
+  };
+
+  test("coerceDataModel resolves \"table.column\" FKs to entity names, and drops auth.users.*", () => {
+    const m = coerceDataModel(raw);
+    const bookings = m.entities.find((e) => e.name === "bookings")!;
+    expect(bookings.fields.find((f) => f.name === "user_id")!.references).toBe("users"); // not "usersid", not dropped
+    expect(bookings.fields.find((f) => f.name === "class_id")!.references).toBe("classes");
+    const users = m.entities.find((e) => e.name === "users")!;
+    // the membership entity's id → auth.users.id is the Supabase auth link, never an app FK
+    expect(users.fields.find((f) => f.name === "id" && f.references)).toBeUndefined();
+  });
+
+  test("an explicit `id` field never duplicates the synthesized primary key", () => {
+    const dir = ws();
+    generateBackend(dir, coerceDataModel(raw));
+    const sql = readFileSync(join(dir, "supabase/migrations/0001_init.sql"), "utf8");
+    for (const table of ["tenants", "users", "memberships", "bookings"]) {
+      const block = sql.slice(sql.indexOf(`"${table}"`), sql.indexOf(");", sql.indexOf(`"${table}"`)));
+      expect((block.match(/"id"\s+uuid/g) ?? []).length).toBe(1); // exactly one id column per table
+    }
+  });
+
+  test("indirectly-owned tables scope by auth_member_id(), never a missing authUserId column", () => {
+    const dir = ws();
+    generateBackend(dir, coerceDataModel(raw));
+    const rls = readFileSync(join(dir, "supabase/migrations/0003_rls.sql"), "utf8");
+    // bookings/memberships own via the user_id FK → auth_member_id(); only `users` uses authUserId directly
+    expect(rls).toContain(`create policy "bookings_owner_all" on "bookings" for all using ("user_id" = auth_member_id())`);
+    expect(rls).toContain(`create policy "memberships_owner_all" on "memberships" for all using ("user_id" = auth_member_id())`);
+    expect(rls).toContain(`"users_owner_all" on "users" for all using ("authUserId" = auth.uid())`);
+    expect(rls).not.toMatch(/on "bookings".*"authUserId"/); // never references a column bookings lacks
+    const auth = readFileSync(join(dir, "supabase/migrations/0002_auth.sql"), "utf8");
+    expect(auth).toContain("create or replace function auth_member_id()"); // the SECURITY DEFINER helper exists
+  });
+
+  test("PROOF: the real-model shape applies clean to Postgres + passes the RLS gate (0 findings)", async () => {
+    const dir = ws();
+    generateBackend(dir, coerceDataModel(raw));
+    expect((await runMigrate(dir)).status).toBe("pass"); // FKs resolve, topo-ordered, no duplicate columns
+    expect((await runRls(dir)).status).toBe("pass"); // recursion-safe, correctly-scoped policies
+  });
+});
