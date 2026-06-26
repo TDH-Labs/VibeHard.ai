@@ -71,7 +71,7 @@ export function rlsEnabledTables(sources: SqlSource[]): Set<string> {
   const combined = sources.map((s) => s.sql).join("\n").toLowerCase();
   const out = new Set<string>();
   for (const m of combined.matchAll(
-    /alter table\s+(?:if exists\s+)?(?:public\.)?(\w+)\s+enable row level security/g,
+    /alter table\s+(?:if exists\s+)?(?:"?public"?\s*\.\s*)?"?(\w+)"?\s+enable row level security/g,
   )) {
     if (m[1]) out.add(m[1]);
   }
@@ -83,7 +83,7 @@ function permissiveTables(sources: SqlSource[]): Set<string> {
   const combined = sources.map((s) => s.sql).join("\n").toLowerCase();
   const out = new Set<string>();
   for (const m of combined.matchAll(
-    /create policy[^;]*?\bon\s+(?:public\.)?(\w+)[^;]*?using\s*\(\s*true\s*\)/gs,
+    /create policy[^;]*?\bon\s+(?:"?public"?\s*\.\s*)?"?(\w+)"?[^;]*?using\s*\(\s*true\s*\)/gs,
   )) {
     if (m[1]) out.add(m[1]);
   }
@@ -104,7 +104,7 @@ function broadAuthenticatedTables(sources: SqlSource[]): Set<string> {
   const combined = sources.map((s) => s.sql).join("\n").toLowerCase();
   const out = new Set<string>();
   for (const m of combined.matchAll(
-    /create policy[^;]*?\bon\s+(?:public\.)?(\w+)[^;]*?using\s*\(\s*(?:auth\.uid\(\)\s+is\s+not\s+null|auth\.role\(\)\s*=\s*'authenticated'|'authenticated'\s*=\s*auth\.role\(\))\s*\)/gs,
+    /create policy[^;]*?\bon\s+(?:"?public"?\s*\.\s*)?"?(\w+)"?[^;]*?using\s*\(\s*(?:auth\.uid\(\)\s+is\s+not\s+null|auth\.role\(\)\s*=\s*'authenticated'|'authenticated'\s*=\s*auth\.role\(\))\s*\)/gs,
   )) {
     if (m[1]) out.add(m[1]);
   }
@@ -115,7 +115,7 @@ function broadAuthenticatedTables(sources: SqlSource[]): Set<string> {
 export function createdTables(sources: SqlSource[]): Set<string> {
   const out = new Set<string>();
   for (const src of sources) {
-    for (const m of src.sql.matchAll(/create table\s+(?:if not exists\s+)?(?:public\.)?(\w+)/gi)) {
+    for (const m of src.sql.matchAll(/create table\s+(?:if not exists\s+)?(?:"?public"?\s*\.\s*)?"?(\w+)"?/gi)) {
       if (m[1]) out.add(m[1].toLowerCase());
     }
   }
@@ -136,7 +136,7 @@ export function parseRls(sources: SqlSource[]): Finding[] {
 
   const findings: Finding[] = [];
   const seen = new Set<string>();
-  const createRe = /create table\s+(?:if not exists\s+)?(?:public\.)?(\w+)/gi;
+  const createRe = /create table\s+(?:if not exists\s+)?(?:"?public"?\s*\.\s*)?"?(\w+)"?/gi;
 
   for (const src of sources) {
     for (const m of src.sql.matchAll(createRe)) {
