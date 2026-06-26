@@ -400,7 +400,9 @@ export async function POST(req: NextRequest) {
   if (!email || !password) return NextResponse.redirect(new URL('/login?error=Enter%20your%20email%20and%20password.', origin), { status: 303 });
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) return NextResponse.redirect(new URL(\`/login?error=\${encodeURIComponent(error.message)}\`, origin), { status: 303 });
+  // SECURITY: one generic message — reflecting the raw error distinguishes "no such user" from "wrong
+  // password" (a user-enumeration oracle that aids credential attacks).
+  if (error) return NextResponse.redirect(new URL('/login?error=Invalid%20email%20or%20password.', origin), { status: 303 });
   const to = req.nextUrl.searchParams.get('redirect');
   return NextResponse.redirect(new URL(to && to.startsWith('/') ? to : '/dashboard', origin), { status: 303 });
 }

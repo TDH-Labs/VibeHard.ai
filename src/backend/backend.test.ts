@@ -292,3 +292,13 @@ describe("F1 — ownership by content hash (manifest), not a comment marker", ()
     expect(readFileSync(join(dir, "lib/supabase/server.ts"), "utf8")).toContain("userOwned");
   });
 });
+
+describe("M4 — signin route doesn't leak a user-enumeration oracle", () => {
+  test("the generated signin route shows a generic error, never the raw auth error.message", () => {
+    const dir = ws();
+    generateBackend(dir, MODEL);
+    const route = readFileSync(join(dir, "app/api/auth/signin/route.ts"), "utf8");
+    expect(route).toContain("Invalid%20email%20or%20password");
+    expect(route).not.toContain("encodeURIComponent(error.message)"); // no raw error reflection
+  });
+});
