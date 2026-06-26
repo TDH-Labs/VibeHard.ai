@@ -353,3 +353,26 @@ describe("pkgUsesSupabase (I/O)", () => {
     expect(pkgUsesSupabase(no)).toBe(false);
   });
 });
+
+describe("A5 — static gate hardening (tautologies, WITH CHECK, report-all)", () => {
+  const created = (name: string, policies: string) => `create table "${name}" ("id" uuid primary key);\nalter table "${name}" enable row level security;\n${policies}`;
+
+  test("a `using (1=1)` tautology is caught, not just the literal `using (true)`", () => {
+    const f = parseRls([{ file: "m.sql", sql: created("notes", `create policy p on "notes" for all using (1=1) with check (1=1);`) }]);
+    expect(f.some((x) => x.ruleId === "rls-policy-using-true")).toBe(true);
+  });
+
+  test("a too-broad `with check (true)` is caught as a cross-tenant WRITE hole", () => {
+    const f = parseRls([{ file: "m.sql", sql: created("notes", `create policy p on "notes" for all using ("tenant_id" = auth_tenant_id()) with check (true);`) }]);
+    const wc = f.find((x) => x.ruleId === "rls-policy-check-true");
+    expect(wc).toBeTruthy();
+    expect(wc!.severity).toBe("high"); // blocking
+  });
+
+  test("report-all: a table with BOTH a tautology read and a broad-authenticated policy yields TWO findings", () => {
+    const sql = created("notes", `create policy a on "notes" for select using (true);\ncreate policy b on "notes" for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
+    const ids = parseRls([{ file: "m.sql", sql }]).map((x) => x.ruleId);
+    expect(ids).toContain("rls-policy-using-true");
+    expect(ids).toContain("rls-policy-authenticated"); // not collapsed to the first match
+  });
+});

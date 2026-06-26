@@ -78,13 +78,28 @@ export function rlsEnabledTables(sources: SqlSource[]): Set<string> {
   return out;
 }
 
-/** Tables whose policy is `using (true)` (authorizes every caller). */
+/** A predicate that authorizes EVERY caller — `true` and its common tautology spellings. The literal
+ *  `using (true)` was trivially evaded by `1=1` / `(select true)` (audit H2), so match those too. */
+const TAUTOLOGY = String.raw`(?:true|1\s*=\s*1|\(\s*select\s+true\s*\))`;
+
+/** Tables whose USING clause is a tautology (authorizes every caller → world-readable). */
 function permissiveTables(sources: SqlSource[]): Set<string> {
   const combined = sources.map((s) => s.sql).join("\n").toLowerCase();
   const out = new Set<string>();
-  for (const m of combined.matchAll(
-    /create policy[^;]*?\bon\s+(?:"?public"?\s*\.\s*)?"?(\w+)"?[^;]*?using\s*\(\s*true\s*\)/gs,
-  )) {
+  for (const m of combined.matchAll(new RegExp(String.raw`create policy[^;]*?\bon\s+(?:"?public"?\s*\.\s*)?"?(\w+)"?[^;]*?using\s*\(\s*${TAUTOLOGY}\s*\)`, "gs"))) {
+    if (m[1]) out.add(m[1]);
+  }
+  return out;
+}
+
+/** Tables whose WITH CHECK clause is a tautology — reads may be scoped, but ANY caller can INSERT/UPDATE
+ *  rows into ANOTHER tenant (the cross-tenant WRITE hole the A1 enforcement gate proved is real). The
+ *  static gate never looked at WITH CHECK before (audit C5). A `for select` policy has none, so this
+ *  only fires on FOR ALL/INSERT/UPDATE — exactly where a broad write check is dangerous. */
+function broadWriteCheckTables(sources: SqlSource[]): Set<string> {
+  const combined = sources.map((s) => s.sql).join("\n").toLowerCase();
+  const out = new Set<string>();
+  for (const m of combined.matchAll(new RegExp(String.raw`create policy[^;]*?\bon\s+(?:"?public"?\s*\.\s*)?"?(\w+)"?[^;]*?with\s+check\s*\(\s*${TAUTOLOGY}\s*\)`, "gs"))) {
     if (m[1]) out.add(m[1]);
   }
   return out;
@@ -132,6 +147,7 @@ export function createdTables(sources: SqlSource[]): Set<string> {
 export function parseRls(sources: SqlSource[]): Finding[] {
   const rlsOn = rlsEnabledTables(sources);
   const permissive = permissiveTables(sources);
+  const broadWriteCheck = broadWriteCheckTables(sources);
   const broadAuthed = broadAuthenticatedTables(sources);
 
   const findings: Finding[] = [];
@@ -144,34 +160,15 @@ export function parseRls(sources: SqlSource[]): Finding[] {
       if (!table || seen.has(table)) continue;
       seen.add(table);
       const line = lineAt(src.sql, m.index ?? 0);
+      // Report EVERY applicable finding for a table, not just the first (audit H3): a fix to one hole
+      // must not hide a second. RLS-off makes policies moot, so when it's off we report only that.
       if (!rlsOn.has(table)) {
-        findings.push({
-          tool: "rls",
-          ruleId: "rls-disabled",
-          severity: "critical",
-          file: src.file,
-          line,
-          message: `RLS not enabled on public.${table} — Supabase exposes this table's REST API to the world`,
-        });
-      } else if (permissive.has(table)) {
-        findings.push({
-          tool: "rls",
-          ruleId: "rls-policy-using-true",
-          severity: "high",
-          file: src.file,
-          line,
-          message: `RLS policy \`using (true)\` on public.${table} authorizes every caller — leaks all rows`,
-        });
-      } else if (broadAuthed.has(table)) {
-        findings.push({
-          tool: "rls",
-          ruleId: "rls-policy-authenticated",
-          severity: "medium", // WARN, not block — intended for single-tenant; a judgment call
-          file: src.file,
-          line,
-          message: `RLS policy on public.${table} authorizes any authenticated user (auth.uid() is not null / auth.role() = 'authenticated') — every logged-in user can read all rows; confirm this table is shared, not per-tenant`,
-        });
+        findings.push({ tool: "rls", ruleId: "rls-disabled", severity: "critical", file: src.file, line, message: `RLS not enabled on public.${table} — Supabase exposes this table's REST API to the world` });
+        continue;
       }
+      if (permissive.has(table)) findings.push({ tool: "rls", ruleId: "rls-policy-using-true", severity: "high", file: src.file, line, message: `RLS read policy is a tautology (\`using (true)\` / \`1=1\`) on public.${table} — authorizes every caller, leaks all rows` });
+      if (broadWriteCheck.has(table)) findings.push({ tool: "rls", ruleId: "rls-policy-check-true", severity: "high", file: src.file, line, message: `RLS WITH CHECK is a tautology on public.${table} — reads may be scoped, but ANY caller can INSERT/UPDATE rows into another tenant (cross-tenant write)` });
+      if (broadAuthed.has(table)) findings.push({ tool: "rls", ruleId: "rls-policy-authenticated", severity: "medium", file: src.file, line, message: `RLS policy on public.${table} authorizes any authenticated user (auth.uid() is not null) — every logged-in user can read all rows; confirm this table is shared, not per-tenant (the rls-enforce gate proves cross-tenant isolation when a data model is present)` });
     }
   }
   return findings;
