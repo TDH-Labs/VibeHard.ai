@@ -1264,6 +1264,55 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
 
+  // ── git-connect: wire an app to a GitHub repo ──────────────────────────────
+  if (cmd === "git-connect") {
+    if (!arg) {
+      console.error("usage: vibehard git-connect <dir> [owner/repo-name]");
+      return 2;
+    }
+    const { gitProviderFromEnv, webhookSecretFromEnv } = await import("./git/webhook-server.ts");
+    const { provisionGitRepo } = await import("./git/provision.ts");
+    const repoName = argv[1] as string | undefined;
+    const webhookUrl = process.env.VIBEHARD_WEBHOOK_URL;
+    const webhookSecret = webhookUrl ? (() => { try { return webhookSecretFromEnv(); } catch { return undefined; } })() : undefined;
+
+    console.log(`\nConnecting ${resolve(arg)} to GitHub…`);
+    const { provider, getToken } = await gitProviderFromEnv();
+    const result = await provisionGitRepo(arg, provider, {
+      repoName,
+      webhookUrl,
+      webhookSecret,
+      openPr: false,
+      getToken,
+    });
+
+    console.log(`\n✅ connected`);
+    console.log(`   repo:    ${result.repoUrl}`);
+    console.log(`   branch:  ${result.branch}`);
+    if (result.created) console.log(`   (repo was created)`);
+    if (result.pushed)  console.log(`   (code pushed)`);
+    if (result.ciWritten) console.log(`   CI workflow written → .github/workflows/gate.yml`);
+    if (result.webhookRegistered) console.log(`   webhook registered`);
+    else if (!webhookUrl) {
+      console.log(`\n   ⚠  No VIBEHARD_WEBHOOK_URL set — webhook NOT registered.`);
+      console.log(`   Once you have a public URL, set it and re-run git-connect, OR activate`);
+      console.log(`   the webhook manually at: https://github.com/settings/apps/vibehard-gate`);
+    }
+    return 0;
+  }
+
+  // ── git-serve: start the webhook server ────────────────────────────────────
+  if (cmd === "git-serve") {
+    const { startWebhookServer, webhookSecretFromEnv } = await import("./git/webhook-server.ts");
+    const port = arg ? parseInt(arg, 10) : 3000;
+    if (isNaN(port)) { console.error("usage: vibehard git-serve [port]"); return 2; }
+    const secret = webhookSecretFromEnv();
+    startWebhookServer({ port, secret });
+    // keep alive — Bun.serve() already holds the event loop open
+    await new Promise(() => {});
+    return 0;
+  }
+
   console.log(
     [
       "vibehard — safe vibe coding.",
@@ -1289,6 +1338,8 @@ export async function main(argv: string[]): Promise<number> {
       "  vibehard claim <ticket> <reviewer> claim a queued packet (refused unless the reviewer's specialty matches)",
       "  vibehard review <ticket>           print the scoped slice a reviewer judges",
       "  vibehard resolve <ticket> <approved|rejected|fixed> [why]   record the verdict (approved needs a justification)",
+      "  vibehard git-connect <dir> [repo]   connect a built app to a GitHub repo (push code + CI workflow + webhook)",
+      "  vibehard git-serve [port]           start the webhook listener (default :3000) — re-gates on every SWE push",
       "  vibehard prod-scan <app.jsonl>      scan a deployed app's logs for anomalies (§20 back-edge, non-blocking)",
       "",
       "Gates: verify · sast · secrets · depvuln · rls (PROJECT_BRIEF.md §8, §12).",
