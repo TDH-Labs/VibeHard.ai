@@ -197,6 +197,19 @@ describe("real-LLM model shape — the live-validation regressions", () => {
     expect(auth).toContain("create or replace function auth_member_id()"); // the SECURITY DEFINER helper exists
   });
 
+  test("owner tables WITH a tenant column also grant a tenant-admin override; bookings (no tenant col) stays owner-only", () => {
+    const dir = ws();
+    generateBackend(dir, coerceDataModel(raw));
+    const rls = readFileSync(join(dir, "supabase/migrations/0003_rls.sql"), "utf8");
+    // memberships carries tenant_id → a gym admin manages every member's rows in their tenant
+    expect(rls).toContain(`create policy "memberships_admin_all" on "memberships" for all using ("tenant_id" = auth_tenant_id() and auth_is_admin())`);
+    expect(rls).toContain(`create policy "users_admin_all" on "users" for all using ("tenant_id" = auth_tenant_id() and auth_is_admin())`);
+    // bookings has no tenant column → ownership is the only expressible scope, no admin override
+    expect(rls).not.toMatch(/"bookings_admin_all"/);
+    // the owner policy is still present (admin override is OR'd on top, not a replacement)
+    expect(rls).toContain(`"memberships_owner_all" on "memberships"`);
+  });
+
   test("PROOF: the real-model shape applies clean to Postgres + passes the RLS gate (0 findings)", async () => {
     const dir = ws();
     generateBackend(dir, coerceDataModel(raw));
