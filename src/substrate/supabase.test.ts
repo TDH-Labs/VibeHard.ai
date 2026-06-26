@@ -214,17 +214,29 @@ describe("verifyLiveRls — the live anonymous probe", () => {
         denied: { status: 401, body: { message: "permission denied" } }, // grant denies
       }),
     });
-    const r = await p.verifyLiveRls(h, ["open", "secure", "denied"]);
+    const r = await p.verifyLiveRls(h, ["open", "secure", "denied"], ["open", "secure", "denied"]);
     expect(r.enforced).toBe(false);
     expect(r.leakedTables).toEqual(["open"]);
 
-    const ok = await p.verifyLiveRls(h, ["secure", "denied"]);
-    expect(ok).toEqual({ enforced: true, leakedTables: [] });
+    const ok = await p.verifyLiveRls(h, ["secure", "denied"], ["secure", "denied"]);
+    expect(ok).toEqual({ enforced: true, leakedTables: [], inconclusive: [] });
   });
-  test("transport/network errors never flip enforcement (don't fail on noise)", async () => {
+  test("EMPTY-TABLE blind spot closed: a table with NO RLS in the migrations is a leak even with zero rows", async () => {
+    const p = new SupabaseBackendProvider({
+      env,
+      executorFactory: () => fakeExecutor().exec,
+      fetchImpl: fetchOf({ ghost: { status: 200, body: [] } }), // empty NOW, but RLS is off → every future row leaks
+    });
+    const r = await p.verifyLiveRls(h, ["ghost"], ["some_other_table"]); // ghost not in the RLS-enabled set
+    expect(r.enforced).toBe(false);
+    expect(r.leakedTables).toEqual(["ghost"]);
+  });
+  test("transport/network errors FAIL CLOSED (inconclusive ⇒ not enforced)", async () => {
     const throwing = (async () => { throw new Error("network down"); }) as unknown as typeof fetch;
     const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl: throwing });
-    expect(await p.verifyLiveRls(h, ["x"])).toEqual({ enforced: true, leakedTables: [] });
+    const r = await p.verifyLiveRls(h, ["x"], ["x"]);
+    expect(r.enforced).toBe(false);
+    expect(r.inconclusive).toEqual(["x"]);
   });
 });
 

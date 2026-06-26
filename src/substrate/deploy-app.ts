@@ -38,6 +38,15 @@ export function tablesFromMigrations(migrations: Migration[]): string[] {
   return [...tables];
 }
 
+/** The subset that actually has RLS enabled (`enable row level security`). The probe treats any table
+ *  NOT here as a definite leak — so an empty-but-unprotected table can't slip through at first deploy. */
+export function rlsEnabledTablesFromMigrations(migrations: Migration[]): string[] {
+  const enabled = new Set<string>();
+  const re = /alter\s+table\s+(?:if\s+exists\s+)?(?:"?public"?\s*\.\s*)?"?([a-z_][a-z0-9_]*)"?\s+enable\s+row\s+level\s+security/gi;
+  for (const m of migrations) for (const match of m.sql.matchAll(re)) enabled.add(match[1]!);
+  return [...enabled];
+}
+
 /**
  * Assemble the real providers from env. Records + secrets live under stateDir (default ~/.vibehard).
  * The HOST is chosen by artifact: a Dockerfile in the workspace → Fly (container deploy, any
@@ -82,9 +91,10 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
+  const rlsEnabledTables = rlsEnabledTablesFromMigrations(migrations);
   const orgRef = process.env.SUPABASE_URL ? refFromUrl(process.env.SUPABASE_URL) : "default";
   // backlog #5: the app's third-party creds (declared in its .env.example) come in via the process
   // env (the web injects the tenant's saved values; a CLI user exports them) → injected at runtime.
   const appEnv = collectAppEnv(requiredCredentialsForApp(workspacePath), process.env);
-  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, appEnv }, deps);
+  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, rlsEnabledTables, appEnv }, deps);
 }

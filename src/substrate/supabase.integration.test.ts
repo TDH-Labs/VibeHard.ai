@@ -97,8 +97,8 @@ describe("LIVE Tier-0 spike — verifyLiveRls against a real Supabase project", 
       expect(result.leakedTables).toEqual([OPEN]);
       expect(result.enforced).toBe(false);
 
-      const secureOnly = await provider.verifyLiveRls(handle, [SECURE]);
-      expect(secureOnly).toEqual({ enforced: true, leakedTables: [] });
+      const secureOnly = await provider.verifyLiveRls(handle, [SECURE], [SECURE]);
+      expect(secureOnly).toEqual({ enforced: true, leakedTables: [], inconclusive: [] });
     },
     60000,
   );
