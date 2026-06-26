@@ -120,3 +120,32 @@ describe("BoltEngine / BoltSession", () => {
     expect(disposed).toBe(true);
   });
 });
+
+import { containedPath } from "./engine.ts";
+import { existsSync } from "node:fs";
+
+describe("C3 — path-traversal containment (LLM controls filePath)", () => {
+  test("containedPath: normal + root-relative paths resolve INSIDE; traversal/escape → null", () => {
+    const root = "/tmp/ws";
+    expect(containedPath(root, "src/app.ts")).toBe("/tmp/ws/src/app.ts");
+    expect(containedPath(root, "/supabase/migrations/init.sql")).toBe("/tmp/ws/supabase/migrations/init.sql"); // leading "/" = root
+    expect(containedPath(root, "a/../b.ts")).toBe("/tmp/ws/b.ts"); // stays inside → fine
+    expect(containedPath(root, "../../etc/cron.d/x")).toBeNull(); // escapes the workspace
+    expect(containedPath(root, "../sibling")).toBeNull();
+  });
+
+  test("the engine REFUSES a traversal filePath: error event, nothing written outside the workspace", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibehard-trav-"));
+    try {
+      const evil = '<boltArtifact id="e" title="e"><boltAction type="file" filePath="../../escaped.txt">pwned</boltAction><boltAction type="file" filePath="ok.txt">fine</boltAction></boltArtifact>';
+      const session = await new BoltEngine(replayDriver([evil])).startSession(dir, CONFIG);
+      const events: EngineEvent[] = [];
+      for await (const e of session.prompt("go")) events.push(e);
+      expect(events.some((e) => e.type === "error" && /outside the workspace/.test((e as { message: string }).message))).toBe(true);
+      expect(existsSync(join(dir, "..", "escaped.txt"))).toBe(false); // the escape never landed
+      expect(existsSync(join(dir, "ok.txt"))).toBe(true); // the legit file still wrote
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

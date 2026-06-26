@@ -42,3 +42,15 @@ describe("parseMissingModules", () => {
     expect(parseMissingModules([sast])).toEqual([]);
   });
 });
+
+import { packageNameOf as pkgName } from "./missingdeps.ts";
+describe("packageNameOf — path-ish / malformed specs are rejected (C3 defense-in-depth)", () => {
+  test("relative, absolute, and scoped-with-traversal specs return null", () => {
+    expect(pkgName("../evil")).toBeNull();
+    expect(pkgName("/etc/passwd")).toBeNull();
+    expect(pkgName("@org/..")).toBeNull(); // scoped name part now validated
+    expect(pkgName("@org/")).toBeNull();
+    expect(pkgName("react")).toBe("react"); // a real package still resolves
+    expect(pkgName("@scope/pkg")).toBe("@scope/pkg");
+  });
+});

@@ -12,9 +12,21 @@
  * drops in behind this interface later with nothing above the seam changing.
  */
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import type { Engine, EngineConfig, EngineEvent, EngineSession } from "../../types.ts";
 import { parseBoltStream, segmentToEvent } from "./normalizer.ts";
+
+/** Resolve `rel` under `root`, or null if it escapes the workspace. The model controls `seg.filePath`,
+ *  so `join` alone is unsafe — it collapses `../../` and an ABSOLUTE path overrides the root entirely,
+ *  letting generated output write anywhere on the host. Containment is enforced here, write-side. */
+export function containedPath(root: string, rel: string): string | null {
+  const base = resolve(root);
+  // A leading "/" in a bolt filePath means the WORKSPACE root (a generator convention), NOT the host
+  // root — strip it so it stays relative (matching the old join() behavior). Only `../` traversal that
+  // genuinely escapes `base` is rejected.
+  const abs = resolve(base, rel.replace(/^\/+/, ""));
+  return abs === base || abs.startsWith(base + sep) ? abs : null;
+}
 
 /** The ONLY coupling point to the real engine: raw bolt-protocol text for a prompt. */
 export interface BoltDriver {
@@ -77,7 +89,12 @@ class BoltSession implements EngineSession {
         // Materialize into OUR durable workspace — this is exactly what the gate
         // chain scans before deploy. The engine writes; the gate disposes.
         try {
-          const abs = join(this.dir, seg.filePath);
+          const abs = containedPath(this.dir, seg.filePath);
+          if (!abs) {
+            // Path traversal / absolute path → refuse, write NOTHING outside the workspace.
+            yield { type: "error", message: `refused to write outside the workspace: ${seg.filePath}` };
+            continue;
+          }
           await mkdir(dirname(abs), { recursive: true });
           await Bun.write(abs, seg.content);
           this.seen.add(seg.filePath);

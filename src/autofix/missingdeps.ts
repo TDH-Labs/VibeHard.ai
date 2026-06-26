@@ -31,8 +31,9 @@ export function packageNameOf(spec: string): string | null {
   if (s.startsWith("@/") || s.startsWith("~/")) return null; // tsconfig path alias, not a package
   if (s.startsWith("node:") || BUILTINS.has(s)) return null; // node builtin
   if (s.startsWith("@")) {
-    const parts = s.split("/");
-    return parts.length >= 2 && parts[0] && parts[1] ? `${parts[0]}/${parts[1]}` : null;
+    const [scope, name] = s.split("/");
+    // validate BOTH parts so `@org/..` (path-ish) can't slip through to the installer
+    return scope && name && /^@[a-z0-9][a-z0-9._-]*$/i.test(scope) && /^[a-z0-9][a-z0-9._-]*$/i.test(name) ? `${scope}/${name}` : null;
   }
   const name = s.split("/")[0] ?? "";
   if (!name || BUILTINS.has(name)) return null;
