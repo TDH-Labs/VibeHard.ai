@@ -226,3 +226,23 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /no human/.test(l))).toBe(false);
   });
 });
+
+import { verdictOf } from "../types.ts";
+describe("B4 — 'fixed' requires the FULL gate (boot-probe), not just the fast build proxy", () => {
+  test("fast proxy passes but full verify fails → autoFix never returns fixed:true", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibehard-b4-"));
+    const fast: GateRunner = async () => ({ verdicts: [verdictOf("sast", [], "t")], passed: true }); // build proxy: green
+    let fullCalls = 0;
+    const full: GateRunner = async () => {
+      fullCalls++;
+      return { verdicts: [verdictOf("verify", [{ tool: "verify", ruleId: "boot-failed", severity: "high", file: "app/", message: "the app compiled but did not boot" }], "t")], passed: false };
+    };
+    try {
+      const res = await autoFix(dir, { gate: fast, fullGate: full, fixer: async () => {}, budget: 2, humanAvailable: async () => true });
+      expect(res.fixed).toBe(false); // a compiles-but-doesn't-run build is NOT "fixed"
+      expect(fullCalls).toBeGreaterThan(0); // the full boot-probe verify actually ran before any verdict
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
