@@ -20,6 +20,7 @@ import { generateBackend } from "./backend/generate.ts";
 import { generateSeed } from "./backend/seed.ts";
 import { generateDashboard } from "./backend/dashboard.ts";
 import { coerceDataModel } from "./backend/model.ts";
+import { runPreview } from "./preview/preview.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
@@ -857,6 +858,23 @@ export async function main(argv: string[]): Promise<number> {
     for (const l of result.log) console.log(`  ${l}`);
     console.log(`\n✨ refactor-phase done — ${result.accepted} accepted, ${result.rejected} reverted (the passing build is preserved).`);
     return 0;
+  }
+
+  if (cmd === "preview") {
+    if (!arg) {
+      console.error("usage: vibehard preview <dir> [--seed]   (boot the app's dev server → a clickable live URL; --seed fills demo data if creds are set)");
+      return 2;
+    }
+    const target = resolve(arg);
+    try {
+      const { url, proc } = await runPreview(target, { seed: argv.includes("--seed") });
+      console.log(`\n▶ Live preview: ${url}\n  Open it in your browser. It's the real, clickable app. Ctrl-C to stop.`);
+      await proc.exited;
+      return 0;
+    } catch (e) {
+      console.error(`preview failed: ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
   }
 
   if (cmd === "polish") {
