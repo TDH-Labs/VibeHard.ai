@@ -15,7 +15,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import { notApplicable, verdictOf } from "../types.ts";
 import type { SensitiveClass } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 
@@ -97,7 +97,7 @@ function walkCode(root: string, exts: string[]): Array<{ rel: string; code: stri
 
 /** Run the PII-leak assessment. Non-sensitive app (or no spec) → PASS (no-op). */
 export async function runPii(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
-  if (!isSensitiveApp(projectPath)) return verdictOf("pii", [], ranAt);
+  if (!isSensitiveApp(projectPath)) return notApplicable("pii", ranAt);
   return verdictOf("pii", scanPii(walkCode(projectPath, [".ts", ".tsx", ".js", ".jsx", ".py"])), ranAt);
 }
 

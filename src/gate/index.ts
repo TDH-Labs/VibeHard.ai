@@ -52,7 +52,9 @@ export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerd
     onVerdict?.(v); // surface each gate's result the moment it lands (live per-gate progress)
     verdicts.push(v);
   }
-  return { verdicts, passed: verdicts.every((v) => v.status === "pass") };
+  // A deploy is allowed when no gate BLOCKS. "n/a" (nothing to check) doesn't block, but it is reported
+  // distinctly so a vacuous no-op never reads as a verified pass (audit H4 / B3).
+  return { verdicts, passed: verdicts.every((v) => v.status === "pass" || v.status === "n/a") };
 }
 
 /**

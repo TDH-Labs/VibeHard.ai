@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import type { Finding, GateVerdict } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import { notApplicable, verdictOf } from "../types.ts";
 import { llmFunctionalReviewer, type FunctionalReviewer } from "../functest/functest.ts";
 
 // Feature-name words that carry no signal about WHICH feature it is — they appear in many features,
@@ -67,16 +67,16 @@ export interface CompletenessOptions {
 export async function runCompleteness(projectPath: string, opts: CompletenessOptions = {}): Promise<GateVerdict> {
   const ranAt = opts.ranAt ?? new Date().toISOString();
   const specPath = join(projectPath, ".vibehard", "spec.json");
-  if (!existsSync(specPath)) return verdictOf("completeness", [], ranAt); // didn't go through planning → N/A
+  if (!existsSync(specPath)) return notApplicable("completeness", ranAt); // didn't go through planning → N/A
 
   let features: string[] = [];
   try {
     const spec = JSON.parse(readFileSync(specPath, "utf8")) as { features?: string[] };
     features = (spec.features ?? []).map((f) => String(f).trim()).filter(Boolean);
   } catch {
-    return verdictOf("completeness", [], ranAt);
+    return notApplicable("completeness", ranAt);
   }
-  if (!features.length) return verdictOf("completeness", [], ranAt);
+  if (!features.length) return notApplicable("completeness", ranAt);
 
   const reviewer = opts.reviewer ?? llmFunctionalReviewer();
   let checks;
@@ -91,7 +91,7 @@ export async function runCompleteness(projectPath: string, opts: CompletenessOpt
     const message = `Could not verify feature completeness — the functional reviewer returned no usable result (${e instanceof Error ? e.message : String(e)}). This is a reviewer/infra problem, NOT a code change: re-run the gate; if it persists a human must check the reviewer model/credentials before this build is declared complete. Failing closed so an unverifiable build is never called "done".`;
     return verdictOf("completeness", [{ tool: "completeness", ruleId: "completeness-unverified", severity: "high", file: "app/", message }], ranAt);
   }
-  if (!checks.length) return verdictOf("completeness", [], ranAt); // genuine N/A (no app sources to read) → don't block
+  if (!checks.length) return notApplicable("completeness", ranAt); // genuine N/A (no app sources to read) → don't block
 
   // Only an entirely-MISSING feature blocks — but guard the reviewer's FALSE NEGATIVES: the LLM's
   // "missing" verdict varies on a nested/borderline feature (observed: "immunization & health

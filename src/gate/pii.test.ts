@@ -52,9 +52,10 @@ describe("runPii — classification-driven", () => {
     expect(v.status).toBe("block");
     expect(v.blocking).toBeGreaterThan(0);
   });
-  test("a NON-sensitive app → PASS (no-op even with a PII log)", async () => {
+  test("a NON-sensitive app → N/A (nothing to check; not a vacuous pass)", async () => {
     const v = await runPii(appDir(false, "console.log(user.email)"), "t");
-    expect(v.status).toBe("pass");
+    expect(v.status).toBe("n/a");
+    expect(v.blocking).toBe(0); // n/a never blocks a deploy
   });
   test("a sensitive app with no PII leak → PASS", async () => {
     const v = await runPii(appDir(true, "console.log('app started'); const id = req.query.id;"), "t");
