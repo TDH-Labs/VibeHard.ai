@@ -237,12 +237,25 @@ function ownerPredicate(e: Entity, model: DataModel): string | null {
 
 /** The RLS policy block for one entity, from its declared access. Only `FOR ALL ... USING ... WITH
  *  CHECK` and `FOR SELECT ... USING` are emitted — never the invalid multi-command FOR clause. */
-function policiesFor(e: Entity, model: DataModel): string[] {
+function policiesFor(e: Entity, model: DataModel, warnings: string[]): string[] {
   const t = q(e.name);
   const out = [`alter table ${t} enable row level security;`];
   const tf = q(e.tenantField ?? model.tenantField);
   const hasTenantCol = e.fields.some((f) => f.name === (e.tenantField ?? model.tenantField));
-  const tenantScoped = !!model.membershipEntity;
+  const tenantScoped = !!model.membershipEntity; // a multi-tenant model (has a membership table)
+
+  // FAIL CLOSED: a multi-tenant table we cannot scope gets DENY-ALL, never authenticated-only (which
+  // would expose every tenant's rows — the C2/C3 fail-open). The dev sees a warning and fixes the model.
+  const deny = (why: string): string[] => {
+    warnings.push(`RLS "${e.name}" (access "${e.access}"): ${why} → emitting a DENY-ALL policy (fail closed). Mark it "auth"/"public" if it is genuinely shared, or add ${e.access === "owner" ? "an owner link or the tenant column" : "the tenant column"}.`);
+    return [`create policy ${q(e.name + "_deny")} on ${t} for all using (false) with check (false);`];
+  };
+  // Single-tenant model (no membership table): there is exactly ONE tenant, so authenticated-shared is
+  // the intended scope and is NOT a cross-tenant leak. Only reachable when tenantScoped is false.
+  const authShared = (readOnly = false): string[] =>
+    readOnly
+      ? [`create policy ${q(e.name + "_auth_read")} on ${t} for select using (auth.uid() is not null);`]
+      : [`create policy ${q(e.name + "_auth_all")} on ${t} for all using (auth.uid() is not null) with check (auth.uid() is not null);`];
 
   if (e.name === model.tenantEntity) {
     // the tenant root: a member sees their own tenant; an admin manages it.
@@ -255,32 +268,30 @@ function policiesFor(e: Entity, model: DataModel): string[] {
       const pred = ownerPredicate(e, model);
       if (pred) {
         out.push(`create policy ${q(e.name + "_owner_all")} on ${t} for all using (${pred}) with check (${pred});`);
-        // A tenant admin manages EVERYONE's rows in their tenant (e.g. staff see all members'
-        // memberships/payments) — but only when the row carries the tenant column, so the admin stays
-        // scoped to their own tenant. Permissive policy ⇒ Postgres ORs it with the owner policy above.
+        // A tenant admin manages EVERYONE's rows in their tenant — but only when the row carries the
+        // tenant column, so the admin stays scoped to their own tenant. Permissive ⇒ Postgres ORs it.
         if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_admin_all")} on ${t} for all using (${tf} = auth_tenant_id() and auth_is_admin()) with check (${tf} = auth_tenant_id() and auth_is_admin());`);
         break;
       }
-      // No ownership link → fall back to a scope that APPLIES: tenant isolation if the table has the
-      // tenant column, else authenticated-only — never a policy that references a missing column.
       if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
-      else out.push(`create policy ${q(e.name + "_auth_all")} on ${t} for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
+      else if (tenantScoped) out.push(...deny("owner-scoped but no owner link and no tenant column"));
+      else out.push(...authShared());
       break;
     }
     case "tenant":
-      if (tenantScoped) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
-      else out.push(`create policy ${q(e.name + "_auth_all")} on ${t} for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
+      if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
+      else if (tenantScoped) out.push(...deny("tenant-scoped but the table has no tenant column"));
+      else out.push(...authShared());
       break;
     case "tenant-admin":
-      if (tenantScoped) {
+      if (tenantScoped && hasTenantCol) {
         out.push(`create policy ${q(e.name + "_tenant_read")} on ${t} for select using (${tf} = auth_tenant_id());`);
         out.push(`create policy ${q(e.name + "_admin_write")} on ${t} for all using (${tf} = auth_tenant_id() and auth_is_admin()) with check (${tf} = auth_tenant_id() and auth_is_admin());`);
-      } else {
-        out.push(`create policy ${q(e.name + "_auth_read")} on ${t} for select using (auth.uid() is not null);`);
-      }
+      } else if (tenantScoped) out.push(...deny("tenant-admin but the table has no tenant column"));
+      else out.push(...authShared(true));
       break;
     case "auth":
-      out.push(`create policy ${q(e.name + "_auth_read")} on ${t} for select using (auth.uid() is not null);`);
+      out.push(...authShared(true)); // explicitly-declared shared reference data (any authenticated user)
       break;
     case "public":
       out.push(`create policy ${q(e.name + "_public_read")} on ${t} for select using (true);`);
@@ -289,9 +300,9 @@ function policiesFor(e: Entity, model: DataModel): string[] {
   return out;
 }
 
-function migrationRls(model: DataModel): string {
-  const lines = [`-- ${MARKER} — Row-Level Security. Every table is protected; no blanket world-readable`, `-- policies except explicit public reads. Helpers live in the auth migration (SECURITY DEFINER, no recursion).`, ""];
-  for (const e of model.entities) lines.push(...policiesFor(e, model), "");
+function migrationRls(model: DataModel, warnings: string[]): string {
+  const lines = [`-- ${MARKER} — Row-Level Security. Every table is protected; an unscopable table is DENIED,`, `-- never world-readable. Helpers live in the auth migration (SECURITY DEFINER, no recursion).`, ""];
+  for (const e of model.entities) lines.push(...policiesFor(e, model, warnings), "");
   return lines.join("\n");
 }
 
@@ -368,17 +379,21 @@ export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico|api
 export interface GenerateResult {
   written: string[];
   skipped: string[]; // user-owned files left untouched
+  /** Security-relevant model gaps surfaced during generation (e.g. a table denied because it couldn't
+   *  be safely scoped). Loud, not silent — the caller surfaces these / turns them into gate findings. */
+  warnings: string[];
 }
 
 /** Generate the backend from the model into `target`. Idempotent + generate-then-own. */
 export function generateBackend(target: string, rawModel: DataModel): GenerateResult {
   const model = withMembershipColumns(normalizeFields(rawModel));
+  const warnings: string[] = [];
   const files: Array<{ rel: string; content: string }> = [
     { rel: "supabase/migrations/0001_init.sql", content: migrationInit(model) },
   ];
   const auth = migrationAuthHelpers(model);
   if (auth) files.push({ rel: "supabase/migrations/0002_auth.sql", content: auth });
-  files.push({ rel: "supabase/migrations/0003_rls.sql", content: migrationRls(model) });
+  files.push({ rel: "supabase/migrations/0003_rls.sql", content: migrationRls(model, warnings) });
   files.push(
     { rel: "lib/supabase/client.ts", content: CLIENT_BROWSER },
     { rel: "lib/supabase/server.ts", content: CLIENT_SERVER },
@@ -396,5 +411,5 @@ export function generateBackend(target: string, rawModel: DataModel): GenerateRe
   // (not just read policy text). Always overwritten — an internal artifact, not user-owned.
   mkdirSync(join(target, ".vibehard"), { recursive: true });
   writeFileSync(join(target, ".vibehard", "datamodel.json"), JSON.stringify(rawModel, null, 2));
-  return { written, skipped };
+  return { written, skipped, warnings };
 }

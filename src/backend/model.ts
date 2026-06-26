@@ -113,7 +113,9 @@ export function coerceDataModel(raw: unknown): DataModel {
     if (!name || seen.has(name)) continue;
     seen.add(name);
     const fields = (Array.isArray(r.fields) ? r.fields : []).map((f) => coerceField(f, names)).filter((f): f is Field => !!f);
-    const access: Access = ACCESS.includes(r.access as Access) ? (r.access as Access) : "auth";
+    // FAIL CLOSED: an unspecified/invalid access defaults to "tenant" (isolated), NOT "auth" (readable
+    // by every authenticated user of every tenant). A model glitch must not silently widen access.
+    const access: Access = ACCESS.includes(r.access as Access) ? (r.access as Access) : "tenant";
     entities.push({
       name,
       fields,
