@@ -487,9 +487,17 @@ export async function main(argv: string[]): Promise<number> {
     while (turns.length < MAX_QUESTIONS) {
       const step = await interviewer(promptText, turns);
       if (step.done || !step.question) break;
-      console.log(step.question.question);
-      const answer = (prompt(`  [suggested: ${step.question.recommended}] > `) || "").trim() || step.question.recommended;
-      turns.push({ question: step.question.question, answer });
+      const q = step.question;
+      console.log(q.question);
+      // Multiple-choice: tap a number (★ = recommended), or type your own answer.
+      q.options.forEach((o, i) => {
+        const star = o.label === q.recommended ? " ★" : "";
+        console.log(`  ${i + 1}. ${o.label}${star}${o.detail ? ` — ${o.detail}` : ""}`);
+      });
+      const raw = (prompt(q.options.length ? `  pick 1-${q.options.length}, or type your own [${q.recommended}] > ` : `  [suggested: ${q.recommended}] > `) || "").trim();
+      const picked = raw && /^\d+$/.test(raw) && q.options[Number(raw) - 1];
+      const answer = picked ? picked.label : raw || q.recommended;
+      turns.push({ question: q.question, answer });
       console.log("");
     }
     if (!turns.length) {

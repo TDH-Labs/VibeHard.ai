@@ -2,11 +2,32 @@ import { describe, expect, test } from "bun:test";
 import { coerceStep, foldInterview, type InterviewTurn } from "./interview.ts";
 
 describe("coerceStep (trust boundary)", () => {
-  test("a well-formed question step", () => {
+  test("a well-formed question step (options default to [])", () => {
     expect(coerceStep({ done: false, question: { question: " Who logs in? ", recommended: " Just your team " } })).toEqual({
       done: false,
-      question: { question: "Who logs in?", recommended: "Just your team" },
+      question: { question: "Who logs in?", options: [], recommended: "Just your team" },
     });
+  });
+  test("parses multiple-choice options (label + detail, deduped, capped)", () => {
+    const step = coerceStep({
+      done: false,
+      question: {
+        question: "Which slice of AcmeCare should I build first?",
+        recommended: "Admin dashboard",
+        options: [
+          { label: "Admin dashboard", detail: "Staff-facing: children, attendance, billing" },
+          { label: "Parent portal", description: "Parents see daily reports + invoices" },
+          { label: "Admin dashboard", detail: "dup dropped" },
+          "Marketing site",
+        ],
+      },
+    });
+    expect(step.question!.options).toEqual([
+      { label: "Admin dashboard", detail: "Staff-facing: children, attendance, billing" },
+      { label: "Parent portal", detail: "Parents see daily reports + invoices" }, // tolerates "description"
+      { label: "Marketing site", detail: "" }, // tolerates a bare string
+    ]);
+    expect(step.question!.recommended).toBe("Admin dashboard");
   });
   test("done:true → stop", () => {
     expect(coerceStep({ done: true })).toEqual({ done: true, question: null });
@@ -18,7 +39,7 @@ describe("coerceStep (trust boundary)", () => {
     expect(coerceStep(null)).toEqual({ done: true, question: null });
   });
   test("tolerates a flattened shape (question/recommended at top level)", () => {
-    expect(coerceStep({ question: "Q?", recommended: "R" })).toEqual({ done: false, question: { question: "Q?", recommended: "R" } });
+    expect(coerceStep({ question: "Q?", recommended: "R" })).toEqual({ done: false, question: { question: "Q?", options: [], recommended: "R" } });
   });
 });
 
