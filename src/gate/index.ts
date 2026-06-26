@@ -18,18 +18,19 @@ import { prodReadinessGate } from "./prod-readiness.ts";
 import { verifyGate, fastVerifyGate } from "./verify.ts";
 import { completenessGate } from "./completeness.ts";
 import { migrateGate } from "./migrate.ts";
+import { rlsEnforceGate } from "./rls-enforce.ts";
 
 /** The default gate chain. Source scanners run FIRST, on authored source; verify runs
  *  LAST because it builds the app (creating .next/dist/…) — keeping derived output out
  *  of the source scans (§11, §19). compliance and prod-readiness are
  *  classification/rigor-driven: a no-op unless the app's spec was persisted by the
  *  front-half, so they never fire on a project that didn't go through it. */
-export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, complianceGate, piiGate, prodReadinessGate, verifyGate, completenessGate];
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, rlsEnforceGate, complianceGate, piiGate, prodReadinessGate, verifyGate, completenessGate];
 
 /** The FAST chain for the inner fix loop: same gates, but verify is the cheap in-place-build
  *  proxy (seconds, not the minutes of clean-room + container + boot probes). Iterate on this;
  *  the full GATES run ONCE at convergence to confirm the real artifact + no regression. */
-export const FAST_GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, complianceGate, piiGate, prodReadinessGate, fastVerifyGate];
+export const FAST_GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, rlsEnforceGate, complianceGate, piiGate, prodReadinessGate, fastVerifyGate];
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";

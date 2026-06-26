@@ -345,5 +345,9 @@ export function generateBackend(target: string, rawModel: DataModel): GenerateRe
     if (writeOwned(join(target, f.rel), f.content)) written.push(f.rel);
     else skipped.push(f.rel);
   }
+  // Persist the coerced model so the RLS-enforcement gate can seed two tenants and PROVE isolation
+  // (not just read policy text). Always overwritten — an internal artifact, not user-owned.
+  mkdirSync(join(target, ".vibehard"), { recursive: true });
+  writeFileSync(join(target, ".vibehard", "datamodel.json"), JSON.stringify(rawModel, null, 2));
   return { written, skipped };
 }
