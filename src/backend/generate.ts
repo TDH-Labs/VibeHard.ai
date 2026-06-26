@@ -129,6 +129,34 @@ function migrationInit(model: DataModel): string {
   return lines.join("\n");
 }
 
+/** A safe literal to fill a required tenant-root column when the bootstrap auto-creates a new tenant. */
+function bootstrapLiteral(f: Field): string {
+  if (f.references) return "gen_random_uuid()"; // a required FK on the tenant root is unusual; best effort
+  switch (f.type) {
+    case "text": return "'New workspace'";
+    case "text[]": return "'{}'::text[]";
+    case "integer": return "0";
+    case "numeric": return "0";
+    case "boolean": return "false";
+    case "timestamptz": return "now()";
+    case "date": return "current_date";
+    case "jsonb": return "'{}'::jsonb";
+    case "uuid": return "gen_random_uuid()";
+    default: return "''";
+  }
+}
+
+/** INSERT that creates a fresh tenant (filling its required columns) and returns its id into
+ *  `assigned_tenant` — used by the bootstrap for a self-service signup that owns its own new tenant. */
+function newTenantInsert(model: DataModel): string {
+  const te = model.entities.find((e) => e.name === model.tenantEntity);
+  const req = (te?.fields ?? []).filter((f) => !f.nullable && !f.default);
+  const cols = req.map((f) => q(f.name));
+  const vals = req.map((f) => bootstrapLiteral(f));
+  const body = cols.length ? `(${cols.join(", ")}) values (${vals.join(", ")})` : "default values";
+  return `insert into ${q(model.tenantEntity!)} ${body} returning ${q("id")} into assigned_tenant;`;
+}
+
 function migrationAuthHelpers(model: DataModel): string {
   if (!model.membershipEntity) return "";
   const m = q(model.membershipEntity);
@@ -136,8 +164,37 @@ function migrationAuthHelpers(model: DataModel): string {
   const rf = q(model.roleField);
   const hasEmail = model.entities.find((e) => e.name === model.membershipEntity)?.fields.some((f) => f.name === "email");
   const hasName = model.entities.find((e) => e.name === model.membershipEntity)?.fields.some((f) => f.name === "name");
-  const cols = ["authUserId", model.tenantField, model.roleField, ...(hasEmail ? ["email"] : []), ...(hasName ? ["name"] : [])];
-  const vals = ["new.id", "(new.raw_user_meta_data->>'tenantId')::uuid", `coalesce(new.raw_user_meta_data->>'role','${model.adminRole}')`, ...(hasEmail ? ["new.email"] : []), ...(hasName ? ["new.raw_user_meta_data->>'name'"] : [])];
+  // Membership row written by the bootstrap. tenant + role are SERVER-assigned (assigned_*), never read
+  // from client-set raw_user_meta_data (the takeover vector). Display name is non-privileged → fine.
+  const memCols = ["authUserId", ...(model.tenantEntity ? [model.tenantField] : []), model.roleField, ...(hasEmail ? ["email"] : []), ...(hasName ? ["name"] : [])];
+  const memVals = ["new.id", ...(model.tenantEntity ? ["assigned_tenant"] : []), "assigned_role", ...(hasEmail ? ["new.email"] : []), ...(hasName ? ["new.raw_user_meta_data->>'name'"] : [])];
+  const declares = `declare assigned_role text${model.tenantEntity ? "; assigned_tenant uuid" : ""};`;
+  const tenantBootstrap = model.tenantEntity
+    ? [
+        `  assigned_tenant := nullif(new.raw_app_meta_data->>'tenantId','')::uuid;`,
+        `  if assigned_tenant is null then`,
+        `    -- self-service signup → a fresh OWN tenant; the creator is its admin (no access to anyone else's data).`,
+        `    ${newTenantInsert(model)}`,
+        `    assigned_role := '${model.adminRole}';`,
+        `  end if;`,
+      ]
+    : [];
+  const trigger = [
+    `-- Bootstrap (SECURITY-CRITICAL): tenant + role come ONLY from raw_app_meta_data, which the service`,
+    `-- role sets server-side (e.g. a validated invite-accept). raw_user_meta_data is set by the CLIENT at`,
+    `-- signUp, so it is NEVER trusted for tenant/role — trusting it let any signup self-assign admin of any tenant.`,
+    `create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path = public, auth as $$`,
+    declares,
+    `begin`,
+    `  assigned_role := coalesce(nullif(new.raw_app_meta_data->>'role',''), '${model.adminRole}');`,
+    ...tenantBootstrap,
+    `  insert into ${m} (${memCols.map(q).join(", ")}) values (${memVals.join(", ")});`,
+    `  return new;`,
+    `end $$;`,
+    `drop trigger if exists on_auth_user_created on auth.users;`,
+    `create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();`,
+    "",
+  ].join("\n");
   return [
     `-- ${MARKER} — auth helpers + first-account bootstrap. SECURITY DEFINER so policies that call`,
     `-- these never re-enter the membership table's own RLS (avoids "stack depth exceeded" recursion).`,
@@ -160,17 +217,7 @@ function migrationAuthHelpers(model: DataModel): string {
     `  select exists (select 1 from ${m} where ${q("authUserId")} = auth.uid() and ${rf} = '${model.adminRole}')`,
     `$$;`,
     "",
-    `-- Bootstrap: when an auth user is created with tenant metadata, create their membership row.`,
-    `create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path = public, auth as $$`,
-    `begin`,
-    `  if new.raw_user_meta_data ? 'tenantId' then`,
-    `    insert into ${m} (${cols.map(q).join(", ")}) values (${vals.join(", ")});`,
-    `  end if;`,
-    `  return new;`,
-    `end $$;`,
-    `drop trigger if exists on_auth_user_created on auth.users;`,
-    `create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();`,
-    "",
+    trigger,
   ].join("\n");
 }
 
