@@ -19,7 +19,10 @@ export interface Finding {
 /** A gate's deterministic verdict. `escalate` is reserved for the human layer. */
 export interface GateVerdict {
   gate: string;
-  status: "pass" | "block" | "escalate";
+  /** "n/a" = the gate had nothing to check (e.g. no spec to classify, no data model to prove RLS on).
+   *  Distinct from "pass" on PURPOSE — a vacuous pass must not read as "verified" (audit H4). It does
+   *  not block a deploy, but it does not count as a verified pass either. */
+  status: "pass" | "block" | "escalate" | "n/a";
   findings: Finding[];
   blocking: number; // count of findings that force a block
   ranAt: string; // ISO timestamp, stamped by the caller
@@ -84,4 +87,10 @@ export function isBlocking(f: Finding): boolean {
 export function verdictOf(gate: string, findings: Finding[], ranAt: string): GateVerdict {
   const blocking = findings.filter(isBlocking).length;
   return { gate, status: blocking > 0 ? "block" : "pass", findings, blocking, ranAt };
+}
+
+/** A gate with NOTHING to check (not "verified OK" — there was simply nothing applicable). Use this
+ *  instead of an empty `verdictOf` so a no-op never masquerades as a real pass (audit H4 / B3). */
+export function notApplicable(gate: string, ranAt: string): GateVerdict {
+  return { gate, status: "n/a", findings: [], blocking: 0, ranAt };
 }

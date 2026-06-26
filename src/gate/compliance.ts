@@ -21,7 +21,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import { notApplicable, verdictOf } from "../types.ts";
 import type { SensitiveClass } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 
@@ -167,7 +167,7 @@ function detectSensitiveLogging(projectPath: string): string[] {
 /** Run the compliance-posture assessment. No classification or non-sensitive → PASS. */
 export async function runCompliance(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
   const cls = readClassification(projectPath);
-  if (!cls || cls.sensitiveClasses.length === 0) return verdictOf("compliance", [], ranAt);
+  if (!cls || cls.sensitiveClasses.length === 0) return notApplicable("compliance", ranAt);
   const input: ComplianceInput = {
     ...cls,
     hasDeletePath: detectDeletePath(projectPath),

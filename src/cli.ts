@@ -355,8 +355,9 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
 /** Print a gate's result the moment it lands — readable for a human, and machine-parseable for the
  *  web dashboard (it keys on the `gate: <glyph> <name>` shape to drive a per-gate checklist). */
 function printGateVerdict(v: { gate: string; status: string; blocking: number }): void {
-  const glyph = v.status === "pass" ? "✓" : v.status === "block" ? "✗" : "⚠";
-  console.log(`  gate: ${glyph} ${v.gate}${v.status === "pass" ? "" : ` (${v.blocking} blocking)`}`);
+  const glyph = v.status === "pass" ? "✓" : v.status === "block" ? "✗" : v.status === "n/a" ? "–" : "⚠";
+  const suffix = v.status === "pass" ? "" : v.status === "n/a" ? " (n/a — nothing to check)" : ` (${v.blocking} blocking)`;
+  console.log(`  gate: ${glyph} ${v.gate}${suffix}`);
 }
 
 /** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human
@@ -1174,7 +1175,7 @@ export async function main(argv: string[]): Promise<number> {
     // 1. gate FIRST — never deploy unverified code (writes the HARD_VERIFY_PASS sentinel on pass)
     console.log("── gating before deploy ──");
     const gate = await deployGate(dir);
-    for (const v of gate.verdicts) console.log(`   ${v.status === "pass" ? "✅" : "🛑"} ${v.gate}`);
+    for (const v of gate.verdicts) console.log(`   ${v.status === "pass" ? "✅" : v.status === "n/a" ? "➖" : "🛑"} ${v.gate}`);
     if (!gate.passed) {
       console.log("\n🛑 BLOCK — not deploying. Fix or escalate first (vibehard escalate <dir>).");
       return 1;

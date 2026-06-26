@@ -4,7 +4,8 @@
  * migrations to embedded Postgres (pglite), replicates Supabase's default table grants so RLS is the
  * ONLY thing gating access, seeds TWO tenants, then — as tenant A's `authenticated` session and as an
  * anonymous session — asserts A can neither read, update, delete, nor insert tenant B's rows for every
- * isolated entity. A leak is a BLOCKING finding. Fail-CLOSED: if the harness can't run, it blocks.
+ * isolated entity. A leak is a BLOCKING finding; a harness ERROR fails CLOSED (blocks). A project with
+ * no data model is "n/a" (nothing to seed) — the static rls gate is the backstop there, not a fake pass.
  *
  * This is the difference between "the policy text looks right" (what the author imagined) and "the
  * database refuses the attack" (what is true). It is also the generator's real regression harness.
@@ -16,7 +17,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { coerceDataModel, type DataModel, type Entity, type Field } from "../backend/model.ts";
 import type { Finding, Gate, GateVerdict } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import { notApplicable, verdictOf } from "../types.ts";
 import { SUPABASE_STUBS, neutralize } from "./migrate.ts";
 
 // Fixed, valid UUIDs for the two-tenant fixture. Tenant root rows ARE the tenant ids.
@@ -124,7 +125,7 @@ export interface EnforceOptions {
 export async function runRlsEnforcement(projectPath: string, model: DataModel, opts: EnforceOptions = {}): Promise<GateVerdict> {
   const ranAt = opts.ranAt ?? new Date().toISOString();
   const dir = join(projectPath, "supabase", "migrations");
-  if (!existsSync(dir) || !model.entities.length || !model.membershipEntity) return verdictOf("rls-enforce", [], ranAt);
+  if (!existsSync(dir) || !model.entities.length || !model.membershipEntity) return notApplicable("rls-enforce", ranAt);
   const migs = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort().map((f) => readFileSync(join(dir, f), "utf8"));
 
   const { PGlite } = await import("@electric-sql/pglite");
@@ -200,12 +201,12 @@ export const rlsEnforceGate: Gate = {
   run: async (projectPath: string): Promise<GateVerdict> => {
     const ranAt = new Date().toISOString();
     const modelPath = join(projectPath, ".vibehard", "datamodel.json");
-    if (!existsSync(modelPath)) return verdictOf("rls-enforce", [], ranAt);
+    if (!existsSync(modelPath)) return notApplicable("rls-enforce", ranAt);
     let model: DataModel;
     try {
       model = coerceDataModel(JSON.parse(readFileSync(modelPath, "utf8")));
     } catch {
-      return verdictOf("rls-enforce", [], ranAt);
+      return notApplicable("rls-enforce", ranAt);
     }
     return runRlsEnforcement(projectPath, model, { ranAt });
   },

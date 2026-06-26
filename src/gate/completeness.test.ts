@@ -45,12 +45,12 @@ describe("completeness gate", () => {
   });
 
   test("no spec (didn't go through planning) → N/A, no block", async () => {
-    expect((await runCompleteness(ws(undefined), { reviewer: async () => [] })).status).toBe("pass");
+    expect((await runCompleteness(ws(undefined), { reviewer: async () => [] })).status).toBe("n/a");
   });
 
   test("reviewer with no app code to read → N/A, no block (empty result, not a failure)", async () => {
     const v = await runCompleteness(ws(["x"]), { reviewer: async () => [] });
-    expect(v.status).toBe("pass");
+    expect(v.status).toBe("n/a");
   });
 
   test("does NOT block a 'missing' verdict when the feature IS implemented on disk (false-negative guard)", async () => {

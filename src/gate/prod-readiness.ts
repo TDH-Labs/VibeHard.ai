@@ -17,7 +17,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import { notApplicable, verdictOf } from "../types.ts";
 import { coerceSpec, decideRigor, type Rigor } from "../spec/index.ts";
 
 const f = (ruleId: string, severity: Finding["severity"], file: string, message: string): Finding => ({
@@ -113,7 +113,7 @@ function readFirst(projectPath: string, names: string[]): string | null {
  *  rigor-driven and only assesses apps that went through the front-half). */
 export async function runProdReadiness(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
   const specPath = join(projectPath, ".vibehard", "spec.json");
-  if (!existsSync(specPath)) return verdictOf("prod-readiness", [], ranAt);
+  if (!existsSync(specPath)) return notApplicable("prod-readiness", ranAt);
 
   let rigor: Rigor = "production"; // fail-closed: an unreadable spec is treated as production-strict
   try {
