@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { coerceDataModel, type DataModel } from "./model.ts";
 import { generateBackend } from "./generate.ts";
+import { generateSeed } from "./seed.ts";
+import { generateDashboard } from "./dashboard.ts";
 import { runMigrate } from "../gate/migrate.ts";
 import { runRls } from "../gate/rls.ts";
 
@@ -101,6 +103,31 @@ describe("generateBackend — deterministic, correct-by-construction", () => {
     generateBackend(dir, MODEL);
     const v = await runRls(dir);
     expect(v.status).toBe("pass");
+  });
+
+  test("seed: FK-aware demo data — tenant + admin login + rows in dependency order", () => {
+    const dir = ws();
+    const r = generateSeed(dir, MODEL);
+    expect(r.written).toBe(true);
+    const s = readFileSync(join(dir, "scripts/seed.ts"), "utf8");
+    expect(s).toContain("auth.admin.createUser"); // a demo login
+    expect(s).toContain('"Center"'); // the tenant is created
+    expect(s).toContain("tenantId"); // tenant FK columns are filled with the tenant id
+    expect(s).toContain("pickId("); // other FKs resolve to a seeded parent row
+    // Child (referenced by Invoice) is seeded before Invoice
+    expect(s.indexOf('insert("Child"')).toBeLessThan(s.indexOf('insert("Invoice"'));
+  });
+
+  test("dashboard: an overview page with KPI counts + recent items, from the model", () => {
+    const dir = ws();
+    const r = generateDashboard(dir, MODEL);
+    expect(r.written).toBe(true);
+    const p = readFileSync(join(dir, "app/dashboard/page.tsx"), "utf8");
+    expect(p).toContain("Good day"); // the at-a-glance header
+    expect(p).toContain("count: 'exact'"); // live KPI counts
+    expect(p).toContain('"Child"'); // a feature entity (not the tenant/membership table)
+    expect(p).not.toContain('from("Center")'); // tenant root isn't a KPI card
+    expect(p).toContain("@/lib/supabase/server"); // RLS-scoped queries
   });
 
   test("generate-then-own: re-run overwrites generated files but never clobbers a user-edited one", () => {

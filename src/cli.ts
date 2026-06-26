@@ -17,6 +17,8 @@ import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.t
 import { designBlock } from "./design/presets.ts";
 import { scaffoldDesignSystem } from "./design/scaffold.ts";
 import { generateBackend } from "./backend/generate.ts";
+import { generateSeed } from "./backend/seed.ts";
+import { generateDashboard } from "./backend/dashboard.ts";
 import { coerceDataModel } from "./backend/model.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
@@ -303,8 +305,12 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
     if (model.entities.length) {
       const r = generateBackend(target, model);
       console.log(`  ▸ backend: generated ${r.written.length} deterministic file(s) (migrations + RLS + auth + supabase clients) from the data model`);
+      // Phase 2: demo seed + an overview dashboard from the same model — so the build looks ALIVE.
+      generateSeed(target, model);
+      const dash = generateDashboard(target, model);
+      console.log(`  ▸ experience: generated a demo seed (scripts/seed.ts)${dash.written ? " + an overview dashboard (/dashboard)" : ""}`);
       systemPrompt +=
-        "\n\nBACKEND ALREADY GENERATED — do NOT write it. The database migrations (supabase/migrations/*), Row-Level Security, the auth route (app/api/auth/signin), the auth bootstrap, the middleware, and the Supabase clients (lib/supabase/{client,server,admin}.ts) ALREADY EXIST and are verified. Do NOT create or modify migrations, RLS, auth, or supabase client files. Build ONLY the feature pages + server actions that USE them — import the clients from '@/lib/supabase/server' (RLS-enforced) and read table/column names from the migrations in supabase/migrations.";
+        "\n\nBACKEND + DASHBOARD + SEED ALREADY GENERATED — do NOT rewrite them. The database migrations (supabase/migrations/*), Row-Level Security, the auth route (app/api/auth/signin), the auth bootstrap, the middleware, the Supabase clients (lib/supabase/{client,server,admin}.ts), a landing overview page (app/dashboard/page.tsx), and a demo seed (scripts/seed.ts) ALREADY EXIST and are verified. Do NOT create or modify any of those. Build ONLY the OTHER feature pages + server actions that USE them — import the clients from '@/lib/supabase/server' (RLS-enforced), read table/column names from supabase/migrations, and link from the existing /dashboard.";
     }
   }
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
