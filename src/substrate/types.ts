@@ -50,6 +50,9 @@ export interface MigrationResult {
 export interface LiveRlsResult {
   enforced: boolean;
   leakedTables: string[];
+  /** Tables we could NOT prove denied (transport error, unexpected response). Fail-CLOSED: any
+   *  inconclusive table makes enforced=false, so "couldn't verify" aborts the deploy, never passes. */
+  inconclusive: string[];
 }
 
 /**
@@ -62,8 +65,10 @@ export interface BackendProvider {
   ensureProject(record: DeploymentRecord, org: CustomerOrg): Promise<{ handle: BackendHandle; secrets: BackendSecrets }>;
   /** Apply only the migrations not already applied; a SQL error → ok:false (abort). */
   applyMigrations(handle: BackendHandle, migrations: Migration[], alreadyApplied: string[]): Promise<MigrationResult>;
-  /** Fire a real anonymous query against `tables`; confirm RLS denies it. */
-  verifyLiveRls(handle: BackendHandle, tables: string[]): Promise<LiveRlsResult>;
+  /** Fire a real anonymous query against `tables`; confirm RLS denies it. `rlsEnabled` is the subset
+   *  the migrations actually enabled RLS on — a probed table NOT in it is a definite leak even when
+   *  empty (the empty-table blind spot). Pass it whenever available. */
+  verifyLiveRls(handle: BackendHandle, tables: string[], rlsEnabled?: string[]): Promise<LiveRlsResult>;
   /** Configure auth (providers + redirect URLs to the deployed app). */
   configureAuth(handle: BackendHandle, appUrl: string): Promise<void>;
   /** Tear the project down (for `vibehard destroy`). */

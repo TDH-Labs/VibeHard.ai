@@ -23,6 +23,7 @@ export interface DeployInput {
   workspacePath: string;
   migrations: Migration[];
   rlsTables: string[]; // the tables the live-RLS probe must find denied to anon
+  rlsEnabledTables?: string[]; // the subset with RLS enabled in the migrations — a probed table not here is a leak
   authRedirectUrl?: string;
   /** User-provided third-party credentials (Stripe, OAuth, email…) to inject into the running app's
    *  runtime env, alongside the Supabase vars (backlog #5). Never includes Supabase/service keys. */
@@ -96,9 +97,10 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
 
     // 3. ⭐ verify RLS is enforced LIVE — the gate guarantee carried into runtime
     step("verifying live RLS");
-    const rls = await deps.backend.verifyLiveRls(handle, input.rlsTables);
+    const rls = await deps.backend.verifyLiveRls(handle, input.rlsTables, input.rlsEnabledTables);
     if (!rls.enforced) {
-      return abort("verify-live-rls", `live RLS NOT enforced — an anonymous query could read: ${rls.leakedTables.join(", ")}`);
+      const reason = rls.leakedTables.length ? `an anonymous query could read: ${rls.leakedTables.join(", ")}` : `could not prove RLS for: ${rls.inconclusive.join(", ")} (failing closed)`;
+      return abort("verify-live-rls", `live RLS NOT enforced — ${reason}`);
     }
 
     // 4. auth

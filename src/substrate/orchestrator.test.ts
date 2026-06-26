@@ -47,7 +47,7 @@ function fakeBackend(over: Partial<BackendProvider> = {}): BackendProvider {
     name: "fake-backend",
     ensureProject: async (rec) => ({ handle: { projectRef: rec.projectRef ?? "proj-1" }, secrets: { url: "https://x.supabase.co", anonKey: "ANON", serviceKey: "SERVICE" } }),
     applyMigrations: async (_h, migs, applied) => ({ ok: true, appliedNow: migs.map((m) => m.id).filter((id) => !applied.includes(id)) }),
-    verifyLiveRls: async () => ({ enforced: true, leakedTables: [] }),
+    verifyLiveRls: async () => ({ enforced: true, leakedTables: [], inconclusive: [] }),
     configureAuth: async () => {},
     deleteProject: async () => {},
     ...over,
@@ -97,7 +97,7 @@ describe("provisionAndDeploy — the deterministic sequence", () => {
   });
 
   test("⭐ live RLS not enforced → aborts BEFORE deploying, never goes live", async () => {
-    const backend = fakeBackend({ verifyLiveRls: async () => ({ enforced: false, leakedTables: ["t"] }) });
+    const backend = fakeBackend({ verifyLiveRls: async () => ({ enforced: false, leakedTables: ["t"], inconclusive: [] }) });
     let deployed = false;
     const host = fakeHost({ deploy: async () => ((deployed = true), { url: "x", hostRef: "h" }) });
     const r = await provisionAndDeploy(await input(), deps({ backend, host }));

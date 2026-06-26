@@ -10,7 +10,8 @@
  * only url + anon). All DB/HTTP I/O is behind injectable seams so the logic unit-tests
  * with fakes — no live project required.
  *
- * Honest limit of verifyLiveRls: it proves a leak only when anon actually SEES a row.
+ * verifyLiveRls is fail-CLOSED: it flags a table whose migrations never enabled RLS (leak even when
+ * empty), a live anon read that returns rows (leak), and anything it cannot prove (inconclusive→block).
  * On an empty table it can't (no row to leak), so the live spike SEEDS a row first. For
  * real deploys, tables are typically seeded or a canary is used.
  */
@@ -220,26 +221,43 @@ export class SupabaseBackendProvider implements BackendProvider {
   }
 
   /**
-   * THE differentiated step. Fire a real ANONYMOUS REST query at each table; if it comes
-   * back with rows, RLS is leaking (the CVE-2025-48757 failure) → not enforced. An empty
-   * result or a permission error means anon is denied. Only proven leaks fail.
+   * THE differentiated step, now fail-CLOSED. Two checks: (1) STATIC — a table the migrations never
+   * enabled RLS on is a leak even if it's empty today (the old probe only caught tables that already
+   * had rows, so a fresh app passed trivially); (2) LIVE — a real anonymous REST query that returns
+   * rows is a leak (CVE-2025-48757). A 200-empty on an RLS-enabled table or a 401/403 is "denied".
+   * Anything we cannot prove (transport error, odd response) is INCONCLUSIVE → enforced=false → abort.
    */
-  async verifyLiveRls(_handle: BackendHandle, tables: string[]): Promise<LiveRlsResult> {
+  async verifyLiveRls(_handle: BackendHandle, tables: string[], rlsEnabled: string[] = []): Promise<LiveRlsResult> {
+    const enabled = new Set(rlsEnabled);
+    const knowEnabled = rlsEnabled.length > 0; // were we told which tables are RLS-protected?
     const leakedTables: string[] = [];
+    const inconclusive: string[] = [];
     for (const t of tables) {
+      // STATIC cross-check (closes the empty-table blind spot): a table the migrations never enabled
+      // RLS on is a definite leak even with zero rows today — anon would read every future row. The old
+      // probe only flagged a table that ALREADY had rows, so a fresh app (all tables empty) always passed.
+      if (knowEnabled && !enabled.has(t)) {
+        leakedTables.push(t);
+        continue;
+      }
       const url = `${this.env.url}/rest/v1/${encodeURIComponent(t)}?select=*&limit=1`;
       try {
         const res = await this.fetchImpl(url, { headers: { apikey: this.env.anonKey, Authorization: `Bearer ${this.env.anonKey}` } });
         if (res.ok) {
           const body = (await res.json().catch(() => null)) as unknown;
           if (Array.isArray(body) && body.length > 0) leakedTables.push(t); // anon SAW rows → leak
+          else if (!Array.isArray(body)) inconclusive.push(t); // unexpected 200 shape → can't prove denial
+          // 200 + [] on an RLS-enabled table → anon denied → secure
+        } else if (res.status === 401 || res.status === 403) {
+          // anon explicitly denied → secure
+        } else {
+          inconclusive.push(t); // 404/5xx/other → could not prove denial
         }
-        // non-2xx (401/403/404) → anon denied or table hidden → not a proven leak
       } catch {
-        // network error → cannot prove a leak; do not fail enforcement on transport noise
+        inconclusive.push(t); // transport error → FAIL CLOSED (was: silently treated as enforced)
       }
     }
-    return { enforced: leakedTables.length === 0, leakedTables };
+    return { enforced: leakedTables.length === 0 && inconclusive.length === 0, leakedTables, inconclusive };
   }
 
   /** v1 no-op: redirect-URL / provider config needs the Management API (PAT, deferred). */

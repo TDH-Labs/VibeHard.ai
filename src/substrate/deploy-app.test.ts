@@ -59,7 +59,7 @@ describe("deployApp — derives input + runs the orchestrator", () => {
           },
           verifyLiveRls: async (_h, tables) => {
             captured.rlsTables = tables;
-            return { enforced: true, leakedTables: [] };
+            return { enforced: true, leakedTables: [], inconclusive: [] };
           },
           configureAuth: async () => {},
           deleteProject: async () => {},
