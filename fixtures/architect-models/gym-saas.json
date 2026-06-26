@@ -1,0 +1,15 @@
+{
+  "_source": "Captured from a real architect-LLM run (deepseek-v4-pro) on the prompt 'multi-tenant SaaS for small gyms to manage members, class schedules, and bookings' (2026-06-26). This exact shape broke the generator four ways before the fixes — explicit `id` fields, `table.column` FK refs, indirect ownership via a user_id FK, and an `auth.users.id` self-link. Kept as a regression fixture so the corpus grows from REAL model output, not author-imagined shapes.",
+  "tenantEntity": "tenants",
+  "membershipEntity": "users",
+  "tenantField": "tenant_id",
+  "roleField": "role",
+  "adminRole": "admin",
+  "entities": [
+    { "name": "tenants", "access": "tenant-admin", "fields": [{ "name": "id", "type": "uuid" }, { "name": "name", "type": "text" }] },
+    { "name": "users", "access": "owner", "fields": [{ "name": "id", "type": "uuid", "references": "auth.users.id" }, { "name": "tenant_id", "type": "uuid", "references": "tenants.id" }, { "name": "email", "type": "text" }, { "name": "role", "type": "text" }] },
+    { "name": "memberships", "access": "owner", "fields": [{ "name": "id", "type": "uuid" }, { "name": "user_id", "type": "uuid", "references": "users.id" }, { "name": "tenant_id", "type": "uuid", "references": "tenants.id" }, { "name": "status", "type": "text" }] },
+    { "name": "classes", "access": "tenant", "fields": [{ "name": "id", "type": "uuid" }, { "name": "tenant_id", "type": "uuid", "references": "tenants.id" }, { "name": "name", "type": "text" }] },
+    { "name": "bookings", "access": "owner", "fields": [{ "name": "id", "type": "uuid" }, { "name": "class_id", "type": "uuid", "references": "classes.id" }, { "name": "user_id", "type": "uuid", "references": "users.id" }, { "name": "status", "type": "text" }] }
+  ]
+}

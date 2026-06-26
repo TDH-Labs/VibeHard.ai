@@ -85,7 +85,14 @@ function insertRow(model: DataModel, e: Entity, t: T, idVal: string): string {
   const vals: string[] = [`'${idVal}'`];
   const present = new Set(e.fields.map((f) => f.name));
   const tenantId = t === "A" ? TA : TB;
+  // The generated table strips model fields named `id`/`createdAt` (the generator synthesizes those —
+  // see normalizeFields), so the harness must too, or a model that lists an explicit `id` (real LLM
+  // output) yields "column id specified more than once". Dedup by name, case-folded.
+  const seen = new Set<string>(["id", "createdat"]);
   const push = (c: string, v: string) => {
+    const k = c.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
     cols.push(`"${c}"`);
     vals.push(v);
   };
