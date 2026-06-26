@@ -55,6 +55,11 @@ export interface Architecture {
   pattern: ArchPattern; // §2
   dataFlow: string; // §3 how components communicate (REST / Pub-Sub / IPC …)
   dataArchitecture: DataArchitecture; // §4
+  /** Structured data model for the DETERMINISTIC backend generator (src/backend). Raw LLM JSON —
+   *  validated by coerceDataModel at use. Optional/additive: absent on older artifacts; when present
+   *  + the deterministic-backend path is on, it generates migrations/RLS/auth/clients instead of the
+   *  LLM writing them. */
+  dataModel?: unknown;
 }
 
 const asStr = (v: unknown, d = ""): string => (typeof v === "string" ? v.trim() : d);
@@ -92,6 +97,7 @@ export function coerceArchitecture(raw: unknown, prd: Prd, srs?: Srs): Architect
     pattern: coercePattern(o.pattern),
     dataFlow: asStr(o.dataFlow),
     dataArchitecture: coerceDataArchitecture(o.dataArchitecture),
+    dataModel: o.dataModel, // raw; coerceDataModel (src/backend) validates at the generation site
   };
 }
 
