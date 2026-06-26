@@ -217,3 +217,21 @@ describe("real-LLM model shape — the live-validation regressions", () => {
     expect((await runRls(dir)).status).toBe("pass"); // recursion-safe, correctly-scoped policies
   });
 });
+
+describe("C1 — coerce surfaces silent downgrades as warnings (loud, not silent)", () => {
+  test("dropped FK, retyped column, and defaulted access each emit a warning", () => {
+    const warnings: string[] = [];
+    coerceDataModel(
+      { entities: [{ name: "Thing", access: "bogus", fields: [{ name: "amount", type: "money" }, { name: "ownerRef", type: "uuid", references: "DoesNotExist" }] }] },
+      warnings,
+    );
+    expect(warnings.some((w) => /FK reference "DoesNotExist".*DROPPED/.test(w))).toBe(true);
+    expect(warnings.some((w) => /unknown type "money".*text/.test(w))).toBe(true);
+    expect(warnings.some((w) => /invalid access "bogus".*tenant/.test(w))).toBe(true);
+  });
+  test("a clean model produces no warnings", () => {
+    const warnings: string[] = [];
+    coerceDataModel({ entities: [{ name: "A", access: "tenant", fields: [{ name: "x", type: "text" }] }] }, warnings);
+    expect(warnings).toEqual([]);
+  });
+});

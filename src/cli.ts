@@ -307,7 +307,10 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // shrinks the codegen surface, so the flaky feature-codegen has less to get wrong.
   const wantsDetBackend = process.env.VIBEHARD_DETERMINISTIC_BACKEND !== "0" && /supabase/i.test(arch.stack) && process.env.VIBEHARD_LANG !== "python";
   if (wantsDetBackend) {
-    const model = coerceDataModel(arch.dataModel);
+    const coerceWarnings: string[] = [];
+    const model = coerceDataModel(arch.dataModel, coerceWarnings);
+    // The trust boundary's silent downgrades (dropped FK, retyped column, defaulted access) are LOUD now.
+    for (const w of coerceWarnings) console.log(`  ⚠ model: ${w}`);
     if (model.entities.length) {
       const r = generateBackend(target, model);
       console.log(`  ▸ backend: generated ${r.written.length} deterministic file(s) (migrations + RLS + auth + supabase clients) from the data model`);

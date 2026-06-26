@@ -73,13 +73,17 @@ function resolveRef(raw: unknown, entityNames: Set<string>): string | undefined 
   return segs.find((x) => entityNames.has(x)); // last-ditch: any segment naming an entity
 }
 
-function coerceField(raw: unknown, entityNames: Set<string>): Field | null {
+function coerceField(raw: unknown, entityNames: Set<string>, warnings?: string[], entity?: string): Field | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const name = ident(r.name);
   if (!name) return null;
+  const where = `${entity ?? "?"}.${name}`;
   const validRef = resolveRef(r.references, entityNames);
+  // LOUD, not silent (audit M5): an FK that didn't resolve loses integrity AND can weaken owner RLS.
+  if (r.references && !validRef) warnings?.push(`field ${where}: FK reference "${String(r.references)}" did not resolve to a known entity → DROPPED (loses the foreign key; an owner policy relying on it falls back to a stricter scope)`);
   let type = FIELD_TYPES.includes(r.type as FieldType) ? (r.type as FieldType) : "text";
+  if (r.type !== undefined && !FIELD_TYPES.includes(r.type as FieldType)) warnings?.push(`field ${where}: unknown type "${String(r.type)}" → coerced to text (a numeric/date column would lose its type)`);
   if (validRef) type = "uuid"; // a FK is always a uuid
   return {
     name,
@@ -93,7 +97,7 @@ function coerceField(raw: unknown, entityNames: Set<string>): Field | null {
 
 /** Trust boundary: coerce arbitrary (LLM) JSON into a valid DataModel. Invalid entities/fields are
  *  dropped; references to non-existent entities are dropped; sensible defaults fill the rest. */
-export function coerceDataModel(raw: unknown): DataModel {
+export function coerceDataModel(raw: unknown, warnings?: string[]): DataModel {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const rawEntities = Array.isArray(o.entities) ? o.entities : [];
   // First pass: collect valid entity names so FK references can be validated.
@@ -112,10 +116,11 @@ export function coerceDataModel(raw: unknown): DataModel {
     const name = ident(r.name);
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    const fields = (Array.isArray(r.fields) ? r.fields : []).map((f) => coerceField(f, names)).filter((f): f is Field => !!f);
+    const fields = (Array.isArray(r.fields) ? r.fields : []).map((f) => coerceField(f, names, warnings, name)).filter((f): f is Field => !!f);
     // FAIL CLOSED: an unspecified/invalid access defaults to "tenant" (isolated), NOT "auth" (readable
     // by every authenticated user of every tenant). A model glitch must not silently widen access.
     const access: Access = ACCESS.includes(r.access as Access) ? (r.access as Access) : "tenant";
+    if (r.access !== undefined && !ACCESS.includes(r.access as Access)) warnings?.push(`entity ${name}: invalid access "${String(r.access)}" → defaulted to "tenant" (isolated). Set it to owner/tenant/tenant-admin/auth/public explicitly.`);
     entities.push({
       name,
       fields,
