@@ -262,3 +262,33 @@ describe("C2 — adminRole can't inject SQL (value-position escaping)", () => {
     expect(auth).toContain("'ad''min'"); // doubled-quote escape, not the break-out form 'ad'min'
   });
 });
+
+describe("F1 — ownership by content hash (manifest), not a comment marker", () => {
+  test("editing a migration but KEEPING the @vibehard:generated comment does NOT clobber the edit (the audit bug)", () => {
+    const dir = ws();
+    generateBackend(dir, MODEL);
+    const mig = join(dir, "supabase/migrations/0001_init.sql");
+    expect(readFileSync(mig, "utf8")).toContain("@vibehard:generated"); // marker still present in the body
+    writeFileSync(mig, readFileSync(mig, "utf8") + '\n-- my hand-added index\ncreate index on "Center" ("name");\n');
+    const r2 = generateBackend(dir, MODEL);
+    expect(r2.skipped).toContain("supabase/migrations/0001_init.sql"); // preserved despite the marker
+    expect(readFileSync(mig, "utf8")).toContain("my hand-added index"); // the edit survives
+    expect(existsSync(mig + ".vibehard-new")).toBe(true); // regenerated version offered for review
+    expect(r2.warnings.some((w) => /kept your edits/.test(w))).toBe(true); // and it's LOUD, not silent
+  });
+
+  test("an UNTOUCHED generated file is still regenerated (owned until the user edits it)", () => {
+    const dir = ws();
+    generateBackend(dir, MODEL);
+    expect(generateBackend(dir, MODEL).written).toContain("supabase/migrations/0003_rls.sql");
+  });
+
+  test("a pre-existing FOREIGN file (never generated, not in the manifest) is preserved", () => {
+    const dir = ws();
+    mkdirSync(join(dir, "lib", "supabase"), { recursive: true });
+    writeFileSync(join(dir, "lib/supabase/server.ts"), "export const userOwned = true;\n");
+    const r = generateBackend(dir, MODEL);
+    expect(r.skipped).toContain("lib/supabase/server.ts");
+    expect(readFileSync(join(dir, "lib/supabase/server.ts"), "utf8")).toContain("userOwned");
+  });
+});

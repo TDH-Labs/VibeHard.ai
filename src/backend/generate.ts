@@ -14,22 +14,67 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import type { DataModel, Entity, Field } from "./model.ts";
 
 const MARKER = "@vibehard:generated";
+const OWNED_MANIFEST = ".vibehard/owned.json";
 
-/** Write only if the path is unwritten or still VibeHard-owned (carries the marker). Returns whether
- *  it wrote. A user-owned file (exists, no marker) is preserved. */
-function writeOwned(path: string, content: string): boolean {
-  if (existsSync(path)) {
+const hashOf = (s: string): string => createHash("sha256").update(s).digest("hex");
+
+type OwnedManifest = Record<string, string>; // relPath → sha256 of the LAST content we generated
+
+function loadManifest(target: string): OwnedManifest {
+  try {
+    return JSON.parse(readFileSync(join(target, OWNED_MANIFEST), "utf8")) as OwnedManifest;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Ownership tracked OUT OF BAND (audit CRITICAL): we own a file only while it still hashes to what we
+ * last generated — never inferred from a comment in the body (which the user keeps when they edit, and
+ * a formatter strips). So:
+ *   • new file, or unchanged-since-we-generated-it → (over)write + record the new hash;
+ *   • the user EDITED our file (hash diverged) → DON'T clobber; write `<file>.vibehard-new` + warn;
+ *   • a pre-existing foreign file we never generated → preserve + warn;
+ *   • backward-compat: a marker-bearing file with no manifest entry is a pre-manifest generation → adopt.
+ * Returns whether the canonical file was (over)written.
+ */
+function writeManaged(target: string, rel: string, content: string, manifest: OwnedManifest, warnings: string[]): boolean {
+  const abs = join(target, rel);
+  const newHash = hashOf(content);
+  if (existsSync(abs)) {
+    let current = "";
     try {
-      if (!readFileSync(path, "utf8").includes(MARKER)) return false; // user took ownership — don't clobber
+      current = readFileSync(abs, "utf8");
     } catch {
       return false;
     }
+    if (hashOf(current) === newHash) {
+      manifest[rel] = newHash;
+      return true; // already exactly this — idempotent
+    }
+    const last = manifest[rel];
+    if (last === undefined) {
+      // never recorded. If it carries the legacy marker it's a pre-manifest generation we may adopt;
+      // otherwise it's the user's own file → never clobber.
+      if (!current.includes(MARKER)) {
+        warnings.push(`preserved ${rel} — a pre-existing file VibeHard didn't generate; not overwriting.`);
+        return false;
+      }
+    } else if (hashOf(current) !== last) {
+      // we generated it, then the USER changed it → keep their edits, surface the regenerated version.
+      writeFileSync(`${abs}.vibehard-new`, content);
+      warnings.push(`kept your edits to ${rel}; wrote the regenerated version to ${rel}.vibehard-new for review. (VibeHard won't overwrite ${rel} until it matches a generated version again.)`);
+      return false;
+    }
+    // last === current hash → unchanged since we generated it → safe to overwrite.
   }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, content);
+  manifest[rel] = newHash;
   return true;
 }
 
@@ -404,15 +449,17 @@ export function generateBackend(target: string, rawModel: DataModel): GenerateRe
     { rel: "app/api/auth/signin/route.ts", content: SIGNIN_ROUTE },
     { rel: "middleware.ts", content: MIDDLEWARE },
   );
+  const manifest = loadManifest(target);
   const written: string[] = [];
   const skipped: string[] = [];
   for (const f of files) {
-    if (writeOwned(join(target, f.rel), f.content)) written.push(f.rel);
+    if (writeManaged(target, f.rel, f.content, manifest, warnings)) written.push(f.rel);
     else skipped.push(f.rel);
   }
-  // Persist the coerced model so the RLS-enforcement gate can seed two tenants and PROVE isolation
-  // (not just read policy text). Always overwritten — an internal artifact, not user-owned.
+  // Persist the coerced model (RLS-enforcement gate seeds from it) + the ownership manifest. Always
+  // overwritten — internal artifacts, not user-owned.
   mkdirSync(join(target, ".vibehard"), { recursive: true });
   writeFileSync(join(target, ".vibehard", "datamodel.json"), JSON.stringify(rawModel, null, 2));
+  writeFileSync(join(target, OWNED_MANIFEST), JSON.stringify(manifest, null, 2));
   return { written, skipped, warnings };
 }
