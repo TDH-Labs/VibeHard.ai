@@ -311,6 +311,8 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
     if (model.entities.length) {
       const r = generateBackend(target, model);
       console.log(`  ▸ backend: generated ${r.written.length} deterministic file(s) (migrations + RLS + auth + supabase clients) from the data model`);
+      // Fail-closed denials are surfaced LOUDLY — a denied table is safe but non-functional until the model is fixed.
+      for (const w of r.warnings) console.log(`  ⚠ ${w}`);
       // Phase 2: demo seed + an overview dashboard from the same model — so the build looks ALIVE.
       generateSeed(target, model);
       const dash = generateDashboard(target, model);
