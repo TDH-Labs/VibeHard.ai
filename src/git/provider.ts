@@ -49,13 +49,26 @@ export function gitHubProvider(getToken: () => Promise<string>, opts: GitHubProv
   return {
     async ensureRepo(repo, ensureOpts) {
       const { owner, name } = splitOwner(repo);
-      const full = `${owner}/${name}`;
-      const got = await api("GET", `/repos/${full}`);
-      if (got.ok) return { repo: full, created: false };
+      // When an owner is known up front we can probe directly; otherwise we resolve
+      // the real owner from the create/whoami response so the returned repo is a
+      // valid "owner/name" (an empty owner yields "/name", which breaks every
+      // downstream lookup — webhook routing, registry, remote URL).
+      if (owner) {
+        const got = await api("GET", `/repos/${owner}/${name}`);
+        if (got.ok) return { repo: `${owner}/${name}`, created: false };
+      } else {
+        const me = await api("GET", "/user");
+        const login = (me.json as { login?: string }).login;
+        if (login) {
+          const got = await api("GET", `/repos/${login}/${name}`);
+          if (got.ok) return { repo: `${login}/${name}`, created: false };
+        }
+      }
       // create under a user or an org (the App's installation account)
       const created = await api("POST", owner ? `/orgs/${owner}/repos` : `/user/repos`, { name, private: ensureOpts?.private ?? true, auto_init: false });
-      if (!created.ok) throw new Error(`create repo ${full}: ${created.status} ${created.text.slice(0, 200)}`);
-      return { repo: full, created: true };
+      if (!created.ok) throw new Error(`create repo ${owner ? `${owner}/` : ""}${name}: ${created.status} ${created.text.slice(0, 200)}`);
+      const fullName = (created.json as { full_name?: string }).full_name ?? `${owner}/${name}`;
+      return { repo: fullName, created: true };
     },
     async openPullRequest(input) {
       const res = await api("POST", `/repos/${input.repo}/pulls`, { head: input.head, base: input.base, title: input.title, body: input.body });
