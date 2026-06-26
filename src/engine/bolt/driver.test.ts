@@ -178,3 +178,59 @@ describe("VIBEHARD_SYSTEM_PROMPT", () => {
     expect(VIBEHARD_SYSTEM_PROMPT).not.toContain("WebContainer"); // browser-runtime constraints stripped
   });
 });
+
+describe("D2 — idle watchdog survives the reasoning phase, aborts a truly dead stream", () => {
+  const setEnv = (kv: Record<string, string>) => {
+    const prev: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(kv)) { prev[k] = process.env[k]; process.env[k] = v; }
+    return () => { for (const k of Object.keys(kv)) prev[k] === undefined ? delete process.env[k] : (process.env[k] = prev[k]!); };
+  };
+  const drain = async (driver: ReturnType<typeof liveBoltDriver>) => {
+    let raw = "";
+    for await (const c of driver.run("go", { provider: "x", model: "y" })) raw += c;
+    return raw;
+  };
+
+  test("a reasoning-only stream that thinks LONGER than the idle window is NOT aborted (the regression)", async () => {
+    // idle=80ms, but reasoning deltas arrive every 20ms for ~200ms before the first text → total think
+    // time far exceeds idle, yet each gap resets the watchdog via fullStream. Old (textStream-only) code
+    // saw no text for 200ms > 80ms and would abort a healthy stream.
+    const restore = setEnv({ VIBEHARD_STREAM_IDLE_MS: "80", VIBEHARD_STREAM_TTFT_MS: "300", VIBEHARD_STREAM_RETRIES: "0", VIBEHARD_STREAM_BACKOFF_MS: "0" });
+    try {
+      const chunks: LanguageModelV3StreamPart[] = [
+        { type: "reasoning-start", id: "r" },
+        ...Array.from({ length: 10 }, (): LanguageModelV3StreamPart => ({ type: "reasoning-delta", id: "r", delta: "thinking " })),
+        { type: "reasoning-end", id: "r" },
+        { type: "text-start", id: "1" },
+        { type: "text-delta", id: "1", delta: '<boltArtifact id="a" title="a"><boltAction type="file" filePath="ok.ts">export const ok = 1;</boltAction></boltArtifact>' },
+        { type: "text-end", id: "1" },
+        { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: USAGE },
+      ];
+      const model = new MockLanguageModelV3({ doStream: async () => ({ stream: simulateReadableStream({ initialDelayInMs: 10, chunkDelayInMs: 20, chunks }) }) });
+      const raw = await drain(liveBoltDriver({ modelFactory: () => model }));
+      expect(raw).toContain("export const ok = 1;"); // completed — reasoning kept it alive
+    } finally {
+      restore();
+    }
+  });
+
+  test("a stream that produces NO token within the grace window aborts (and, retries exhausted, throws)", async () => {
+    const restore = setEnv({ VIBEHARD_STREAM_TTFT_MS: "40", VIBEHARD_STREAM_IDLE_MS: "40", VIBEHARD_STREAM_RETRIES: "1", VIBEHARD_STREAM_BACKOFF_MS: "0" });
+    try {
+      // A stream that NEVER emits a token but honors the abort signal: the watchdog's TTFT (40ms) fires
+      // controller.abort(idle), the signal propagates to doStream, the stream errors → driver throws.
+      const model = new MockLanguageModelV3({
+        doStream: async ({ abortSignal }) => ({
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            start(controller) {
+              abortSignal?.addEventListener("abort", () => controller.error(new Error(String((abortSignal as AbortSignal).reason ?? "aborted"))));
+            },
+          }),
+        }),
+      });
+      await expect(drain(liveBoltDriver({ modelFactory: () => model }))).rejects.toThrow(/idle|abort/i);
+    } finally {
+      restore();
+    }
+  });
+});
