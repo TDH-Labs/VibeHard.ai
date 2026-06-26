@@ -66,3 +66,18 @@ describe("design scaffold — premium by default, deterministic", () => {
     expect(existsSync(join(dir, "tailwind.config.ts"))).toBe(false);
   });
 });
+
+import { pickDesignPreset } from "./presets.ts";
+describe("pickDesignPreset — auto-pick by domain", () => {
+  test("childcare (even with health records) → warm, not corporate", () => {
+    expect(pickDesignPreset({ name: "ProCare", summary: "childcare management with immunization records", features: ["attendance"], sensitiveData: ["phi"] })).toBe("warm");
+  });
+  test("finance/legal/health-practice → professional", () => {
+    expect(pickDesignPreset({ summary: "invoicing and accounting for a law firm", sensitiveData: ["financial"] })).toBe("professional");
+    expect(pickDesignPreset({ summary: "patient intake for a medical clinic" })).toBe("professional");
+  });
+  test("marketing/launch → bold; generic → clean default", () => {
+    expect(pickDesignPreset({ summary: "a startup landing page with a waitlist" })).toBe("bold");
+    expect(pickDesignPreset({ summary: "an internal tool to track widgets" })).toBe("clean");
+  });
+});

@@ -89,6 +89,19 @@ export const DESIGN_PRESETS: DesignPreset[] = [
 
 const DEFAULT_PRESET = "clean";
 
+/** Auto-pick a design preset from the app's domain so it looks RIGHT without asking — warm for
+ *  childcare/community/wellness, professional for finance/legal/health-practice, bold for
+ *  marketing/launch, else the premium default. Domain keywords win over data-sensitivity (a daycare
+ *  with health records should still feel warm, not like a bank). VIBEHARD_DESIGN overrides this. */
+export function pickDesignPreset(spec: { name?: string; summary?: string; features?: string[]; sensitiveData?: string[] }): string {
+  const text = [spec.name, spec.summary, ...(spec.features ?? [])].join(" ").toLowerCase();
+  if (/\b(child|childcare|daycare|kid|family|families|community|wellness|nonprofit|charity|school|tutor|education|hospitality|booking|salon|spa|fitness|coaching|therap|pet|food|recipe|event)\w*/.test(text)) return "warm";
+  const financial = (spec.sensitiveData ?? []).some((c) => c === "financial");
+  if (financial || /\b(bank|finance|financ|invoic|account|legal|\blaw\b|insurance|clinic|medical|patient|hospital|pharma|\btax\b|payroll|compliance|audit|enterprise|b2b)\w*/.test(text)) return "professional";
+  if (/\b(launch|landing|startup|marketing|portfolio|creative|agency|waitlist|crypto|web3|game|gaming|music|art)\w*/.test(text)) return "bold";
+  return DEFAULT_PRESET;
+}
+
 export function designPreset(key: string | undefined): DesignPreset {
   return DESIGN_PRESETS.find((p) => p.key === key) ?? DESIGN_PRESETS.find((p) => p.key === DEFAULT_PRESET)!;
 }
