@@ -130,7 +130,8 @@ export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
       const idleMs = Number(process.env.VIBEHARD_STREAM_IDLE_MS) || 120_000; // no token for 2 min ONCE FLOWING ⇒ dead
       const ttftMs = Number(process.env.VIBEHARD_STREAM_TTFT_MS) || 300_000; // first-token grace: a reasoning model thinks before it emits (5 min)
       const overallMs = Number(process.env.VIBEHARD_STREAM_OVERALL_MS) || 900_000; // 15 min hard cap
-      const retries = 2;
+      const retries = Number(process.env.VIBEHARD_STREAM_RETRIES ?? 2); // retry-on-transient count
+      const backoffMs = Number(process.env.VIBEHARD_STREAM_BACKOFF_MS ?? 2000); // linear backoff base
       let lastErr: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const controller = new AbortController();
@@ -168,7 +169,7 @@ export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
           const sig = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
           const transient = /abort|timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|idle|stream exceeded|\b(429|500|502|503|504)\b/i.test(sig);
           if (!transient || attempt === retries) throw e;
-          await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // linear backoff, then retry from scratch
+          await new Promise((r) => setTimeout(r, backoffMs * (attempt + 1))); // linear backoff, then retry from scratch
           continue;
         } finally {
           if (idle) clearTimeout(idle);
