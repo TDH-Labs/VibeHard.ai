@@ -35,6 +35,14 @@ You are an expert Software Architect. You turn a Software Requirements Specifica
   "pattern": { "name": string, "rationale": string, "tradeoffs": string },                 // §2 — WHY this pattern + what is sacrificed
   "dataFlow": string,                                // §3 how components communicate (REST / Pub-Sub / IPC / RLS-scoped client)
   "dataArchitecture": { "storageRationale": string, "schema": string, "stateManagement": string },   // §4 — schema = SQL DDL for core entities
+  "dataModel": {                                     // §4b — STRUCTURED model; a deterministic generator turns this into migrations+RLS+auth (so get it right, not the prose DDL)
+    "tenantEntity": string,                          // the tenant root table, e.g. "Center" (omit for single-user apps)
+    "membershipEntity": string,                      // the table linking a login to a tenant+role, e.g. "Staff" (needed for tenant scoping)
+    "tenantField": string,                           // tenant FK column name, e.g. "centerId"
+    "roleField": string, "adminRole": string,        // e.g. "role", "admin"
+    "entities": [ { "name": string, "access": "owner|tenant|tenant-admin|auth|public",
+                    "fields": [ { "name": string, "type": "uuid|text|text[]|integer|numeric|boolean|timestamptz|date|jsonb", "nullable": boolean, "references": string } ] } ]
+  },
   "workstreams": [ { "name": string, "responsibility": string, "files": [string], "dependsOn": [string], "covers": ["FR-1"] } ]
 }
 
@@ -43,6 +51,7 @@ You are an expert Software Architect. You turn a Software Requirements Specifica
 - The workstream dependency graph MUST be acyclic (typical order: data/schema → server/api → ui). Every workstream owns >=1 file. "dependsOn" may only name other workstreams in the list.
 - DEPLOYMENT CONSTRAINT (hard): the data layer MUST be Supabase (Postgres + Row-Level Security) — the security boundary the platform verifies live before deploy. Do NOT use MongoDB, Firebase, MySQL, DynamoDB, PlanetScale, SQLite, or a self-managed Postgres (pg/Prisma/TypeORM/Knex/Drizzle). Deploy as EITHER a Vercel app (Next.js / Vite / static) OR a single Dockerfile container (e.g. FastAPI on Fly).
 - §2 pattern: give the rationale (from the SRS constraints) AND state the trade-offs explicitly. §4 dataArchitecture.schema: a concise SQL DDL for the core entities (derive from the SRS data model; include the RLS-relevant owner columns).
+- §4b dataModel: emit the STRUCTURED model for every persisted entity — its access policy (owner = a user's own rows; tenant = any member of the tenant; tenant-admin = members read, admins write; auth = any logged-in user; public = world-readable) and typed fields with FK \`references\`. A tenant-scoped entity MUST include its tenant FK field (e.g. centerId references the tenant entity). This drives the generated migrations/RLS — be precise; don't restate the prose DDL here.
 - BE CONCISE so the whole JSON fits in one response: short phrases, a focused DDL, 3-7 workstreams. A truncated document is a failed document.
 - If given previous gaps, FIX every one (break a cycle, add files or covers, move the data layer to Supabase, supply the missing pattern rationale, …).`;
 

@@ -16,6 +16,8 @@ import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
 import { designBlock } from "./design/presets.ts";
 import { scaffoldDesignSystem } from "./design/scaffold.ts";
+import { generateBackend } from "./backend/generate.ts";
+import { coerceDataModel } from "./backend/model.ts";
 import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.ts";
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
@@ -290,7 +292,21 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // inherits a consistent, professional look. Python (FastAPI API) has no UI, so no design block.
   // Inject the FLEET learning store's codegen conventions (private; system-prompt only — never
   // shipped to the user). This is now the single source for what used to be hardcoded conventions.
-  const systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock()) + fleetBlock(arch.stack, "codegen");
+  let systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock()) + fleetBlock(arch.stack, "codegen");
+
+  // DETERMINISTIC BACKEND (opt-in via VIBEHARD_DETERMINISTIC_BACKEND while it's validated live): on a
+  // Supabase stack, generate migrations/RLS/auth/clients from the structured data model BEFORE codegen
+  // — the layer the LLM gets wrong — and tell codegen to build features against it, not re-author it.
+  const wantsDetBackend = process.env.VIBEHARD_DETERMINISTIC_BACKEND === "1" && /supabase/i.test(arch.stack) && process.env.VIBEHARD_LANG !== "python";
+  if (wantsDetBackend) {
+    const model = coerceDataModel(arch.dataModel);
+    if (model.entities.length) {
+      const r = generateBackend(target, model);
+      console.log(`  ▸ backend: generated ${r.written.length} deterministic file(s) (migrations + RLS + auth + supabase clients) from the data model`);
+      systemPrompt +=
+        "\n\nBACKEND ALREADY GENERATED — do NOT write it. The database migrations (supabase/migrations/*), Row-Level Security, the auth route (app/api/auth/signin), the auth bootstrap, the middleware, and the Supabase clients (lib/supabase/{client,server,admin}.ts) ALREADY EXIST and are verified. Do NOT create or modify migrations, RLS, auth, or supabase client files. Build ONLY the feature pages + server actions that USE them — import the clients from '@/lib/supabase/server' (RLS-enforced) and read table/column names from the migrations in supabase/migrations.";
+    }
+  }
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
   // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the
   // prior-tiers snapshot) is mapped to names for the brief — identical to sequential codegen.
