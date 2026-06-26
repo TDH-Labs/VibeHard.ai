@@ -34,6 +34,9 @@ function writeOwned(path: string, content: string): boolean {
 }
 
 const q = (s: string): string => `"${s}"`;
+/** A SQL string LITERAL (value position), single-quotes escaped. Defense-in-depth for model values
+ *  like adminRole that are interpolated into emitted SQL — the coercer also restricts their charset. */
+const lit = (s: string): string => `'${String(s).replace(/'/g, "''")}'`;
 
 function columnSql(f: Field): string {
   const parts = [q(f.name), f.type];
@@ -110,7 +113,7 @@ function withMembershipColumns(model: DataModel): DataModel {
     const add: Field[] = [];
     if (!have.has("authUserId")) add.push({ name: "authUserId", type: "uuid", nullable: false, unique: true, default: undefined, references: undefined });
     if (!have.has(model.tenantField) && model.tenantEntity) add.push({ name: model.tenantField, type: "uuid", nullable: false, references: model.tenantEntity });
-    if (!have.has(model.roleField)) add.push({ name: model.roleField, type: "text", nullable: false, default: `'${model.adminRole}'` });
+    if (!have.has(model.roleField)) add.push({ name: model.roleField, type: "text", nullable: false, default: lit(model.adminRole) });
     return { ...e, fields: [...add, ...e.fields] };
   });
   return { ...model, entities };
@@ -175,7 +178,7 @@ function migrationAuthHelpers(model: DataModel): string {
         `  if assigned_tenant is null then`,
         `    -- self-service signup → a fresh OWN tenant; the creator is its admin (no access to anyone else's data).`,
         `    ${newTenantInsert(model)}`,
-        `    assigned_role := '${model.adminRole}';`,
+        `    assigned_role := ${lit(model.adminRole)};`,
         `  end if;`,
       ]
     : [];
@@ -186,7 +189,7 @@ function migrationAuthHelpers(model: DataModel): string {
     `create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path = public, auth as $$`,
     declares,
     `begin`,
-    `  assigned_role := coalesce(nullif(new.raw_app_meta_data->>'role',''), '${model.adminRole}');`,
+    `  assigned_role := coalesce(nullif(new.raw_app_meta_data->>'role',''), ${lit(model.adminRole)});`,
     ...tenantBootstrap,
     `  insert into ${m} (${memCols.map(q).join(", ")}) values (${memVals.join(", ")});`,
     `  return new;`,
@@ -214,7 +217,7 @@ function migrationAuthHelpers(model: DataModel): string {
     `$$;`,
     "",
     `create or replace function auth_is_admin() returns boolean language sql stable security definer set search_path = public as $$`,
-    `  select exists (select 1 from ${m} where ${q("authUserId")} = auth.uid() and ${rf} = '${model.adminRole}')`,
+    `  select exists (select 1 from ${m} where ${q("authUserId")} = auth.uid() and ${rf} = ${lit(model.adminRole)})`,
     `$$;`,
     "",
     trigger,
