@@ -127,30 +127,39 @@ export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
     // materializing anything (engine.ts "accumulate-then-parse") — a failed attempt writes no
     // files, so we buffer internally and yield once on success (one yield ⇒ clean restart).
     async *run(prompt: string, config: EngineConfig): AsyncIterable<string> {
-      const idleMs = Number(process.env.VIBEHARD_STREAM_IDLE_MS) || 120_000; // no token for 2 min ⇒ dead
+      const idleMs = Number(process.env.VIBEHARD_STREAM_IDLE_MS) || 120_000; // no token for 2 min ONCE FLOWING ⇒ dead
+      const ttftMs = Number(process.env.VIBEHARD_STREAM_TTFT_MS) || 300_000; // first-token grace: a reasoning model thinks before it emits (5 min)
       const overallMs = Number(process.env.VIBEHARD_STREAM_OVERALL_MS) || 900_000; // 15 min hard cap
       const retries = 2;
       let lastErr: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const controller = new AbortController();
         let idle: ReturnType<typeof setTimeout> | undefined;
+        let flowing = false; // seen ANY stream part yet? reasoning counts — the first part is what TTFT covers
         const armIdle = () => {
           if (idle) clearTimeout(idle);
-          idle = setTimeout(() => controller.abort(new Error(`stream idle ${idleMs}ms (no token received)`)), idleMs);
+          const ms = flowing ? idleMs : ttftMs; // longer grace before the FIRST token, tighter idle between tokens
+          idle = setTimeout(() => controller.abort(new Error(`stream idle ${ms}ms (no token received)`)), ms);
         };
         const overall = setTimeout(() => controller.abort(new Error(`stream exceeded ${overallMs}ms overall`)), overallMs);
         let raw: string | null = null;
         try {
           armIdle();
-          // streamText does NOT reject textStream on a provider error — it ends the stream silently
-          // and reports via onError. Capture it so a failed call becomes a throw (→ retry), instead
-          // of a silent empty "success" that would ship an app with no files.
+          // streamText does NOT reject on a provider error — it ends the stream silently and reports
+          // via onError. Capture it so a failed call becomes a throw (→ retry), instead of a silent
+          // empty "success" that would ship an app with no files.
           let streamErr: unknown;
           const result = streamText({ model: modelFactory(config), system: systemPrompt, prompt, maxOutputTokens: MAX_OUTPUT_TOKENS, abortSignal: controller.signal, onError: ({ error }) => { streamErr = error; } });
           let acc = "";
-          for await (const chunk of result.textStream) {
-            armIdle(); // each token resets the idle watchdog
-            acc += chunk;
+          // Iterate the FULL stream, not just textStream: a reasoning model emits reasoning tokens —
+          // often for minutes — BEFORE its first text token. textStream yields nothing during that
+          // phase, so the old watchdog aborted a healthy "thinking" stream (kimi codegen, 2/2 stalls).
+          // ANY part resets the watchdog; only text deltas accumulate into the materialized output.
+          for await (const part of result.fullStream) {
+            flowing = true;
+            armIdle();
+            if (part.type === "text-delta") acc += part.text;
+            else if (part.type === "error") throw part.error;
           }
           if (streamErr) throw streamErr;
           raw = acc;
