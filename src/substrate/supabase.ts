@@ -203,15 +203,24 @@ export class SupabaseBackendProvider implements BackendProvider {
   async applyMigrations(_handle: BackendHandle, migrations: Migration[], alreadyApplied: string[]): Promise<MigrationResult> {
     const todo = migrations.filter((m) => !alreadyApplied.includes(m.id));
     const appliedNow: string[] = [];
-    if (!todo.length) return { ok: true, appliedNow };
+    if (!todo.length) return { ok: true, appliedNow }; // nothing to do → open no connection
     const db = this.executorFactory();
     try {
+      // A DB-side ledger is the SOURCE OF TRUTH for what's applied — idempotent even if the side-file
+      // record was lost between apply and write (the old behavior re-ran a non-idempotent migration on
+      // resume, e.g. CREATE POLICY → "already exists"). The ledger insert goes FIRST in the txn, so a
+      // re-applied migration conflicts on the PK and the whole txn (incl. the migration SQL) rolls back.
+      await db.exec(`create table if not exists _vibehard_migrations (id text primary key, applied_at timestamptz not null default now());`);
       for (const m of todo) {
+        const id = `'${m.id.replace(/'/g, "''")}'`;
         try {
-          await db.exec(m.sql);
+          await db.exec(`begin;\ninsert into _vibehard_migrations (id) values (${id});\n${m.sql}\n;\ncommit;`);
           appliedNow.push(m.id);
         } catch (e) {
-          return { ok: false, appliedNow, error: `migration ${m.id}: ${msg(e)}` };
+          await db.exec("rollback;").catch(() => {});
+          const message = msg(e);
+          if (/_vibehard_migrations/i.test(message)) continue; // already in the ledger → already applied → skip, not an error
+          return { ok: false, appliedNow, error: `migration ${m.id}: ${message}` };
         }
       }
       return { ok: true, appliedNow };
