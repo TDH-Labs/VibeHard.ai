@@ -300,10 +300,12 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   const designPresetKey = process.env.VIBEHARD_DESIGN ?? pickDesignPreset(arch.prd.spec);
   let systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock(designPresetKey)) + fleetBlock(arch.stack, "codegen");
 
-  // DETERMINISTIC BACKEND (opt-in via VIBEHARD_DETERMINISTIC_BACKEND while it's validated live): on a
-  // Supabase stack, generate migrations/RLS/auth/clients from the structured data model BEFORE codegen
-  // — the layer the LLM gets wrong — and tell codegen to build features against it, not re-author it.
-  const wantsDetBackend = process.env.VIBEHARD_DETERMINISTIC_BACKEND === "1" && /supabase/i.test(arch.stack) && process.env.VIBEHARD_LANG !== "python";
+  // DETERMINISTIC BACKEND (default ON for Supabase stacks; opt OUT with VIBEHARD_DETERMINISTIC_BACKEND=0):
+  // generate migrations/RLS/auth/clients from the structured data model BEFORE codegen — the layer the
+  // LLM gets wrong — and tell codegen to build features against it, not re-author it. Validated live
+  // end-to-end against a real architect-LLM data model (migrate + rls gates pass, 0 findings); it also
+  // shrinks the codegen surface, so the flaky feature-codegen has less to get wrong.
+  const wantsDetBackend = process.env.VIBEHARD_DETERMINISTIC_BACKEND !== "0" && /supabase/i.test(arch.stack) && process.env.VIBEHARD_LANG !== "python";
   if (wantsDetBackend) {
     const model = coerceDataModel(arch.dataModel);
     if (model.entities.length) {
