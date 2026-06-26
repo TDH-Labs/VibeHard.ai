@@ -14,7 +14,7 @@ import { FileReviewerStore, makeReviewer, matchesPacket, parseSpecialties } from
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
 import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
-import { designBlock } from "./design/presets.ts";
+import { designBlock, pickDesignPreset } from "./design/presets.ts";
 import { scaffoldDesignSystem } from "./design/scaffold.ts";
 import { generateBackend } from "./backend/generate.ts";
 import { generateSeed } from "./backend/seed.ts";
@@ -295,7 +295,10 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // inherits a consistent, professional look. Python (FastAPI API) has no UI, so no design block.
   // Inject the FLEET learning store's codegen conventions (private; system-prompt only — never
   // shipped to the user). This is now the single source for what used to be hardcoded conventions.
-  let systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock()) + fleetBlock(arch.stack, "codegen");
+  // Auto-pick the design preset from the app's domain (warm/professional/bold/clean) unless the
+  // operator forced one with VIBEHARD_DESIGN — so it looks RIGHT without asking.
+  const designPresetKey = process.env.VIBEHARD_DESIGN ?? pickDesignPreset(arch.prd.spec);
+  let systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock(designPresetKey)) + fleetBlock(arch.stack, "codegen");
 
   // DETERMINISTIC BACKEND (opt-in via VIBEHARD_DETERMINISTIC_BACKEND while it's validated live): on a
   // Supabase stack, generate migrations/RLS/auth/clients from the structured data model BEFORE codegen
@@ -696,8 +699,8 @@ export async function main(argv: string[]): Promise<number> {
       scaffoldConfigs(target); // deterministic boilerplate (postcss/tailwind) — never LLM-generated
       // Deterministic design system: write the chosen preset's theme + globals so the look is
       // GUARANTEED premium, not left to the model (which diluted prompt-only presets to generic gray).
-      const ds = scaffoldDesignSystem(target);
-      if (ds.applied) console.log(`  ▸ scaffold: applied the "${ds.preset}" design system (themed tailwind + globals.css — premium by default)`);
+      const ds = scaffoldDesignSystem(target, process.env.VIBEHARD_DESIGN ?? pickDesignPreset(arch.prd.spec));
+      if (ds.applied) console.log(`  ▸ scaffold: applied the "${ds.preset}" design system (auto-picked from the app's domain — premium by default)`);
       writeFileSync(builtMarker, JSON.stringify({ at: new Date().toISOString() }));
     }
 
