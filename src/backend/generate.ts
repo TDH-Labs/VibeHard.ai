@@ -206,10 +206,17 @@ function policiesFor(e: Entity, model: DataModel): string[] {
   switch (e.access) {
     case "owner": {
       const pred = ownerPredicate(e, model);
-      if (pred) out.push(`create policy ${q(e.name + "_owner_all")} on ${t} for all using (${pred}) with check (${pred});`);
+      if (pred) {
+        out.push(`create policy ${q(e.name + "_owner_all")} on ${t} for all using (${pred}) with check (${pred});`);
+        // A tenant admin manages EVERYONE's rows in their tenant (e.g. staff see all members'
+        // memberships/payments) — but only when the row carries the tenant column, so the admin stays
+        // scoped to their own tenant. Permissive policy ⇒ Postgres ORs it with the owner policy above.
+        if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_admin_all")} on ${t} for all using (${tf} = auth_tenant_id() and auth_is_admin()) with check (${tf} = auth_tenant_id() and auth_is_admin());`);
+        break;
+      }
       // No ownership link → fall back to a scope that APPLIES: tenant isolation if the table has the
       // tenant column, else authenticated-only — never a policy that references a missing column.
-      else if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
+      if (tenantScoped && hasTenantCol) out.push(`create policy ${q(e.name + "_tenant_all")} on ${t} for all using (${tf} = auth_tenant_id()) with check (${tf} = auth_tenant_id());`);
       else out.push(`create policy ${q(e.name + "_auth_all")} on ${t} for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
       break;
     }
