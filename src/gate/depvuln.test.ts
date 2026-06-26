@@ -107,3 +107,34 @@ describe("depvuln disposition", () => {
     expect(verdictOf("depvuln", mediumOnly, ts).status).toBe("pass");
   });
 });
+
+import { scanGapFindings } from "./depvuln.ts";
+import { mkdtempSync as mkd, writeFileSync as wf, mkdirSync as md, rmSync as rmf } from "node:fs";
+import { tmpdir as td } from "node:os";
+import { join as pj } from "node:path";
+describe("depvuln — a no-lockfile scan is flagged incomplete, not a silent pass", () => {
+  const proj = (pkg: object, lock = false) => {
+    const d = mkd(pj(td(), "vibehard-depgap-"));
+    wf(pj(d, "package.json"), JSON.stringify(pkg));
+    if (lock) wf(pj(d, "package-lock.json"), "{}");
+    return d;
+  };
+  test("deps declared but no lockfile → a medium advisory finding", () => {
+    const d = proj({ dependencies: { next: "^15", react: "^18" } });
+    const f = scanGapFindings(d);
+    expect(f).toHaveLength(1);
+    expect(f[0]!.ruleId).toBe("depscan-incomplete");
+    expect(f[0]!.severity).toBe("medium"); // visible, non-blocking
+    rmf(d, { recursive: true, force: true });
+  });
+  test("a lockfile present → no advisory (the scan was complete)", () => {
+    const d = proj({ dependencies: { next: "^15" } }, true);
+    expect(scanGapFindings(d)).toHaveLength(0);
+    rmf(d, { recursive: true, force: true });
+  });
+  test("no deps declared → no advisory", () => {
+    const d = proj({});
+    expect(scanGapFindings(d)).toHaveLength(0);
+    rmf(d, { recursive: true, force: true });
+  });
+});
