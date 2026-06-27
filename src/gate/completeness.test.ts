@@ -113,4 +113,12 @@ export default async function Billing() {
     const dir = projectWith("app/billing/page.tsx", real);
     expect(looksImplemented("billing payment processing", dir)).toBe(true);
   });
+
+  test("audit3 M-3: a stub padded with a long STRING LITERAL does NOT vindicate", () => {
+    // length is faked with a big string literal containing the feature token + a fake `await`; after
+    // stripping string contents the real code is a one-liner → still reads as missing.
+    const padded = `const _pad = "${"billing payment processing await ".repeat(40)}";\nexport default function Billing() { return null; }\n`;
+    const dir = projectWith("app/billing/page.tsx", padded);
+    expect(looksImplemented("billing payment processing", dir)).toBe(false);
+  });
 });

@@ -41,8 +41,19 @@ const FEATURE_STOPWORDS = new Set([
  *  fixer from clearing a "missing" finding by dropping an empty file named for the feature (audit B2). */
 const IMPL_SIGNAL = /\bawait\b|\buseState\b|\buseEffect\b|onSubmit|<form|fetch\(|\.from\(|createClient|server-only|use server|export\s+async\s+function\s+(?:GET|POST|PUT|PATCH|DELETE)|<[A-Z][A-Za-z0-9]/;
 function substantive(code: string): boolean {
-  const stripped = code.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ").trim();
-  return stripped.length >= 200 && IMPL_SIGNAL.test(code); // real logic + real size, not a one-liner stub
+  // Strip comments AND string/template literals before measuring (audit3 M-3): a stub padded with a
+  // long string literal (`const _pad = "billing billing billing…"`) used to inflate the length past 200
+  // and vindicate. We also test the impl signal on the STRIPPED code so an `await`/`<form` hidden in a
+  // string or comment can't count as real behavior.
+  const stripped = code
+    .replace(/\/\/.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/`(?:\\.|[^`\\])*`/g, "``") // template literals → empty
+    .replace(/"(?:\\.|[^"\\])*"/g, '""') // double-quoted → empty
+    .replace(/'(?:\\.|[^'\\])*'/g, "''") // single-quoted → empty
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length >= 200 && IMPL_SIGNAL.test(stripped); // real logic + real size, not a padded stub
 }
 
 export function looksImplemented(feature: string, projectPath: string): boolean {

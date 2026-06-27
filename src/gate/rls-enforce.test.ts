@@ -95,6 +95,29 @@ describe("RLS enforcement harness — proves the database actually denies cross-
     expect(v.findings.some((f) => /access:"auth" but carries a tenant column/.test(f.message))).toBe(true);
   });
 
+  test("TEETH (audit3 M-5): an access:'auth' table with a per-user owner column (no tenant column) is caught", async () => {
+    const dir = project();
+    // Notification is access:"auth" with authUserId but NO tenant column → any authenticated user can
+    // read any other user's notifications. The C-2 probe only covered tenant-column tables; M-5 adds this.
+    const model = coerceDataModel({
+      tenantEntity: "Org",
+      membershipEntity: "Member",
+      tenantField: "orgId",
+      roleField: "role",
+      adminRole: "admin",
+      entities: [
+        { name: "Org", access: "tenant-admin", fields: [{ name: "name", type: "text" }] },
+        { name: "Member", access: "owner", fields: [{ name: "email", type: "text" }, { name: "orgId", type: "uuid", references: "Org" }] },
+        { name: "Notification", access: "auth", fields: [{ name: "body", type: "text" }, { name: "authUserId", type: "uuid" }] },
+      ],
+    });
+    generateBackend(dir, model);
+    const v = await runRlsEnforcement(dir, model);
+    expect(v.status).toBe("block");
+    expect(v.findings.some((f) => f.ruleId === "cross-tenant-read" && /Notification/.test(f.message))).toBe(true);
+    expect(v.findings.some((f) => /per-user owner column/.test(f.message))).toBe(true);
+  });
+
   test("fail-CLOSED: a harness/SQL error blocks (never a silent pass)", async () => {
     const dir = project();
     generateBackend(dir, MODEL);

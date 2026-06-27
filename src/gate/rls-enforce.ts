@@ -162,15 +162,24 @@ export async function runRlsEnforcement(projectPath: string, model: DataModel, o
     const hasTenantColumn = (e: Entity): boolean =>
       (!!model.tenantField && e.fields.some((f) => f.name === model.tenantField)) ||
       (!!model.tenantEntity && e.fields.some((f) => f.references === model.tenantEntity));
+    // M-5 (audit3): a per-user owner column the harness can seed to a known user (authUserId is the
+    // generator's standard owner column + is special-cased in insertRow). An access:"auth" table with
+    // one but NO tenant column is per-user data mislabeled as shared — any authed user reads any other's.
+    const hasOwnerColumn = (e: Entity): boolean => e.fields.some((f) => f.name === "authUserId" || f.name === e.ownerField);
 
     for (const e of model.entities) {
       if (e.access === "public") continue; // world-readable by design
       const idB = idFor(model, e, "B");
       const isolated = e.access === "owner" || e.access === "tenant" || e.access === "tenant-admin";
       const authTenantScoped = e.access === "auth" && hasTenantColumn(e);
-      const mislabel = authTenantScoped ? ` — "${e.name}" is access:"auth" but carries a tenant column; relabel it "tenant"/"owner" so RLS scopes rows to the caller's tenant` : "";
+      const authUserScoped = e.access === "auth" && !hasTenantColumn(e) && hasOwnerColumn(e);
+      const mislabel = authTenantScoped
+        ? ` — "${e.name}" is access:"auth" but carries a tenant column; relabel it "tenant"/"owner" so RLS scopes rows to the caller's tenant`
+        : authUserScoped
+          ? ` — "${e.name}" is access:"auth" but has a per-user owner column; any authenticated user can read another user's rows — use access:"owner"`
+          : "";
 
-      if (isolated || authTenantScoped) {
+      if (isolated || authTenantScoped || authUserScoped) {
         // READ: tenant A must not see tenant B's row.
         await become("authenticated", UA);
         if ((await scalar(`select count(*)::int as n from "${e.name}" where "id" = '${idB}'`)) > 0) findings.push(leak(e, "read", `tenant isolation FAILS: an authenticated user of tenant A can SELECT tenant B's "${e.name}" row.${mislabel}`));
