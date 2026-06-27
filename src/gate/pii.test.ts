@@ -33,6 +33,21 @@ describe("scanPii — precision (does NOT flag labels / non-PII)", () => {
   });
 });
 
+describe("scanPii — F6 (audit2): bracket access can't bypass detection", () => {
+  test("bracket access to a PII field in a log is flagged", () => {
+    expect(ids(`console.log(user["email"])`)).toContain("pii-in-logs");
+    expect(ids(`logger.info(row['ssn'])`)).toContain("pii-in-logs");
+  });
+
+  test("bracket access from req.query is flagged", () => {
+    expect(ids(`const e = req.query["email"];`)).toContain("pii-in-url");
+  });
+
+  test("bracket access to a NON-PII field is still ignored (precision held)", () => {
+    expect(ids(`console.log(obj["status"])`)).toEqual([]);
+  });
+});
+
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });

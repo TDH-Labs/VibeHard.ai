@@ -68,14 +68,29 @@ export interface MigrateOptions {
   apply?: (statementsInOrder: Array<{ file: string; sql: string }>) => Promise<{ file: string; error: string } | null>;
 }
 
+/** Per-statement wall-clock budget (audit2 D — build DoS via a pathological generated migration, e.g.
+ *  `generate_series(1,1e10)`). statement_timeout is set best-effort; the Promise.race is the backstop
+ *  that catches a runaway that yields to the event loop. NOTE: a fully CPU-bound pglite (WASM, single-
+ *  threaded) statement can't be preempted by either — the durable fix is a resource-capped subprocess;
+ *  this bounds the common cases. */
+const APPLY_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms (possible runaway migration)`)), ms)),
+  ]);
+}
+
 async function pgliteApplier(files: Array<{ file: string; sql: string }>): Promise<{ file: string; error: string } | null> {
   const { PGlite } = await import("@electric-sql/pglite");
   const db = new PGlite();
   try {
     await db.exec(SUPABASE_STUBS);
+    await db.exec(`set statement_timeout = '20s';`).catch(() => {}); // best-effort; pglite WASM may not honor it
     for (const { file, sql } of files) {
       try {
-        await db.exec(neutralize(sql));
+        await withTimeout(db.exec(neutralize(sql)), APPLY_TIMEOUT_MS, `applying ${file}`);
       } catch (e) {
         return { file, error: (String(e instanceof Error ? e.message : e).split("\n")[0] ?? "apply failed").slice(0, 300) };
       }
@@ -84,6 +99,19 @@ async function pgliteApplier(files: Array<{ file: string; sql: string }>): Promi
   } finally {
     await db.close();
   }
+}
+
+/** CREATE EXTENSION names referenced across the migration set. `neutralize` shims these so the
+ *  in-memory check passes — but the migration still DEPENDS on the extension being available on the
+ *  real Postgres, so we surface it (audit2 D — "silently neutralizes CREATE EXTENSION"). */
+export function extensionsIn(files: Array<{ file: string; sql: string }>): string[] {
+  const names = new Set<string>();
+  for (const { sql } of files) {
+    for (const m of sql.matchAll(/create\s+extension\s+(?:if\s+not\s+exists\s+)?"?([a-z0-9_-]+)"?/gi)) {
+      if (m[1]) names.add(m[1].toLowerCase());
+    }
+  }
+  return [...names].sort();
 }
 
 export async function runMigrate(projectPath: string, opts: MigrateOptions = {}): Promise<GateVerdict> {
@@ -97,9 +125,19 @@ export async function runMigrate(projectPath: string, opts: MigrateOptions = {})
     .map((f) => ({ file: join("supabase/migrations", f), sql: readFileSync(join(dir, f), "utf8") }));
   if (!files.length) return verdictOf("migrate", [], ranAt);
 
+  // Surface (don't silently neutralize) extensions the in-memory check shims — a medium advisory so
+  // the author confirms the extension is enabled on their real Supabase project (audit2 D).
+  const extAdvisory: Finding[] = extensionsIn(files).map((ext) => ({
+    tool: "migrate",
+    ruleId: "extension-shimmed",
+    severity: "medium",
+    file: "supabase/migrations",
+    message: `the migration uses \`create extension ${ext}\`, which is SHIMMED for the in-memory check (so a pglite pass doesn't guarantee real-Postgres behavior). Confirm \`${ext}\` is enabled on your Supabase project (Dashboard → Database → Extensions) before relying on it.`,
+  }));
+
   const applier = opts.apply ?? pgliteApplier;
   const failure = await applier(files);
-  if (!failure) return verdictOf("migrate", [], ranAt); // every migration applied to a real Postgres ✓
+  if (!failure) return verdictOf("migrate", extAdvisory, ranAt); // every migration applied to a real Postgres ✓ (+ any extension advisories)
 
   const finding: Finding = {
     tool: "migrate",
@@ -108,7 +146,7 @@ export async function runMigrate(projectPath: string, opts: MigrateOptions = {})
     file: failure.file,
     message: `This migration does NOT apply to a real Postgres: ${failure.error}. The other gates only read migrations as text — this one executes them. Fix the SQL so the schema actually builds (common causes: a CREATE POLICY "FOR" clause listing multiple commands instead of FOR ALL; a foreign key to a table created later; a function or policy that references a table defined further down; RLS recursion).`,
   };
-  return verdictOf("migrate", [finding], ranAt);
+  return verdictOf("migrate", [finding, ...extAdvisory], ranAt);
 }
 
 export const migrateGate = { name: "migrate", run: (p: string) => runMigrate(p) };

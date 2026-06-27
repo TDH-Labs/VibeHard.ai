@@ -143,10 +143,14 @@ function walkCode(root: string, exts: string[]): Array<{ rel: string; code: stri
   return out;
 }
 
-/** A hard-delete path exists if a migration has a `for delete` RLS policy, or the
- *  code has a DELETE handler / `.delete()` call / `DELETE FROM`. */
-function detectDeletePath(projectPath: string): boolean {
-  const re = /for\s+delete\b|\.delete\s*\(|delete\s+from\b|['"]DELETE['"]/i;
+/** A hard-delete path exists if a migration has a `for delete` RLS policy, or the code has a real
+ *  delete IMPLEMENTATION: a `.delete()` ORM/Supabase call, `DELETE FROM` SQL, or a server-side DELETE
+ *  route handler (Next `function DELETE`, Express/FastAPI `(app|router).delete(` → matched by
+ *  `.delete(`). F4 (audit2): the old `['"]DELETE['"]` branch matched a bare HTTP-method string (e.g.
+ *  `fetch(url,{method:"DELETE"})` or a comment), letting an app SATISFY the erasure control without
+ *  any actual delete capability — removed so the literal string can't game it. */
+export function detectDeletePath(projectPath: string): boolean {
+  const re = /for\s+delete\b|\.delete\s*\(|delete\s+from\b|\bfunction\s+DELETE\b|\bexport\s+(?:async\s+)?function\s+DELETE\b/i;
   return walkCode(projectPath, [".sql", ".ts", ".tsx", ".js", ".jsx"]).some(({ code }) => re.test(code));
 }
 

@@ -26,11 +26,12 @@ const SENSITIVE: readonly SensitiveClass[] = ["pii", "phi", "financial", "creden
 const PII = "email|ssn|social.?security|date.?of.?birth|dob|birth.?date|phone|passport|driver.?s?.?licen[sc]e|credit.?card|card.?number|cvv|cvc|bank.?account|routing.?number|tax.?id|national.?id|patient|diagnosis|medical.?record|health.?record|home.?address|street.?address|full.?name|password|passwd";
 const LOG = "(?:console\\.(?:log|info|warn|error|debug)|logger\\.\\w+|logging\\.\\w+|\\bprint)\\s*\\(";
 
-/** A log call that references a PII field by PROPERTY ACCESS (`user.email`) or INTERPOLATION
- *  (`${user.ssn}`) — not a quoted label. */
-const LOG_RE = new RegExp(`${LOG}.*?(?:\\.(?:${PII})|\\$\\{[^}]*\\b(?:${PII}))`, "i");
-/** PII read out of a URL / query string (Express/Next, Flask, Django, FastAPI). */
-const URL_RE = new RegExp(`(?:req\\.query\\.|\\.searchParams\\.get\\(\\s*['"\`]|\\.args\\.get\\(\\s*['"\`]|\\.GET\\.get\\(\\s*['"\`]|query_params\\.get\\(\\s*['"\`])(?:${PII})`, "i");
+/** A log call that references a PII field by PROPERTY ACCESS (`user.email`), BRACKET ACCESS
+ *  (`user["email"]`), or INTERPOLATION (`${user.ssn}`) — not a quoted label. F6 (audit2): the
+ *  bracket form was the bypass — `console.log(user["ssn"])` slipped past the dot-only matcher. */
+const LOG_RE = new RegExp(`${LOG}.*?(?:\\.(?:${PII})|\\[\\s*['"\`](?:${PII})|\\$\\{[^}]*\\b(?:${PII}))`, "i");
+/** PII read out of a URL / query string (Express/Next, Flask, Django, FastAPI), dot OR bracket access. */
+const URL_RE = new RegExp(`(?:req\\.query(?:\\.|\\[\\s*['"\`])|\\.searchParams\\.get\\(\\s*['"\`]|\\.args\\.get\\(\\s*['"\`]|\\.GET\\.get\\(\\s*['"\`]|query_params\\.get\\(\\s*['"\`])(?:${PII})`, "i");
 
 const finding = (ruleId: string, message: string, file: string): Finding => ({ tool: "pii", ruleId, severity: "high", file, message });
 

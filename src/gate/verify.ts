@@ -46,11 +46,13 @@ export function verifyRuns(rigor: Rigor | null): number {
   return rigor === "production" ? 5 : rigor === "prototype" ? 1 : 3;
 }
 
-/** A server is "up" if it answers with any 2xx or 3xx — it booted and is serving
- *  (a 3xx is the common "/ → /login" redirect of a server-rendered app). 4xx/5xx
- *  or no answer (0) mean it isn't serving. */
+/** A server is "up" if it answers with a 2xx — it booted and is actually SERVING a page (B4,
+ *  audit2). We previously accepted 3xx too, but `fetch` already FOLLOWS redirects, so a legitimate
+ *  "/ → /login" resolves to the final 200 here; a status that is STILL 3xx after following means a
+ *  broken/looping redirect that never lands on a served page — not healthy. 4xx/5xx or no answer (0)
+ *  also mean it isn't serving. */
 export function isUp(status: number): boolean {
-  return status >= 200 && status < 400;
+  return status >= 200 && status < 300;
 }
 
 /** One launch+probe outcome: the HTTP status observed (0 = never came up), plus a

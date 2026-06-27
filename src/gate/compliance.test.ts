@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { assessCompliance, type ComplianceInput } from "./compliance.ts";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { assessCompliance, detectDeletePath, type ComplianceInput } from "./compliance.ts";
 import { isBlocking, verdictOf } from "../types.ts";
 
 function input(over: Partial<ComplianceInput> = {}): ComplianceInput {
@@ -13,6 +16,32 @@ function input(over: Partial<ComplianceInput> = {}): ComplianceInput {
   };
 }
 const ruleIds = (i: ComplianceInput) => assessCompliance(i).map((f) => f.ruleId);
+
+describe("detectDeletePath — F4 (audit2): the literal 'DELETE' string can't fake a delete path", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const dir = (files: Record<string, string>): string => {
+    const d = mkdtempSync(join(tmpdir(), "dd-compl-"));
+    dirs.push(d);
+    for (const [name, content] of Object.entries(files)) {
+      mkdirSync(join(d, name, ".."), { recursive: true });
+      writeFileSync(join(d, name), content);
+    }
+    return d;
+  };
+
+  test("an HTTP-method string `method:\"DELETE\"` does NOT count as a hard-delete path", () => {
+    expect(detectDeletePath(dir({ "client.ts": `await fetch("/api/x", { method: "DELETE" });` }))).toBe(false);
+  });
+
+  test("a real `.delete()` / `delete from` / Next DELETE handler DOES count", () => {
+    expect(detectDeletePath(dir({ "a.ts": `await supabase.from("notes").delete().eq("id", id);` }))).toBe(true);
+    expect(detectDeletePath(dir({ "m.sql": `DELETE FROM notes WHERE id = $1;` }))).toBe(true);
+    expect(detectDeletePath(dir({ "route.ts": `export async function DELETE(req: Request) { /* ... */ }` }))).toBe(true);
+  });
+});
 
 describe("assessCompliance — §21 seven controls (verifiable BLOCK, judgment advisory)", () => {
   test("a non-sensitive app → no assessment at all (the gate is classification-driven)", () => {
