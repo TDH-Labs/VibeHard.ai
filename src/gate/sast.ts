@@ -88,6 +88,19 @@ export async function runSast(
  * pass. "Scanner didn't run" must never look like "scanned, clean" — the
  * false-PASS class (PROJECT_BRIEF §11 fail-closed invariant).
  */
+/** A semgrep `errors[]` entry that indicates the RULESET/CONFIG failed to load (vs. a single
+ *  unparseable target file). When p/default can't load, semgrep still emits valid JSON with an empty
+ *  `results` array — a clean-looking PASS over nothing (audit2 C5). */
+function isConfigError(e: unknown): boolean {
+  const o = e as { level?: string; type?: string; message?: string };
+  const text = `${o.type ?? ""} ${o.message ?? ""}`.toLowerCase();
+  return /config|ruleset|could not (load|find)|failed to (load|parse)[^.]*\b(rule|config)|no rules?\b|unable to (load|find)/.test(text);
+}
+
+function scanFailed(target: string, message: string): Finding {
+  return { tool: "semgrep", ruleId: "scan-failed", severity: "critical", file: target, message };
+}
+
 export function interpretSemgrep(
   stdout: string,
   exitCode: number,
@@ -103,15 +116,21 @@ export function interpretSemgrep(
   const ran =
     json !== null && typeof json === "object" && Array.isArray((json as { results?: unknown }).results);
   if (!ran) {
-    return [
-      {
-        tool: "semgrep",
-        ruleId: "scan-failed",
-        severity: "critical",
-        file: target,
-        message: `SAST scan did not run (exit ${exitCode}) — failing closed. ${stderr.trim().slice(0, 200)}`.trim(),
-      },
-    ];
+    return [scanFailed(target, `SAST scan did not run (exit ${exitCode}) — failing closed. ${stderr.trim().slice(0, 200)}`.trim())];
+  }
+  // C5 (audit2): a valid `results` array is NOT proof the scan was real. Inspect what semgrep itself
+  // reported — a config/ruleset load failure, or zero files actually scanned (when we already know
+  // authored source exists) means it scanned nothing meaningful → fail closed, never a vacuous pass.
+  const j = json as { errors?: unknown[]; paths?: { scanned?: unknown[] } };
+  const errors = Array.isArray(j.errors) ? j.errors : [];
+  const scanned = Array.isArray(j.paths?.scanned) ? (j.paths!.scanned as unknown[]) : null;
+  if (scanned !== null && scanned.length === 0) {
+    return [scanFailed(target, `SAST scanned 0 files (exit ${exitCode}) — the ruleset failed to load or every path was skipped; failing closed. ${stderr.trim().slice(0, 160)}`.trim())];
+  }
+  const fatal = errors.filter(isConfigError);
+  if (fatal.length) {
+    const detail = fatal.map((e) => String((e as { message?: string }).message ?? (e as { type?: string }).type ?? "config error")).join("; ");
+    return [scanFailed(target, `SAST ruleset/config failed to load (exit ${exitCode}) — failing closed: ${detail.slice(0, 200)}`)];
   }
   return parseSemgrep(json);
 }

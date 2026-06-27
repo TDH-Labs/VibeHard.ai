@@ -25,4 +25,10 @@ describe("B3 — n/a status: honest, non-blocking, never a vacuous pass", () => 
     const r = await runGate("/x", [naGate, blockGate]);
     expect(r.passed).toBe(false);
   });
+
+  test("audit2 B3: an ALL-n/a board is NOT a pass — nothing was verified, so don't ship vacuously", async () => {
+    const r = await runGate("/x", [naGate, { name: "classify2", run: async () => notApplicable("classify2", "t") }]);
+    expect(r.passed).toBe(false); // no block, but no substantive pass either → not deployable
+    expect(r.verdicts.every((v) => v.status === "n/a")).toBe(true);
+  });
 });

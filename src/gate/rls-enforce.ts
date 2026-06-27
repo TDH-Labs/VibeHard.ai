@@ -155,15 +155,24 @@ export async function runRlsEnforcement(projectPath: string, model: DataModel, o
       await db.exec(insertRow(model, e, "B", idFor(model, e, "B")));
     }
 
+    // C-2 (audit2): does this entity carry a tenant column? An `access:"auth"` table that does is
+    // tenant data mislabeled as "any authenticated user" — the generator emits a permissive
+    // `auth.uid() is not null` policy for it, which leaks ACROSS tenants. Probe those too.
+    const hasTenantColumn = (e: Entity): boolean =>
+      (!!model.tenantField && e.fields.some((f) => f.name === model.tenantField)) ||
+      (!!model.tenantEntity && e.fields.some((f) => f.references === model.tenantEntity));
+
     for (const e of model.entities) {
       if (e.access === "public") continue; // world-readable by design
       const idB = idFor(model, e, "B");
       const isolated = e.access === "owner" || e.access === "tenant" || e.access === "tenant-admin";
+      const authTenantScoped = e.access === "auth" && hasTenantColumn(e);
+      const mislabel = authTenantScoped ? ` — "${e.name}" is access:"auth" but carries a tenant column; relabel it "tenant"/"owner" so RLS scopes rows to the caller's tenant` : "";
 
-      if (isolated) {
+      if (isolated || authTenantScoped) {
         // READ: tenant A must not see tenant B's row.
         await become("authenticated", UA);
-        if ((await scalar(`select count(*)::int as n from "${e.name}" where "id" = '${idB}'`)) > 0) findings.push(leak(e, "read", `tenant isolation FAILS: an authenticated user of tenant A can SELECT tenant B's "${e.name}" row.`));
+        if ((await scalar(`select count(*)::int as n from "${e.name}" where "id" = '${idB}'`)) > 0) findings.push(leak(e, "read", `tenant isolation FAILS: an authenticated user of tenant A can SELECT tenant B's "${e.name}" row.${mislabel}`));
 
         // UPDATE / DELETE: rolled back so the probe is non-destructive even on a leak.
         await db.exec("begin");
@@ -178,7 +187,7 @@ export async function runRlsEnforcement(projectPath: string, model: DataModel, o
         await become("authenticated", UA);
         try {
           await db.query(insertRow(model, e, "B", crossId));
-          findings.push(leak(e, "insert", `WRITE isolation FAILS: tenant A can INSERT a row into tenant B's "${e.name}" (missing or too-weak WITH CHECK).`));
+          findings.push(leak(e, "insert", `WRITE isolation FAILS: tenant A can INSERT a row into tenant B's "${e.name}" (missing or too-weak WITH CHECK).${mislabel}`));
           await db.exec(`reset role; delete from "${e.name}" where "id" = '${crossId}';`); // clean up the leaked row
         } catch (err) {
           const m = String(err instanceof Error ? err.message : err);

@@ -375,4 +375,30 @@ describe("A5 — static gate hardening (tautologies, WITH CHECK, report-all)", (
     expect(ids).toContain("rls-policy-using-true");
     expect(ids).toContain("rls-policy-authenticated"); // not collapsed to the first match
   });
+
+  test("audit2 A5: the extended tautology spellings are all caught", () => {
+    for (const taut of ["2>1", "not false", "'t'::boolean", "1 is not null", "(select true) is not false", "true::boolean", "0 = 0"]) {
+      const f = parseRls([{ file: "m.sql", sql: created("notes", `create policy p on "notes" for all using (${taut}) with check (${taut});`) }]);
+      expect(f.some((x) => x.ruleId === "rls-policy-using-true")).toBe(true);
+    }
+  });
+
+  test("audit2 A5: a real scoped predicate is NOT mistaken for a tautology", () => {
+    const f = parseRls([{ file: "m.sql", sql: created("notes", `create policy p on "notes" for all using ("tenant_id" = auth_tenant_id()) with check ("tenant_id" = auth_tenant_id());`) }]);
+    expect(f.some((x) => x.ruleId === "rls-policy-using-true")).toBe(false);
+    expect(f.some((x) => x.ruleId === "rls-policy-check-true")).toBe(false);
+  });
+
+  test("audit2 C-2: `auth.uid() is not null` BLOCKS (high) when the project is multi-tenant", () => {
+    const sql = created("notes", `create policy p on "notes" for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
+    const f = parseRls([{ file: "m.sql", sql }], { multiTenant: true });
+    const authed = f.find((x) => x.ruleId === "rls-policy-authenticated");
+    expect(authed?.severity).toBe("high"); // blocking in a multi-tenant app
+  });
+
+  test("audit2 C-2: the same policy stays a MEDIUM warn for a single-tenant app", () => {
+    const sql = created("notes", `create policy p on "notes" for all using (auth.uid() is not null) with check (auth.uid() is not null);`);
+    const f = parseRls([{ file: "m.sql", sql }], { multiTenant: false });
+    expect(f.find((x) => x.ruleId === "rls-policy-authenticated")?.severity).toBe("medium");
+  });
 });
