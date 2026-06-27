@@ -234,7 +234,10 @@ function migrationAuthHelpers(model: DataModel): string {
     `create or replace function handle_new_user() returns trigger language plpgsql security definer set search_path = public, auth as $$`,
     declares,
     `begin`,
-    `  assigned_role := coalesce(nullif(new.raw_app_meta_data->>'role',''), ${lit(model.adminRole)});`,
+    // audit2: an invite that OMITS a role defaults to the LEAST-PRIVILEGE member role, never admin
+    // (the old admin default let an invite with no role silently grant tenant-admin). A self-service
+    // signup that creates its OWN tenant is promoted to admin in tenantBootstrap below.
+    `  assigned_role := coalesce(nullif(new.raw_app_meta_data->>'role',''), ${lit(model.memberRole)});`,
     ...tenantBootstrap,
     `  insert into ${m} (${memCols.map(q).join(", ")}) values (${memVals.join(", ")});`,
     `  return new;`,

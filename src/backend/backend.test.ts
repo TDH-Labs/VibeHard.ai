@@ -250,6 +250,7 @@ describe("C2 — adminRole can't inject SQL (value-position escaping)", () => {
       tenantField: "orgId",
       roleField: "role",
       adminRole: "ad'min", // a raw model (not via coerce) with a quote → the emitter must escape it
+      memberRole: "member",
       entities: [
         { name: "Org", access: "tenant-admin", fields: [{ name: "name", type: "text", nullable: false }] },
         { name: "Member", access: "owner", fields: [{ name: "orgId", type: "uuid", nullable: false, references: "Org" }] },

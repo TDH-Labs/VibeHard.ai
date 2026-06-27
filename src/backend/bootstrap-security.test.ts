@@ -75,4 +75,20 @@ describe("bootstrap trigger — client-supplied metadata can NEVER assign tenant
       await db.close();
     }
   });
+
+  test("audit2: an invite that OMITS the role joins as least-privilege member, NOT admin", async () => {
+    const db = await bootDb();
+    try {
+      // A server-side invite to tenant B with NO role specified — must NOT silently grant admin.
+      await db.exec(`insert into auth.users ("id", "email", "raw_user_meta_data", "raw_app_meta_data")
+        values ('d0000000-0000-4000-8000-000000000003', 'norole@ok.test',
+                '{}'::jsonb, '{"tenantId":"${TENANT_B}"}'::jsonb);`);
+      const row = await db.query<{ orgId: string; role: string }>(`select "orgId", "role" from "Member" where "authUserId" = 'd0000000-0000-4000-8000-000000000003'`);
+      expect(row.rows.length).toBe(1);
+      expect((row.rows[0] as { orgId: string; role: string }).orgId).toBe(TENANT_B);
+      expect((row.rows[0] as { orgId: string; role: string }).role).toBe("member"); // least-privilege default, not "admin"
+    } finally {
+      await db.close();
+    }
+  });
 });
