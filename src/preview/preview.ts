@@ -70,7 +70,7 @@ export async function runPreview(dir: string, opts: PreviewOptions = {}): Promis
   // 1) install if needed
   if (!existsSync(join(dir, "node_modules")) || installStale(dir)) {
     log("  ▸ installing dependencies…");
-    const inst = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], { cwd: dir, stdout: "inherit", stderr: "inherit" });
+    const inst = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: dir, stdout: "inherit", stderr: "inherit" });
     if (inst.exitCode !== 0) throw new Error("npm install failed");
   }
 

@@ -76,7 +76,9 @@ export function applyMissingDeps(workspacePath: string, packages: string[]): Mis
   const failed: string[] = [];
   if (!existsSync(join(workspacePath, "package.json"))) return { installed, failed: packages };
   for (const pkg of packages) {
-    const r = Bun.spawnSync(["npm", "install", pkg, "--no-audit", "--no-fund", "--save"], {
+    // --ignore-scripts (audit2 B-3): installing a missing/typosquatted dep must NOT run its
+    // postinstall on the build host (which carries the operator's env). Resolve + place only.
+    const r = Bun.spawnSync(["npm", "install", pkg, "--no-audit", "--no-fund", "--save", "--ignore-scripts"], {
       cwd: workspacePath,
       stdout: "pipe",
       stderr: "pipe",

@@ -52,6 +52,70 @@ describe("anti-tamper detection (pure)", () => {
   });
 });
 
+describe("anti-tamper — audit2 B-1 walk-arounds", () => {
+  test("deleting .vibehard/datamodel.json (disarms rls-enforce → n/a) is tampering", () => {
+    const dir = ws();
+    mkdirSync(join(dir, ".vibehard"), { recursive: true });
+    writeFileSync(join(dir, ".vibehard/datamodel.json"), `{"tables":[]}`);
+    const before = captureSurface(dir, []);
+    rmSync(join(dir, ".vibehard/datamodel.json"));
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/gate INPUT was DELETED/i);
+  });
+
+  test("disabling RLS in place (file kept) is tampering", () => {
+    const dir = ws();
+    const before = captureSurface(dir, []);
+    // keep the table + file, but strip the `enable row level security` line
+    writeFileSync(join(dir, "supabase/migrations/0001_init.sql"), `create table "notes" ("id" uuid primary key);\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/RLS was DISABLED/i);
+  });
+
+  test("removing a policy in place is tampering", () => {
+    const dir = ws();
+    writeFileSync(join(dir, "supabase/migrations/0001_init.sql"), `create table "notes" ("id" uuid primary key);\nalter table "notes" enable row level security;\ncreate policy p on "notes" for all using ("owner" = auth.uid());\n`);
+    const before = captureSurface(dir, []);
+    // keep table + RLS enable, drop the policy
+    writeFileSync(join(dir, "supabase/migrations/0001_init.sql"), `create table "notes" ("id" uuid primary key);\nalter table "notes" enable row level security;\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/policy was REMOVED/i);
+  });
+
+  test("dropping a .from('x') data access to hide a finding is tampering", () => {
+    const dir = ws();
+    writeFileSync(join(dir, "page.ts"), `export const load = () => supabase.from("secrets").select("*");\n`);
+    const before = captureSurface(dir, []);
+    writeFileSync(join(dir, "page.ts"), `export const load = () => ({});\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/data access was REMOVED/i);
+  });
+
+  test("gutting a flagged file to `export {}` is tampering", () => {
+    const dir = ws();
+    const flagged = "app/api/run/route.ts";
+    mkdirSync(join(dir, "app/api/run"), { recursive: true });
+    writeFileSync(join(dir, flagged), `export async function POST(req: Request) {\n  const body = await req.json();\n  return new Response(eval(body.code));\n}\n`);
+    const finding: Finding = { tool: "sast", ruleId: "dangerous-eval", severity: "critical", file: flagged, message: "eval of request body" };
+    const before = captureSurface(dir, [finding]);
+    writeFileSync(join(dir, flagged), `export {};\n`);
+    expect(tamperReason(before, captureSurface(dir, [finding]))).toMatch(/was GUTTED/i);
+  });
+
+  test("adding an @ts-ignore / eslint-disable suppression is tampering", () => {
+    const dir = ws();
+    writeFileSync(join(dir, "page.ts"), `export const x = 1;\n`);
+    const before = captureSurface(dir, []);
+    writeFileSync(join(dir, "page.ts"), `// @ts-ignore\nexport const x: number = "1" as any;\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/suppression directive was ADDED/i);
+  });
+
+  test("a genuine fix that ADDS a policy + grows the file is NOT tampering", () => {
+    const dir = ws();
+    writeFileSync(join(dir, "page.ts"), `export const load = () => supabase.from("notes").select("*");\n`);
+    const before = captureSurface(dir, []);
+    // strengthen: add a policy, keep table/RLS/query, no suppressions
+    writeFileSync(join(dir, "supabase/migrations/0001_init.sql"), `create table "notes" ("id" uuid primary key, "owner" uuid);\nalter table "notes" enable row level security;\ncreate policy p on "notes" for all using ("owner" = auth.uid()) with check ("owner" = auth.uid());\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toBeNull();
+  });
+});
+
 describe("autoFix — a fix that GREENS the gate by deleting the flagged file is rejected", () => {
   test("delete-to-pass → escalates (fixed:false), never accepts the gamed green", async () => {
     const dir = ws();

@@ -39,7 +39,34 @@ export interface SupabaseConnectResult {
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-/** Normalize a pasted URL: trim, strip a trailing slash, tolerate a missing scheme. */
+/**
+ * Allowlisted hostnames for the connector's server-side fetch (audit2 C-3 — SSRF). We `fetch` the
+ * pasted URL from the server, so an attacker who pastes `https://metadata.google.internal` or an
+ * internal IP turns this into a blind-SSRF status oracle from our network vantage. A real Supabase
+ * project is always `<ref>.supabase.co` (or `.supabase.in`); self-hosters can add their own suffix
+ * via VIBEHARD_SUPABASE_HOST_SUFFIXES (comma-separated, e.g. ".db.mycorp.com"). Default rejects
+ * everything else — and all IP literals — BEFORE any network call.
+ */
+const BUILTIN_SUPABASE_SUFFIXES = [".supabase.co", ".supabase.in"];
+function allowedSupabaseSuffixes(): string[] {
+  const extra = (process.env.VIBEHARD_SUPABASE_HOST_SUFFIXES ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.startsWith("."));
+  return [...BUILTIN_SUPABASE_SUFFIXES, ...extra];
+}
+
+/** True only for a public Supabase (or operator-allowlisted) hostname — never an IP literal. */
+export function isAllowedSupabaseHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (!h.includes(".")) return false; // bare host (e.g. "localhost") — reject
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return false; // IPv4 literal → no SSRF to internal ranges
+  if (h.includes(":") || h.startsWith("[")) return false; // IPv6 literal
+  return allowedSupabaseSuffixes().some((s) => h.endsWith(s));
+}
+
+/** Normalize a pasted URL: trim, strip a trailing slash, tolerate a missing scheme, ENFORCE the
+ *  Supabase host allowlist (C-3). Returns null on anything we won't fetch. */
 function normalizeUrl(raw: string): string | null {
   const t = raw.trim().replace(/\/+$/, "");
   if (!t) return null;
@@ -47,7 +74,7 @@ function normalizeUrl(raw: string): string | null {
   try {
     const u = new URL(withScheme);
     if (u.protocol !== "https:") return null; // keys must never travel over http
-    if (!u.hostname.includes(".")) return null;
+    if (!isAllowedSupabaseHost(u.hostname)) return null; // SSRF guard — reject before any fetch
     return `${u.protocol}//${u.hostname}`;
   } catch {
     return null;

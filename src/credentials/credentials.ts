@@ -107,11 +107,52 @@ export function requiredCredentialsForApp(dir: string): RequiredCredential[] {
   return [];
 }
 
+/**
+ * Operator/platform secrets that must NEVER be injected into a deployed TENANT app, regardless of
+ * what the app's .env.example declares (audit2 C-4). The app env is sourced from `process.env` on the
+ * build host, which carries the operator's deploy + master keys; a generated app that names any of
+ * these (by accident or adversarially) would otherwise receive the operator's real value.
+ *
+ * SCOPE — this set is deliberately ONLY pure platform-infrastructure tokens that no tenant app ever
+ * reads at its own runtime. We do NOT list keys a tenant legitimately provides under the same name
+ * (STRIPE_SECRET_KEY, OPENAI/ANTHROPIC_API_KEY, …): those share the env name with the operator's, so
+ * the merged build env can't tell them apart by name, and denying them would block the tenant's own
+ * keychain value. The durable fix for that collision is to source appEnv from the per-tenant keychain
+ * instead of process.env (tracked separately); this deny-set closes the unambiguous leak today.
+ */
+export const NEVER_INJECT = new Set<string>([
+  // deploy / host tokens (the tenant app never deploys itself)
+  "FLY_API_TOKEN",
+  "VERCEL_TOKEN",
+  "GITHUB_PAT",
+  "GITHUB_TOKEN",
+  // platform master + signing keys
+  "VIBEHARD_SECRETS_KEY",
+  "VIBEHARD_SENTINEL_SECRET",
+  // Supabase service-role (RLS bypass) + DB creds — also excluded by AUTO_PROVIDED, defense in depth
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_SERVICE_KEY",
+  "SUPABASE_JWT_SECRET",
+  "SUPABASE_DB_PASSWORD",
+  // Supabase management PAT (creates/destroys projects — platform-only)
+  "SUPABASE_ACCESS_TOKEN",
+  "SUPABASE_PAT",
+  // platform Stripe Connect identity (tenants connect their OWN account; this is the platform's ca_)
+  "STRIPE_CONNECT_CLIENT_ID",
+  // GitHub App (platform identity for git-live)
+  "GITHUB_APP_ID",
+  "GITHUB_APP_PRIVATE_KEY_PATH",
+  "GITHUB_APP_INSTALLATION_ID",
+  "GITHUB_WEBHOOK_SECRET",
+]);
+
 /** Collect the values the user actually provided for the required keys, from a source (e.g.
- *  process.env). Blank/missing values are skipped, so a half-filled set injects only what's set. */
+ *  process.env). Blank/missing values are skipped, so a half-filled set injects only what's set.
+ *  Platform/operator secrets (NEVER_INJECT) are refused even if the app declares them (C-4). */
 export function collectAppEnv(required: RequiredCredential[], source: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const c of required) {
+    if (NEVER_INJECT.has(c.key)) continue; // operator secret — never source it into a tenant app
     const v = source[c.key];
     if (v && v.trim()) out[c.key] = v;
   }
