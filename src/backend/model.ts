@@ -55,6 +55,9 @@ export interface DataModel {
   roleField: string;
   /** Role value that counts as admin. Default "admin". */
   adminRole: string;
+  /** Least-privilege role for an invited member when the invite omits a role. Default "member".
+   *  An omitted invite role must NEVER default to admin (audit2 — privilege-escalation footgun). */
+  memberRole: string;
   entities: Entity[];
 }
 
@@ -140,6 +143,8 @@ export function coerceDataModel(raw: unknown, warnings?: string[]): DataModel {
     // adminRole is a VALUE interpolated into emitted SQL — restrict to a safe charset (letters/digits/
     // space/_/-) so untrusted model JSON can't break out of a SQL string literal. Escaped again at emit.
     adminRole: (typeof o.adminRole === "string" ? o.adminRole.replace(/[^A-Za-z0-9 _-]/g, "").trim() : "") || "admin",
+    // memberRole: same charset discipline; the least-privilege default for an omitted invite role.
+    memberRole: (typeof o.memberRole === "string" ? o.memberRole.replace(/[^A-Za-z0-9 _-]/g, "").trim() : "") || "member",
     entities,
   };
 }
