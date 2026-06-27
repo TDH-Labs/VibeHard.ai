@@ -17,7 +17,7 @@ import { deployApp } from "./deploy-app.ts";
 import { FileRecordStore } from "./record.ts";
 import { LocalEncryptedSecretsStore } from "./secrets.ts";
 import { resolveDbUrl, SupabaseBackendProvider, type SupabaseEnv } from "./supabase.ts";
-import { SENTINEL_REL } from "../gate/index.ts";
+import { stampSentinel } from "../gate/index.ts";
 import type { SubstrateDeps } from "./orchestrator.ts";
 import type { HostProvider } from "./types.ts";
 
@@ -60,8 +60,7 @@ describe("LIVE e2e — deployApp provisions a real Supabase backend (fake host)"
       const ws = mkdtempSync(join(tmpdir(), "dd-e2e-"));
       const stateDir = mkdtempSync(join(tmpdir(), "dd-state-"));
       try {
-        mkdirSync(join(ws, ".gate"), { recursive: true });
-        writeFileSync(join(ws, SENTINEL_REL), "ok"); // gate-passed
+        await stampSentinel(ws, true); // gate-passed (HMAC-signed sentinel — audit3 M-4)
         const md = join(ws, "supabase", "migrations");
         mkdirSync(md, { recursive: true });
         writeFileSync(

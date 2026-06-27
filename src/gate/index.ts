@@ -5,7 +5,7 @@
  * of what produced it. The deploy verdict is deterministic with zero LLM in the
  * path (PROJECT_BRIEF.md §11 "Deploy verdict", §13).
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
@@ -37,11 +37,19 @@ export const FAST_GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";
 
-/** HMAC-sign a sentinel payload. Key = VIBEHARD_SENTINEL_SECRET (fail loudly in prod if absent).
+/** Per-process fallback when VIBEHARD_SENTINEL_SECRET is unset (CLI/dev/test). audit3 M-4: the old
+ *  fallback was a COMMITTED literal ("dev-sentinel-insecure"), a publicly-known key anyone could use to
+ *  forge a sentinel. A random per-process key removes that: stamp+verify within one process (the real
+ *  gate→deploy flow, and tests) still match, while a forged sentinel can't be signed by an attacker who
+ *  doesn't know the key. Cross-process without the env var fails verification → fail-CLOSED (deploy
+ *  blocked), never fail-open. Set VIBEHARD_SENTINEL_SECRET for stable cross-process verification. */
+const FALLBACK_SENTINEL_KEY = randomBytes(32).toString("hex");
+
+/** HMAC-sign a sentinel payload. Key = VIBEHARD_SENTINEL_SECRET, else a per-process random key.
  *  Message = "<projectPath>\n<timestamp>" so a sentinel is bound to exactly one project directory:
  *  copying it into a sibling workspace fails verification (C3 fix). */
 function sentinelMac(projectPath: string, timestamp: string): string {
-  const secret = process.env.VIBEHARD_SENTINEL_SECRET ?? "dev-sentinel-insecure";
+  const secret = process.env.VIBEHARD_SENTINEL_SECRET || FALLBACK_SENTINEL_KEY;
   return createHmac("sha256", secret).update(`${projectPath}\n${timestamp}`).digest("hex");
 }
 
