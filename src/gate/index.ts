@@ -9,7 +9,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
-import type { Gate, GateVerdict } from "../types.ts";
+import { verdictOf, type Gate, type GateVerdict } from "../types.ts";
 import { sastGate } from "./sast.ts";
 import { secretsGate } from "./secrets.ts";
 import { depvulnGate } from "./depvuln.ts";
@@ -72,7 +72,17 @@ export interface DeployResult extends PipelineResult {
 export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerdict?: (v: GateVerdict) => void): Promise<PipelineResult> {
   const verdicts: GateVerdict[] = [];
   for (const g of gates) {
-    const v = await g.run(projectPath);
+    let v: GateVerdict;
+    try {
+      v = await g.run(projectPath);
+    } catch (e) {
+      // C-5 (audit2) fail-closed: a gate that THROWS (e.g. Bun.spawnSync raises "Executable not found
+      // in $PATH" when docker/trivy/semgrep/gitleaks is missing — a throw, not a non-zero exit) must
+      // never escape the loop and crash the pipeline into an unverified state. Convert it to a BLOCKING
+      // verdict so the build is held, not silently shipped.
+      const message = `the ${g.name} gate crashed (${e instanceof Error ? e.message : String(e)}) — failing closed (§11): a gate that can't run must block, never pass`;
+      v = verdictOf(g.name, [{ tool: g.name, ruleId: "gate-crashed", severity: "critical", file: projectPath, message }], new Date().toISOString());
+    }
     onVerdict?.(v); // surface each gate's result the moment it lands (live per-gate progress)
     verdicts.push(v);
   }

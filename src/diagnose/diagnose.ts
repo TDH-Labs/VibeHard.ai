@@ -133,7 +133,9 @@ function buildCheck(dir: string): { ran: boolean; ok: boolean; findings: Finding
   }
   try {
     cpSync(dir, tmp, { recursive: true, filter: (src) => !DERIVED.has(relative(dir, src).split("/").pop() ?? "") });
-    const install = Bun.spawnSync(existsSync(join(tmp, "package-lock.json")) ? ["npm", "ci", "--no-audit", "--no-fund"] : ["npm", "install", "--no-audit", "--no-fund"], { cwd: tmp, stdout: "pipe", stderr: "pipe", timeout: 180_000 });
+    // --ignore-scripts (audit2 B-3): the diagnostic clean-room install of generated deps must not run
+    // their lifecycle scripts on the host.
+    const install = Bun.spawnSync(existsSync(join(tmp, "package-lock.json")) ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"] : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: tmp, stdout: "pipe", stderr: "pipe", timeout: 180_000 });
     if ((install.exitCode ?? 1) !== 0) {
       const log = `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`;
       const localized = parseBuildErrors(log, dir, "install-failed");

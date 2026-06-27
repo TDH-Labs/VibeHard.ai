@@ -63,4 +63,23 @@ describe("collectAppEnv", () => {
     const out = collectAppEnv(req, { STRIPE_SECRET_KEY: "sk_live_real", RESEND_API_KEY: "  ", GOOGLE_CLIENT_ID: "id123", SUPABASE_URL: "should-be-ignored" });
     expect(out).toEqual({ STRIPE_SECRET_KEY: "sk_live_real", GOOGLE_CLIENT_ID: "id123" });
   });
+
+  test("C-4 (audit2): a platform/operator token is NEVER injected even if the app declares it", () => {
+    // a generated (or adversarial) app whose .env.example names operator-only infra tokens
+    const req2 = requiredCredentials("FLY_API_TOKEN=\nVERCEL_TOKEN=\nVIBEHARD_SECRETS_KEY=\nGITHUB_WEBHOOK_SECRET=\nSTRIPE_SECRET_KEY=\nMY_APP_KEY=");
+    const out = collectAppEnv(req2, {
+      FLY_API_TOKEN: "operator-fly-token",
+      VERCEL_TOKEN: "operator-vercel-token",
+      VIBEHARD_SECRETS_KEY: "operator-master-key",
+      GITHUB_WEBHOOK_SECRET: "operator-webhook-secret",
+      STRIPE_SECRET_KEY: "tenant-own-stripe", // legitimately tenant-supplied → still injected
+      MY_APP_KEY: "app-value",
+    });
+    expect(out.FLY_API_TOKEN).toBeUndefined();
+    expect(out.VERCEL_TOKEN).toBeUndefined();
+    expect(out.VIBEHARD_SECRETS_KEY).toBeUndefined();
+    expect(out.GITHUB_WEBHOOK_SECRET).toBeUndefined();
+    expect(out.STRIPE_SECRET_KEY).toBe("tenant-own-stripe"); // not platform-infra → allowed
+    expect(out.MY_APP_KEY).toBe("app-value");
+  });
 });

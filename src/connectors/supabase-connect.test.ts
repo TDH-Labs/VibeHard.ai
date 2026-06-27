@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { validateSupabaseConnection, supabaseKeychainEntries, type SupabaseConnectInput } from "./supabase-connect.ts";
+import { validateSupabaseConnection, supabaseKeychainEntries, isAllowedSupabaseHost, type SupabaseConnectInput } from "./supabase-connect.ts";
 
 // A fake fetch that answers by (path, key) so we can simulate good/bad keys without a network.
 function fakeFetch(routes: Record<string, (key: string) => number>) {
@@ -71,6 +71,59 @@ describe("validateSupabaseConnection — proves keys against the live project", 
     const r = await validateSupabaseConnection({ ...good, url: "abcd.supabase.co/" }, liveProject);
     expect(r.ok).toBe(true);
     expect(r.ref).toBe("abcd");
+  });
+});
+
+describe("SSRF guard (audit2 C-3) — only public Supabase hosts are fetched", () => {
+  test("isAllowedSupabaseHost accepts Supabase hosts, rejects everything else + IP literals", () => {
+    for (const ok of ["abcd.supabase.co", "x-y-z.supabase.co", "proj.supabase.in"]) {
+      expect(isAllowedSupabaseHost(ok)).toBe(true);
+    }
+    for (const bad of [
+      "metadata.google.internal",
+      "169.254.169.254",
+      "127.0.0.1",
+      "10.0.0.5",
+      "localhost",
+      "evil.com",
+      "abcd.supabase.co.evil.com",
+      "[::1]",
+    ]) {
+      expect(isAllowedSupabaseHost(bad)).toBe(false);
+    }
+  });
+
+  test("an internal-metadata URL is rejected before ANY fetch", async () => {
+    let called = false;
+    const r = await validateSupabaseConnection({ ...good, url: "https://metadata.google.internal" }, async () => {
+      called = true;
+      return new Response("{}");
+    });
+    expect(r.ok).toBe(false);
+    expect(r.checks[0]!.name).toBe("url");
+    expect(called).toBe(false); // SSRF guard fired before the network call
+  });
+
+  test("an IP-literal URL is rejected before ANY fetch", async () => {
+    let called = false;
+    const r = await validateSupabaseConnection({ ...good, url: "https://169.254.169.254" }, async () => {
+      called = true;
+      return new Response("{}");
+    });
+    expect(r.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+
+  test("an operator-allowlisted suffix can be added via env (self-hosted escape hatch)", () => {
+    const prev = process.env.VIBEHARD_SUPABASE_HOST_SUFFIXES;
+    process.env.VIBEHARD_SUPABASE_HOST_SUFFIXES = ".db.mycorp.com";
+    try {
+      expect(isAllowedSupabaseHost("supabase.db.mycorp.com")).toBe(true);
+      expect(isAllowedSupabaseHost("evil.com")).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.VIBEHARD_SUPABASE_HOST_SUFFIXES;
+      else process.env.VIBEHARD_SUPABASE_HOST_SUFFIXES = prev;
+    }
   });
 });
 

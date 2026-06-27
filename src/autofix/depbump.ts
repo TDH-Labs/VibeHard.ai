@@ -147,7 +147,7 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
   if (!plan.bumped.length && !plan.majorBumped.length && !plan.overridden.length) return { ...plan, installExit: null };
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-  const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], {
+  const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
     cwd: workspacePath,
     stdout: "ignore",
     stderr: "ignore",
