@@ -57,8 +57,11 @@ export class LocalEncryptedSecretsStore implements SecretsStore {
       const iv = blob.subarray(SALT_LEN, SALT_LEN + IV_LEN);
       const tag = blob.subarray(SALT_LEN + IV_LEN, SALT_LEN + IV_LEN + TAG_LEN);
       const ct = blob.subarray(SALT_LEN + IV_LEN + TAG_LEN);
+      if (tag.length !== TAG_LEN) return null; // reject a truncated blob outright
       const key = scryptSync(this.passphrase, salt, 32);
-      const decipher = createDecipheriv("aes-256-gcm", key, iv);
+      // Pin the GCM auth-tag length (sast gcm-no-tag-length): without it Node accepts a shorter-than-
+      // expected tag, weakening the forgery bound. We always wrote a full 16-byte tag, so require it.
+      const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
       decipher.setAuthTag(tag);
       const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
       return JSON.parse(pt.toString("utf8")) as BackendSecrets;
