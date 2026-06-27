@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { builtinModules } from "node:module";
 import type { Finding } from "../types.ts";
+import { safeToolEnv } from "../gate/verify.ts";
 
 const BUILTINS = new Set<string>([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
 
@@ -80,6 +81,10 @@ export function applyMissingDeps(workspacePath: string, packages: string[]): Mis
     // postinstall on the build host (which carries the operator's env). Resolve + place only.
     const r = Bun.spawnSync(["npm", "install", pkg, "--no-audit", "--no-fund", "--save", "--ignore-scripts"], {
       cwd: workspacePath,
+      // audit3 M-1: scope the env — without this, npm inherits the FULL host process.env (FLY_API_TOKEN,
+      // VIBEHARD_SECRETS_KEY, …) right inside the live build pipeline. safeToolEnv passes only toolchain
+      // vars + the app's dummy keys (the same isolation the verify gate uses).
+      env: safeToolEnv(workspacePath),
       stdout: "pipe",
       stderr: "pipe",
       timeout: 120_000,

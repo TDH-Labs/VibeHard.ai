@@ -106,6 +106,39 @@ describe("anti-tamper — audit2 B-1 walk-arounds", () => {
     expect(tamperReason(before, captureSurface(dir, []))).toMatch(/suppression directive was ADDED/i);
   });
 
+  test("audit3 M-2: `as unknown as` double-cast and biome-ignore are counted as suppressions", () => {
+    const dir = ws();
+    writeFileSync(join(dir, "page.ts"), `export const x = 1;\n`);
+    const before = captureSurface(dir, []);
+    writeFileSync(join(dir, "page.ts"), `// biome-ignore lint: x\nexport const y = (z as unknown as number);\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/suppression directive was ADDED/i);
+  });
+
+  test("audit3 M-2: a suppression stashed in a hidden dir is still counted", () => {
+    const dir = ws();
+    const before = captureSurface(dir, []);
+    mkdirSync(join(dir, ".sneaky"), { recursive: true });
+    writeFileSync(join(dir, ".sneaky/x.ts"), `// @ts-nocheck\nexport const evil = 1;\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/suppression directive was ADDED/i);
+  });
+
+  test("audit3 HIGH-1: a new migration that DISABLES rls is tampering (enable count unchanged)", () => {
+    const dir = ws();
+    const before = captureSurface(dir, []);
+    // keep the original enable; add a NEW migration that turns RLS off
+    writeFileSync(join(dir, "supabase/migrations/0002_off.sql"), `alter table "notes" disable row level security;\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/RLS was DISABLED in a migration/i);
+  });
+
+  test("audit3 HIGH-1: ALTER POLICY weakened to a tautology is tampering (create-policy count unchanged)", () => {
+    const dir = ws();
+    writeFileSync(join(dir, "supabase/migrations/0001_init.sql"), `create table "notes" ("id" uuid primary key);\nalter table "notes" enable row level security;\ncreate policy p on "notes" for all using ("owner" = auth.uid());\n`);
+    const before = captureSurface(dir, []);
+    // do not drop the policy — WEAKEN it in place with an alter
+    writeFileSync(join(dir, "supabase/migrations/0002_weaken.sql"), `alter policy p on "notes" using (true);\n`);
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/WEAKENED to a tautology/i);
+  });
+
   test("a genuine fix that ADDS a policy + grows the file is NOT tampering", () => {
     const dir = ws();
     writeFileSync(join(dir, "page.ts"), `export const load = () => supabase.from("notes").select("*");\n`);

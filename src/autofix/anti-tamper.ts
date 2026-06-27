@@ -32,8 +32,15 @@ export interface ProtectedSurface {
   protectedInputs: string[];
   /** Count of `enable row level security` across migrations — a drop = RLS disabled to dodge a finding. */
   rlsEnableCount: number;
+  /** Count of `disable row level security` across migrations — an INCREASE = RLS turned off in a new
+   *  migration (the `enable` is still present, so rlsEnableCount wouldn't catch it). */
+  rlsDisableCount: number;
   /** Count of `create policy` across migrations — a drop = a policy removed in place. */
   policyCount: number;
+  /** Count of policy clauses (create OR alter) whose USING / WITH CHECK is a tautology — an INCREASE =
+   *  a policy weakened to "true" in place (e.g. `alter policy x using (true)`), which create/enable
+   *  counts can't see. */
+  weakPolicyCount: number;
   /** Distinct `.from("x")` table references in app source — a drop = a query removed to hide a finding. */
   tableRefs: string[];
   /** Meaningful (whitespace-stripped) byte length of each security-flagged file — a collapse = gutted. */
@@ -49,10 +56,19 @@ const KNOWN_SECURITY_FILES = ["middleware.ts", "app/api/auth/signin/route.ts", "
 /** Gate inputs the front-half persisted; deleting them makes the data-layer gates report `n/a` (no-op). */
 const PROTECTED_INPUTS = [".vibehard/datamodel.json", ".vibehard/spec.json"];
 
+/** Tautology spellings (lowercased SQL) — kept in sync with the rls gate's set. Used to detect a
+ *  policy weakened to a "true"-equivalent in a create OR alter statement (HIGH-1). */
+const TAUT = String.raw`(?:true(?:::bool(?:ean)?)?|'(?:t|true)'(?:::bool(?:ean)?)?|\d+\s*(?:=|<>|!=|>=|<=|>|<)\s*\d+|not\s+false|\(\s*select\s+true\s*\)(?:\s+is\s+not\s+false)?|(?:true|\d+|'(?:t|true)')\s+is\s+not\s+null|(?:true|\d+|null|'(?:t|true)')\s+is\s+not\s+false)`;
+const WEAK_POLICY_RE = new RegExp(String.raw`(?:create|alter)\s+policy[^;]*?(?:using|with\s+check)\s*\(\s*${TAUT}\s*\)`, "gs");
+
 const SOURCE_EXT = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
-const SKIP_DIRS = new Set(["node_modules", ".next", "dist", "build", ".git", ".vibehard", ".vercel", "out", "coverage", ".turbo"]);
-/** Suppression directives that silence a static check rather than resolve it. */
-const SUPPRESSION_RE = /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|nosemgrep|\bas\s+any\b/g;
+// Dirs never walked for source. audit3 M-2: we no longer skip ALL dotfiles wholesale (that let a fixer
+// stash suppressions in a `.hidden/` subtree) — only these known non-source dirs are skipped, so any
+// OTHER hidden dir IS scanned. .vibehard stays here (it's gate input, tracked via protectedInputs).
+const SKIP_DIRS = new Set(["node_modules", ".next", "dist", "build", ".git", ".vibehard", ".vercel", "out", "coverage", ".turbo", ".idea", ".vscode", ".cache", ".husky"]);
+/** Suppression directives that silence a static check rather than resolve it. audit3 M-2 adds the
+ *  `as unknown as T` double-cast and `biome-ignore`. */
+const SUPPRESSION_RE = /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|biome-ignore|nosemgrep|\bas\s+any\b|\bas\s+unknown\s+as\b/g;
 /** `.from("table")` / `.from('table')` data access in Supabase/SQL client code. */
 const FROM_RE = /\.from\(\s*['"`]([A-Za-z_][\w]*)['"`]/g;
 /** A flagged file is "gutted" if its meaningful body collapses below this fraction of its prior size … */
@@ -106,12 +122,10 @@ function walkSource(root: string): string[] {
       return;
     }
     for (const e of entries) {
-      if (e.name.startsWith(".") && e.name !== ".vibehard") {
-        // hidden dirs/files are skipped EXCEPT we never recurse .vibehard (handled as protectedInputs)
-        if (e.isDirectory()) continue;
-      }
       const full = join(dir, e.name);
       if (e.isDirectory()) {
+        // audit3 M-2: recurse into hidden dirs too (except the known non-source set) so a fixer can't
+        // stash suppressions in a `.hidden/` subtree the scanner ignores.
         if (!SKIP_DIRS.has(e.name)) visit(full);
       } else if (SOURCE_EXT.some((x) => e.name.endsWith(x))) {
         out.push(full);
@@ -163,7 +177,9 @@ export function captureSurface(root: string, blocking: Finding[]): ProtectedSurf
     flaggedFiles: flaggedFiles.sort(),
     protectedInputs: PROTECTED_INPUTS.filter((f) => existsSync(join(root, f))).sort(),
     rlsEnableCount: countMatches(sql, /enable row level security/g),
+    rlsDisableCount: countMatches(sql, /disable row level security/g),
     policyCount: countMatches(sql, /create policy/g),
+    weakPolicyCount: countMatches(sql, WEAK_POLICY_RE),
     tableRefs,
     flaggedSizes,
     suppressions,
@@ -190,6 +206,12 @@ export function tamperReason(before: ProtectedSurface, after: ProtectedSurface):
   // audit2 B-1: RLS disabled / a policy removed in place (file kept, construct gutted).
   if (after.rlsEnableCount < before.rlsEnableCount) return `RLS was DISABLED — 'enable row level security' count dropped ${before.rlsEnableCount}→${after.rlsEnableCount} (weakening isolation to clear a finding)`;
   if (after.policyCount < before.policyCount) return `an RLS policy was REMOVED — 'create policy' count dropped ${before.policyCount}→${after.policyCount}`;
+
+  // audit3 HIGH-1: the destructive SQL variants the counts above can't see — a `disable row level
+  // security` added in a NEW migration (enable still present), or a policy weakened to a tautology in
+  // place via `alter policy ... using (true)` (create-policy count unchanged).
+  if (after.rlsDisableCount > before.rlsDisableCount) return `RLS was DISABLED in a migration ('disable row level security' added: ${before.rlsDisableCount}→${after.rlsDisableCount}) — silently turning off tenant isolation`;
+  if (after.weakPolicyCount > before.weakPolicyCount) return `an RLS policy was WEAKENED to a tautology (a create/alter policy USING/WITH CHECK of 'true' or equivalent: ${before.weakPolicyCount}→${after.weakPolicyCount}) — opening cross-tenant access`;
 
   // audit2 B-1: a data access removed so its finding vanishes (table/file kept, query deleted).
   const goneRefs = before.tableRefs.filter((t) => !after.tableRefs.includes(t));
