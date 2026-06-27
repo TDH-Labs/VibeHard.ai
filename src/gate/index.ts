@@ -86,9 +86,13 @@ export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerd
     onVerdict?.(v); // surface each gate's result the moment it lands (live per-gate progress)
     verdicts.push(v);
   }
-  // A deploy is allowed when no gate BLOCKS. "n/a" (nothing to check) doesn't block, but it is reported
-  // distinctly so a vacuous no-op never reads as a verified pass (audit H4 / B3).
-  return { verdicts, passed: verdicts.every((v) => v.status === "pass" || v.status === "n/a") };
+  // A deploy is allowed when no gate BLOCKS *and* at least one gate did substantive work (status
+  // "pass"). B3 (audit2): an app where EVERY gate is "n/a" was never actually verified — nothing
+  // applied — so it must NOT stamp the sentinel and ship vacuously. "n/a" never blocks, but a board
+  // of all-n/a is not a pass.
+  const noBlocks = verdicts.every((v) => v.status === "pass" || v.status === "n/a");
+  const anySubstantive = verdicts.some((v) => v.status === "pass");
+  return { verdicts, passed: noBlocks && anySubstantive };
 }
 
 /**

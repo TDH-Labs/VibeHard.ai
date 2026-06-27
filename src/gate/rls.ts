@@ -79,8 +79,18 @@ export function rlsEnabledTables(sources: SqlSource[]): Set<string> {
 }
 
 /** A predicate that authorizes EVERY caller — `true` and its common tautology spellings. The literal
- *  `using (true)` was trivially evaded by `1=1` / `(select true)` (audit H2), so match those too. */
-const TAUTOLOGY = String.raw`(?:true|1\s*=\s*1|\(\s*select\s+true\s*\))`;
+ *  `using (true)` was trivially evaded by `1=1` / `(select true)` (audit H2), and audit2 A5 added the
+ *  `2>1` / `not false` / `'t'::boolean` / `1 is not null` / `(select true) is not false` family — all
+ *  caught here so a one-character respelling can't slip a world-readable policy past the gate. */
+const TAUTOLOGY = String.raw`(?:` +
+  String.raw`true(?:::bool(?:ean)?)?` + // true, true::bool, true::boolean
+  String.raw`|'(?:t|true)'(?:::bool(?:ean)?)?` + // 't', 'true', 't'::boolean
+  String.raw`|\d+\s*(?:=|<>|!=|>=|<=|>|<)\s*\d+` + // constant comparison: 1=1, 2>1, 0<1, …
+  String.raw`|not\s+false` + // not false
+  String.raw`|\(\s*select\s+true\s*\)(?:\s+is\s+not\s+false)?` + // (select true), (select true) is not false
+  String.raw`|(?:true|\d+|'(?:t|true)')\s+is\s+not\s+null` + // a non-null constant is never null
+  String.raw`|(?:true|\d+|null|'(?:t|true)')\s+is\s+not\s+false` + // … is not false
+  String.raw`)`;
 
 /** Tables whose USING clause is a tautology (authorizes every caller → world-readable). */
 function permissiveTables(sources: SqlSource[]): Set<string> {
@@ -144,7 +154,7 @@ export function createdTables(sources: SqlSource[]): Set<string> {
  * security` → CRITICAL (its REST API is open); a `using (true)` policy → HIGH
  * (authorizes every caller). Each table reported once, attributed to its create.
  */
-export function parseRls(sources: SqlSource[]): Finding[] {
+export function parseRls(sources: SqlSource[], opts: { multiTenant?: boolean } = {}): Finding[] {
   const rlsOn = rlsEnabledTables(sources);
   const permissive = permissiveTables(sources);
   const broadWriteCheck = broadWriteCheckTables(sources);
@@ -168,7 +178,16 @@ export function parseRls(sources: SqlSource[]): Finding[] {
       }
       if (permissive.has(table)) findings.push({ tool: "rls", ruleId: "rls-policy-using-true", severity: "high", file: src.file, line, message: `RLS read policy is a tautology (\`using (true)\` / \`1=1\`) on public.${table} — authorizes every caller, leaks all rows` });
       if (broadWriteCheck.has(table)) findings.push({ tool: "rls", ruleId: "rls-policy-check-true", severity: "high", file: src.file, line, message: `RLS WITH CHECK is a tautology on public.${table} — reads may be scoped, but ANY caller can INSERT/UPDATE rows into another tenant (cross-tenant write)` });
-      if (broadAuthed.has(table)) findings.push({ tool: "rls", ruleId: "rls-policy-authenticated", severity: "medium", file: src.file, line, message: `RLS policy on public.${table} authorizes any authenticated user (auth.uid() is not null) — every logged-in user can read all rows; confirm this table is shared, not per-tenant (the rls-enforce gate proves cross-tenant isolation when a data model is present)` });
+      if (broadAuthed.has(table)) {
+        // C-2 (audit2): "any authenticated user" is a WARN for a single-tenant app, but in a
+        // multi-tenant one it's a cross-tenant leak (every logged-in user of every tenant reads
+        // every row) → escalate to blocking when the project declares a tenant/membership model.
+        const sev: Finding["severity"] = opts.multiTenant ? "high" : "medium";
+        const message = opts.multiTenant
+          ? `RLS policy on public.${table} authorizes ANY authenticated user (auth.uid() is not null) in a MULTI-TENANT app — every logged-in user of every tenant can read all rows (cross-tenant leak). Scope the policy to the caller's tenant/owner, not merely "logged in".`
+          : `RLS policy on public.${table} authorizes any authenticated user (auth.uid() is not null) — every logged-in user can read all rows; confirm this table is shared, not per-tenant (the rls-enforce gate proves cross-tenant isolation when a data model is present)`;
+        findings.push({ tool: "rls", ruleId: "rls-policy-authenticated", severity: sev, file: src.file, line, message });
+      }
     }
   }
   return findings;
@@ -318,6 +337,20 @@ export async function readAppSources(projectPath: string): Promise<CodeSource[]>
   return out;
 }
 
+/** C-2 (audit2): is this a multi-tenant project? The generator persists a data model; a
+ *  membership or tenant entity means "any authenticated user" policies leak across tenants, so the
+ *  static gate escalates that finding to blocking. No model (hand-written app) → treat as single-tenant. */
+export function isMultiTenantProject(projectPath: string): boolean {
+  const p = join(projectPath, ".vibehard", "datamodel.json");
+  if (!existsSync(p)) return false;
+  try {
+    const m = JSON.parse(readFileSync(p, "utf8")) as { membershipEntity?: unknown; tenantEntity?: unknown };
+    return Boolean(m.membershipEntity || m.tenantEntity);
+  } catch {
+    return false;
+  }
+}
+
 /** Does package.json declare a dependency on the Supabase client? */
 export function pkgUsesSupabase(projectPath: string): boolean {
   const p = join(projectPath, "package.json");
@@ -343,7 +376,7 @@ export async function runRls(
   const appSources = await readAppSources(projectPath);
   const usage = detectSupabaseUsage(appSources, pkgUsesSupabase(projectPath));
   const findings = [
-    ...parseRls(sources),
+    ...parseRls(sources, { multiTenant: isMultiTenantProject(projectPath) }),
     ...parseRlsCoverage(usage, rlsEnabledTables(sources), createdTables(sources)),
     ...(usage.usesSupabase ? parseServiceKeyUsage(appSources) : []),
   ];

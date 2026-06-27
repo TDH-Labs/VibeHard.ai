@@ -83,4 +83,24 @@ describe("interpretSemgrep — fail CLOSED on a scan that didn't run", () => {
       expect(f[0]).toMatchObject({ tool: "semgrep", ruleId: "scan-failed", severity: "critical" });
     }
   });
+
+  test("audit2 C5: a config/ruleset load error → scan-failed even with a valid (empty) results array", () => {
+    const out = JSON.stringify({ results: [], errors: [{ level: "error", type: "ConfigError", message: "could not load config p/default" }], paths: { scanned: ["a.ts"] } });
+    const f = interpretSemgrep(out, 7, "", "/proj");
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ ruleId: "scan-failed", severity: "critical" });
+    expect(f[0]!.message).toMatch(/ruleset\/config failed to load/i);
+  });
+
+  test("audit2 C5: zero files scanned → scan-failed (the scan didn't really run)", () => {
+    const out = JSON.stringify({ results: [], errors: [], paths: { scanned: [] } });
+    const f = interpretSemgrep(out, 0, "", "/proj");
+    expect(f[0]).toMatchObject({ ruleId: "scan-failed", severity: "critical" });
+    expect(f[0]!.message).toMatch(/scanned 0 files/i);
+  });
+
+  test("audit2 C5: a real scan (files scanned, no config error) still passes clean", () => {
+    const out = JSON.stringify({ results: [], errors: [], paths: { scanned: ["a.ts", "b.ts"] } });
+    expect(interpretSemgrep(out, 0, "", "/proj")).toEqual([]);
+  });
 });
