@@ -33,20 +33,11 @@ Rules:
 
 Return ONLY JSON: { "id": kebab-case-slug, "rule": string, "phase": "planning"|"codegen"|"both" }`;
 
-/** Build-error text + file paths are UNTRUSTED — they originate from generated (prompt-influenced)
- *  app code, so a build error can carry prompt-injection aimed at the induction LLM (audit2 — fleet
- *  induction injection). Neutralize obvious instruction cues, strip control chars + code fences that
- *  could escape our delimiter, and bound length. The proposal is still human-gated downstream, but we
- *  keep the injection out of the model's context to begin with. Pure → unit-tested. */
-const INJECTION_RE = /\b(?:ignore|disregard|forget)\b[^\n]*\b(?:previous|prior|above|earlier|all)\b[^\n]*\b(?:instruction|prompt|rule)s?\b|^\s*(?:system|assistant|developer)\s*:|\byou are (?:now|a)\b|\bnew instructions?\b/gim;
-export function sanitizeUntrusted(s: string, max = 600): string {
-  return (s ?? "")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ") // control chars (keep tab/newline)
-    .replace(/`{3,}/g, "``") // neutralize code fences that could break our <<<>>> delimiter
-    .replace(INJECTION_RE, "[redacted-injection]")
-    .slice(0, max)
-    .trim();
-}
+// Build-error text + file paths are UNTRUSTED (generated, prompt-influenced) -- sanitize before they
+// reach the induction LLM. The matcher lives in ./sanitize.ts (shared with the codegen render path so
+// an approved rule is scrubbed too -- audit3 HIGH-2). Re-exported for the unit tests.
+import { sanitizeUntrusted } from "./sanitize.ts";
+export { sanitizeUntrusted };
 
 function renderCandidate(c: Candidate): string {
   const evidence = (c.resolutions ?? [])

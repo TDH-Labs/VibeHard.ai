@@ -18,6 +18,7 @@
  * fleet learning and the self-correction loops that drift/reward-hack — see ACMECARE_HARDENING.)
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { sanitizeUntrusted } from "./sanitize.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -103,7 +104,10 @@ export function fleetBlock(rawStack?: string, phase: Phase = "codegen"): string 
     return p === phase || p === "both";
   });
   if (!cs.length) return "";
-  return ["", "<learned_conventions>", "  Conventions VibeHard has LEARNED from prior builds (each cleared a gate, validated across builds). Follow them exactly:", ...cs.map((c, i) => `  ${i + 1}. ${c.rule}`), "</learned_conventions>"].join("\n");
+  // audit3 HIGH-2: scrub each rule again at render time. A convention is human-approved, but the rule
+  // text traces back to untrusted build output — sanitizing here means an injection that slipped through
+  // induction can't reach the codegen system prompt verbatim.
+  return ["", "<learned_conventions>", "  Conventions VibeHard has LEARNED from prior builds (each cleared a gate, validated across builds). Follow them exactly:", ...cs.map((c, i) => `  ${i + 1}. ${sanitizeUntrusted(c.rule, 400)}`), "</learned_conventions>"].join("\n");
 }
 
 /** Record a gate-failure signal from a build — the learning INPUT. Idempotent per build is the
