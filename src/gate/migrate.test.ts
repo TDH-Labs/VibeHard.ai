@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runMigrate } from "./migrate.ts";
+import { runMigrate, extensionsIn } from "./migrate.ts";
 
 const tmps: string[] = [];
 afterEach(() => {
@@ -60,7 +60,9 @@ CREATE POLICY "own" ON "Staff" FOR ALL USING ("authUserId" = auth.uid());`,
       }),
     );
     expect(v.status).toBe("pass");
-    expect(v.findings).toHaveLength(0);
+    // The only finding is the non-blocking extension advisory (audit2 D — uuid-ossp is shimmed + surfaced).
+    expect(v.findings.filter((f) => f.severity === "high" || f.severity === "critical")).toHaveLength(0);
+    expect(v.findings.every((f) => f.ruleId === "extension-shimmed")).toBe(true);
   });
 
   test("applies multiple migrations IN ORDER (later file depends on earlier)", async () => {
@@ -83,5 +85,23 @@ CREATE POLICY "own" ON "Staff" FOR ALL USING ("authUserId" = auth.uid());`,
     });
     expect(v.status).toBe("block");
     expect(v.findings[0]!.message).toContain("boom");
+  });
+
+  test("audit2 D: extensionsIn lists every CREATE EXTENSION name", () => {
+    const names = extensionsIn([
+      { file: "a.sql", sql: `create extension if not exists "pgcrypto";\ncreate extension citext;` },
+      { file: "b.sql", sql: `CREATE EXTENSION vector;` },
+    ]);
+    expect(names).toEqual(["citext", "pgcrypto", "vector"]);
+  });
+
+  test("audit2 D: a shimmed extension is SURFACED as a non-blocking advisory (not silently dropped)", async () => {
+    const v = await runMigrate(ws({ "001.sql": `create extension if not exists pg_trgm;\ncreate table "t" (id uuid primary key);` }), {
+      apply: async () => null, // applies clean
+    });
+    expect(v.status).toBe("pass"); // advisory is medium → does not block
+    const ext = v.findings.find((f) => f.ruleId === "extension-shimmed");
+    expect(ext?.severity).toBe("medium");
+    expect(ext?.message).toMatch(/pg_trgm/);
   });
 });

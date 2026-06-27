@@ -98,13 +98,18 @@ describe("summarizeVerify (pure)", () => {
     expect(summarizeVerify(runs, 3)).toHaveLength(1);
   });
 
-  test("a server that redirects / → /login (3xx) counts as up (no false block)", () => {
+  test("audit2 B4: a healthy / → /login resolves to 200 (fetch follows redirects) and passes", () => {
+    // In production the probe's `fetch` follows the redirect, so a healthy redirecting app records 200.
+    expect(summarizeVerify([{ run: 1, status: 200 }, { run: 2, status: 200 }, { run: 3, status: 200 }], 3)).toEqual([]);
+  });
+
+  test("audit2 B4: a status still 3xx after following (broken/looping redirect) is NOT up → blocks", () => {
     const runs = [
       { run: 1, status: 302 },
-      { run: 2, status: 200 },
+      { run: 2, status: 302 },
       { run: 3, status: 302 },
     ];
-    expect(summarizeVerify(runs, 3)).toEqual([]);
+    expect(summarizeVerify(runs, 3).length).toBeGreaterThan(0);
   });
 
   test("a boot crash is surfaced in the finding message (actionable for auto-fix)", () => {
@@ -144,9 +149,9 @@ describe("summarizeShutdown — §18 graceful shutdown (advisory)", () => {
 });
 
 describe("isUp (pure probe predicate)", () => {
-  test("2xx and 3xx are up; 4xx/5xx and 0 are not", () => {
-    for (const s of [200, 201, 204, 301, 302, 308, 399]) expect(isUp(s)).toBe(true);
-    for (const s of [0, 400, 401, 404, 500, 503]) expect(isUp(s)).toBe(false);
+  test("audit2 B4: only 2xx is up; a leftover 3xx (broken/looping redirect) and 4xx/5xx/0 are not", () => {
+    for (const s of [200, 201, 204, 299]) expect(isUp(s)).toBe(true);
+    for (const s of [0, 301, 302, 308, 399, 400, 401, 404, 500, 503]) expect(isUp(s)).toBe(false);
   });
 });
 

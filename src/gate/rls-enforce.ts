@@ -146,6 +146,7 @@ export async function runRlsEnforcement(projectPath: string, model: DataModel, o
 
   try {
     await db.exec(SUPABASE_STUBS);
+    await db.exec(`set statement_timeout = '20s';`).catch(() => {}); // best-effort build-DoS guard (audit2 D)
     for (const sql of migs) await db.exec(neutralize(sql));
     // Replicate Supabase's default grants so RLS — not a missing GRANT — is the ONLY access control.
     await db.exec(`grant usage on schema public to anon, authenticated; grant select, insert, update, delete on all tables in schema public to anon, authenticated;`);
