@@ -5,6 +5,8 @@
  * of what produced it. The deploy verdict is deterministic with zero LLM in the
  * path (PROJECT_BRIEF.md §11 "Deploy verdict", §13).
  */
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
 import type { Gate, GateVerdict } from "../types.ts";
@@ -34,6 +36,28 @@ export const FAST_GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, 
 
 /** Relative path of the "all gates passed" sentinel within a project. */
 export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";
+
+/** HMAC-sign a sentinel payload. Key = VIBEHARD_SENTINEL_SECRET (fail loudly in prod if absent).
+ *  Message = "<projectPath>\n<timestamp>" so a sentinel is bound to exactly one project directory:
+ *  copying it into a sibling workspace fails verification (C3 fix). */
+function sentinelMac(projectPath: string, timestamp: string): string {
+  const secret = process.env.VIBEHARD_SENTINEL_SECRET ?? "dev-sentinel-insecure";
+  return createHmac("sha256", secret).update(`${projectPath}\n${timestamp}`).digest("hex");
+}
+
+/** Verify the sentinel's HMAC. Fails closed: any missing/malformed/wrong-key content → false. */
+export function verifySentinel(projectPath: string): boolean {
+  const sentinelPath = join(projectPath, SENTINEL_REL);
+  if (!existsSync(sentinelPath)) return false;
+  try {
+    const [timestamp, mac] = readFileSync(sentinelPath, "utf8").trim().split("\n");
+    if (!timestamp || !mac) return false;
+    const expected = sentinelMac(projectPath, timestamp);
+    return timingSafeEqual(Buffer.from(mac, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false; // fail-closed: bad read / wrong length / corrupted → deny
+  }
+}
 
 export interface PipelineResult {
   verdicts: GateVerdict[];
@@ -65,7 +89,9 @@ export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerd
 export async function stampSentinel(projectPath: string, passed: boolean): Promise<string | null> {
   const sentinel = join(projectPath, SENTINEL_REL);
   if (passed) {
-    await Bun.write(sentinel, `${new Date().toISOString()}\n`);
+    const ts = new Date().toISOString();
+    const mac = sentinelMac(projectPath, ts);
+    await Bun.write(sentinel, `${ts}\n${mac}\n`);
     return sentinel;
   }
   await rm(sentinel, { force: true });

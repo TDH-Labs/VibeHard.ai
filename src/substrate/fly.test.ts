@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FlyHostProvider, renderFlyToml } from "./fly.ts";
+import { FlyHostProvider, isPublicEnvVar, partitionEnv, renderFlyToml } from "./fly.ts";
 import type { CommandResult, CommandRunner } from "./vercel.ts";
 
 // Snapshot fly.toml AT each command call — the provider writes it for the duration of the deploy
@@ -108,6 +108,64 @@ describe("FlyHostProvider.deploy", () => {
 
   test("missing token → throws before touching anything", async () => {
     await expect(new FlyHostProvider({ token: "", runner: capturingRunner().runner }).deploy("/nope", {}, null)).rejects.toThrow(/FLY_API_TOKEN/);
+  });
+});
+
+describe("partitionEnv / isPublicEnvVar — HIGH-6: third-party secrets must not appear in plaintext fly.toml", () => {
+  test("NEXT_PUBLIC_* and VITE_* are public (intentionally in browser bundle)", () => {
+    expect(isPublicEnvVar("NEXT_PUBLIC_SUPABASE_URL")).toBe(true);
+    expect(isPublicEnvVar("VITE_STRIPE_PK")).toBe(true);
+  });
+
+  test("SUPABASE_URL and SUPABASE_ANON_KEY are public", () => {
+    expect(isPublicEnvVar("SUPABASE_URL")).toBe(true);
+    expect(isPublicEnvVar("SUPABASE_ANON_KEY")).toBe(true);
+  });
+
+  test("STRIPE_SECRET_KEY and API tokens are secrets (never in [env])", () => {
+    expect(isPublicEnvVar("STRIPE_SECRET_KEY")).toBe(false);
+    expect(isPublicEnvVar("STRIPE_WEBHOOK_SECRET")).toBe(false);
+    expect(isPublicEnvVar("FLY_API_TOKEN")).toBe(false);
+    expect(isPublicEnvVar("OPENAI_API_KEY")).toBe(false);
+    expect(isPublicEnvVar("SUPABASE_SERVICE_ROLE_KEY")).toBe(false);
+  });
+
+  test("partitionEnv splits correctly", () => {
+    const env = {
+      SUPABASE_URL: "https://x.supabase.co",
+      SUPABASE_ANON_KEY: "anon",
+      NEXT_PUBLIC_SUPABASE_URL: "https://x.supabase.co",
+      STRIPE_SECRET_KEY: "sk_live_secret",
+      STRIPE_WEBHOOK_SECRET: "whsec_secret",
+    };
+    const { publicEnv, secretEnv } = partitionEnv(env);
+    expect(Object.keys(publicEnv)).toEqual(expect.arrayContaining(["SUPABASE_URL", "SUPABASE_ANON_KEY", "NEXT_PUBLIC_SUPABASE_URL"]));
+    expect(Object.keys(publicEnv)).not.toContain("STRIPE_SECRET_KEY");
+    expect(Object.keys(publicEnv)).not.toContain("STRIPE_WEBHOOK_SECRET");
+    expect(secretEnv.STRIPE_SECRET_KEY).toBe("sk_live_secret");
+    expect(secretEnv.STRIPE_WEBHOOK_SECRET).toBe("whsec_secret");
+    expect(secretEnv.SUPABASE_URL).toBeUndefined();
+  });
+
+  test("FlyHostProvider.deploy sends secrets via fly secrets set, NOT in fly.toml", async () => {
+    const dir = workspaceWithDockerfile();
+    try {
+      const { runner, calls } = capturingRunner();
+      await new FlyHostProvider({ token: "t", runner }).deploy(
+        dir,
+        { SUPABASE_URL: "u", SUPABASE_ANON_KEY: "a", STRIPE_SECRET_KEY: "sk_live_secret" },
+        null,
+      );
+      const deployCall = calls.find((c) => c.cmd.includes("deploy"))!;
+      // Secret must NOT appear in fly.toml [env]
+      expect(deployCall.flyToml ?? "").not.toContain("sk_live_secret");
+      // Secret MUST be set via fly secrets set
+      const secretsCall = calls.find((c) => c.cmd.includes("secrets") && c.cmd.includes("set"));
+      expect(secretsCall).toBeDefined();
+      expect(secretsCall!.cmd.join(" ")).toContain("STRIPE_SECRET_KEY=sk_live_secret");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

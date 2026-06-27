@@ -307,7 +307,7 @@ export function installStale(projectPath: string): boolean {
 function ensureInstalled(projectPath: string, env: Record<string, string | undefined>): BuildOutcome | null {
   const pkg = readPkg(projectPath);
   if (!pkg || !hasDeps(pkg) || !installStale(projectPath)) return null;
-  const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund"], {
+  const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
     cwd: projectPath,
     env,
     stdout: "pipe",
@@ -338,10 +338,29 @@ function ensurePythonInstalled(projectPath: string, env: Record<string, string |
   };
 }
 
+/** The MINIMAL host env a build/install toolchain needs to FUNCTION, with NONE of the platform's
+ *  secrets (CRITICAL-2). Generated app code is untrusted; spreading the full `process.env`
+ *  (FLY_API_TOKEN, OPENCODE_API_KEY, SUPABASE_*, STRIPE_* …) into `npm run build` / `npm install`
+ *  would hand those secrets to whatever the LLM wrote. We allowlist only toolchain vars and supply
+ *  the app's DECLARED keys as dummies (synthEnv) — exactly what the isolated container branch does. */
+const TOOL_ENV_ALLOW = [
+  "PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+  "USER", "LOGNAME", "SHELL", "NODE_ENV", "NODE_OPTIONS", "npm_config_cache",
+  "npm_config_registry", "npm_config_prefix", "XDG_CACHE_HOME", "SYSTEMROOT", "COMSPEC",
+];
+export function safeToolEnv(projectPath: string): Record<string, string> {
+  const env: Record<string, string> = { ...synthEnv(readEnvTemplates(projectPath)) };
+  for (const k of TOOL_ENV_ALLOW) {
+    const v = process.env[k];
+    if (v !== undefined) env[k] = v;
+  }
+  return env;
+}
+
 /** Install (if needed) then run the build script. Dummy env (from .env.example)
  *  is injected so a build-time env read doesn't fail. */
 async function runBuild(projectPath: string, script: string): Promise<BuildOutcome> {
-  const env = { ...synthEnv(readEnvTemplates(projectPath)), ...process.env };
+  const env = safeToolEnv(projectPath);
   const installFail = ensureInstalled(projectPath, env);
   if (installFail) return installFail;
   const build = Bun.spawnSync(["npm", "run", script], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe" });
@@ -389,8 +408,8 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
       filter: (src) => !COPY_EXCLUDE.has(src.split("/").pop() ?? ""),
     });
     const cmd = existsSync(join(tmp, "package-lock.json"))
-      ? ["npm", "ci", "--no-audit", "--no-fund"]
-      : ["npm", "install", "--no-audit", "--no-fund"];
+      ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"]
+      : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"];
     const install = Bun.spawnSync(cmd, { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
     if ((install.exitCode ?? 1) !== 0) {
       return [cleanFinding("install", `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`)];
@@ -564,7 +583,7 @@ export async function runVerify(
     );
   }
 
-  const env = { ...synthEnv(readEnvTemplates(projectPath)), ...process.env };
+  const env = safeToolEnv(projectPath);
   const rigor = readRigor(projectPath);
   const findings: Finding[] = [];
 

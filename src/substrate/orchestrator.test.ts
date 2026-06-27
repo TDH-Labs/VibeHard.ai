@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { destroy, provisionAndDeploy, type DeployInput, type SubstrateDeps } from "./orchestrator.ts";
+import { stampSentinel } from "../gate/index.ts";
 import type { BackendProvider, BackendSecrets, HostProvider, RecordStore, SecretsStore } from "./types.ts";
 
 const ts = "2026-06-22T00:00:00.000Z";
@@ -16,8 +16,7 @@ afterEach(async () => {
 async function passingWorkspace(): Promise<string> {
   const d = await mkdtemp(join(tmpdir(), "dd-sub-ws-"));
   tmps.push(d);
-  mkdirSync(join(d, ".gate"), { recursive: true });
-  writeFileSync(join(d, ".gate", "HARD_VERIFY_PASS"), "ok");
+  await stampSentinel(d, true); // write HMAC-authenticated sentinel (C3)
   return d;
 }
 
@@ -133,7 +132,7 @@ describe("provisionAndDeploy — the deterministic sequence", () => {
   test("refuses without the gate sentinel (§11 precondition, defense in depth)", async () => {
     const noSentinel = await mkdtemp(join(tmpdir(), "dd-nosent-"));
     tmps.push(noSentinel);
-    expect(provisionAndDeploy(await input({ workspacePath: noSentinel }), deps())).rejects.toThrow(/HARD_VERIFY_PASS/);
+    expect(provisionAndDeploy(await input({ workspacePath: noSentinel }), deps())).rejects.toThrow(/sentinel absent or HMAC invalid/);
   });
 });
 

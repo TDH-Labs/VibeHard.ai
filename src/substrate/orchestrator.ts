@@ -12,9 +12,8 @@
  * leaves the record at its last good state (status "failed"), so a re-run resumes.
  * The providers are injected, so this whole flow is unit-tested with fakes.
  */
-import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { SENTINEL_REL } from "../gate/index.ts";
+import { SENTINEL_REL, verifySentinel } from "../gate/index.ts";
 import type { CustomerOrg, DeploymentRecord, Migration, RecordStore, BackendProvider, HostProvider, SecretsStore } from "./types.ts";
 
 export interface DeployInput {
@@ -66,9 +65,10 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
   const step = (m: string): void => deps.onStep?.(m);
 
   // §11 precondition (defense in depth): a build that didn't pass the gate must never
-  // reach provisioning/deploy. The deploy path already enforces this; we re-check.
-  if (!existsSync(join(input.workspacePath, SENTINEL_REL))) {
-    throw new Error("runtime substrate refused: no HARD_VERIFY_PASS sentinel — the gate must pass before deploy");
+  // reach provisioning/deploy. verifySentinel() checks existence AND HMAC authenticity,
+  // so a file created by anything other than a real gate pass (C3 fix) is rejected.
+  if (!verifySentinel(input.workspacePath)) {
+    throw new Error("runtime substrate refused: sentinel absent or HMAC invalid — the gate must pass before deploy");
   }
 
   let record = deps.records.get(input.app) ?? freshRecord(input, now());
