@@ -179,6 +179,13 @@ export async function runRlsEnforcement(projectPath: string, model: DataModel, o
           ? ` — "${e.name}" is access:"auth" but has a per-user owner column; any authenticated user can read another user's rows — use access:"owner"`
           : "";
 
+      // C-3 (audit3) standalone: an access:"auth" table that is actually tenant/user-scoped is mislabeled
+      // even when its policy happens to be correct — surface it as a non-blocking advisory regardless of
+      // the probe outcome, so the labeling error is visible (not only as a side-note on a leak finding).
+      if (authTenantScoped || authUserScoped) {
+        findings.push({ tool: "rls-enforce", ruleId: "access-auth-mislabel", severity: "low", file: "supabase/migrations", message: `"${e.name}" is access:"auth" but ${authTenantScoped ? "carries a tenant column" : "has a per-user owner column"} — if it holds per-${authTenantScoped ? "tenant" : "user"} data, relabel it "${authTenantScoped ? "tenant" : "owner"}" so RLS scopes it (access:"auth" means any authenticated user can read every row).` });
+      }
+
       if (isolated || authTenantScoped || authUserScoped) {
         // READ: tenant A must not see tenant B's row.
         await become("authenticated", UA);
