@@ -148,11 +148,21 @@ export const NEVER_INJECT = new Set<string>([
 
 /** Collect the values the user actually provided for the required keys, from a source (e.g.
  *  process.env). Blank/missing values are skipped, so a half-filled set injects only what's set.
- *  Platform/operator secrets (NEVER_INJECT) are refused even if the app declares them (C-4). */
+ *  Platform/operator secrets (NEVER_INJECT) are refused even if the app declares them (C-4).
+ *
+ *  C-6 / C-4-deeper (audit3): in a MULTI-TENANT deploy the source env is shared (operator + tenant),
+ *  so a key that COLLIDES by name (ANTHROPIC_API_KEY, OPENAI_API_KEY, STRIPE_SECRET_KEY) can't be
+ *  disambiguated — the operator's value would leak into the tenant app. When `VIBEHARD_TENANT_KEYS` is
+ *  present (the web sets it to the names in the tenant's own keychain), we restrict injection to that
+ *  allowlist: ONLY keys the tenant explicitly provided flow; an operator value under the same name is
+ *  never injected. When it's absent (a direct CLI user IS the operator — no tenant boundary), behaviour
+ *  is unchanged. */
 export function collectAppEnv(required: RequiredCredential[], source: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {};
+  const tenantAllow = source.VIBEHARD_TENANT_KEYS ? new Set(source.VIBEHARD_TENANT_KEYS.split(",").map((s) => s.trim()).filter(Boolean)) : null;
   for (const c of required) {
     if (NEVER_INJECT.has(c.key)) continue; // operator secret — never source it into a tenant app
+    if (tenantAllow && !tenantAllow.has(c.key)) continue; // multi-tenant: only the tenant's own keychain keys
     const v = source[c.key];
     if (v && v.trim()) out[c.key] = v;
   }

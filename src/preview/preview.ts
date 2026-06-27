@@ -10,7 +10,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { installStale } from "../gate/verify.ts";
+import { installStale, safeToolEnv } from "../gate/verify.ts";
 
 export interface PkgLike {
   scripts?: Record<string, string>;
@@ -74,16 +74,26 @@ export async function runPreview(dir: string, opts: PreviewOptions = {}): Promis
     if (inst.exitCode !== 0) throw new Error("npm install failed");
   }
 
+  // C-7 (audit3): preview runs GENERATED (untrusted) code — never hand it the full host env (which
+  // carries FLY_API_TOKEN / VERCEL_TOKEN / VIBEHARD_SECRETS_KEY …). Scope it: toolchain + dummies
+  // (safeToolEnv) plus only the PUBLIC Supabase vars the app reads at runtime.
+  const pick = (...names: string[]): Record<string, string> => Object.fromEntries(names.flatMap((n) => (process.env[n] ? [[n, process.env[n] as string]] : [])));
+  const supaPublic = pick("NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_URL", "SUPABASE_ANON_KEY", "VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY");
+
   // 2) optional seed (only if the script + Supabase creds exist — else the preview just renders empty)
   if (opts.seed && existsSync(join(dir, "scripts/seed.ts")) && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     log("  ▸ seeding demo data…");
-    Bun.spawnSync(["bun", "scripts/seed.ts"], { cwd: dir, stdout: "inherit", stderr: "inherit", env: { ...process.env } });
+    // the seed legitimately needs the service-role key to WRITE demo rows — pass that, but nothing else
+    // beyond toolchain + public Supabase (no FLY/VERCEL/platform secrets).
+    const seedEnv = { ...safeToolEnv(dir), ...supaPublic, SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY as string };
+    Bun.spawnSync(["bun", "scripts/seed.ts"], { cwd: dir, stdout: "inherit", stderr: "inherit", env: seedEnv });
   }
 
-  // 3) boot the dev server; watch its output for the URL it advertises
+  // 3) boot the dev server; watch its output for the URL it advertises. The app runs through RLS with
+  //    the PUBLIC (anon) Supabase key only — never the service key, never platform tokens.
   const { cmd, args } = devCommand(pkg);
   log(`  ▸ starting dev server (${cmd} ${args.join(" ")})…`);
-  const proc = Bun.spawn([cmd, ...args], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env } });
+  const proc = Bun.spawn([cmd, ...args], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...safeToolEnv(dir), ...supaPublic } });
 
   const deadline = Date.now() + (opts.readyTimeoutMs ?? 60_000);
   const decoder = new TextDecoder();

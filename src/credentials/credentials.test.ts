@@ -82,4 +82,25 @@ describe("collectAppEnv", () => {
     expect(out.STRIPE_SECRET_KEY).toBe("tenant-own-stripe"); // not platform-infra → allowed
     expect(out.MY_APP_KEY).toBe("app-value");
   });
+
+  test("C-6 (audit3): with VIBEHARD_TENANT_KEYS set, a colliding key is injected ONLY if the tenant provided it", () => {
+    const req = requiredCredentials("ANTHROPIC_API_KEY=\nOPENAI_API_KEY=\nMY_APP_KEY=");
+    const out = collectAppEnv(req, {
+      // operator has its own ANTHROPIC key in the host env; the tenant did NOT provide one
+      ANTHROPIC_API_KEY: "operator-anthropic-key",
+      // the tenant DID provide OPENAI + MY_APP_KEY (these names are in their keychain)
+      OPENAI_API_KEY: "tenant-openai-key",
+      MY_APP_KEY: "tenant-app-value",
+      VIBEHARD_TENANT_KEYS: "OPENAI_API_KEY,MY_APP_KEY",
+    });
+    expect(out.ANTHROPIC_API_KEY).toBeUndefined(); // operator key NOT in the tenant allowlist → never injected
+    expect(out.OPENAI_API_KEY).toBe("tenant-openai-key"); // tenant-provided → injected
+    expect(out.MY_APP_KEY).toBe("tenant-app-value");
+  });
+
+  test("C-6: without VIBEHARD_TENANT_KEYS (direct CLI use), behaviour is unchanged", () => {
+    const req = requiredCredentials("MY_APP_KEY=");
+    const out = collectAppEnv(req, { MY_APP_KEY: "v" });
+    expect(out.MY_APP_KEY).toBe("v");
+  });
 });

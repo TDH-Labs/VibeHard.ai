@@ -68,7 +68,7 @@ const SOURCE_EXT = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 const SKIP_DIRS = new Set(["node_modules", ".next", "dist", "build", ".git", ".vibehard", ".vercel", "out", "coverage", ".turbo", ".idea", ".vscode", ".cache", ".husky"]);
 /** Suppression directives that silence a static check rather than resolve it. audit3 M-2 adds the
  *  `as unknown as T` double-cast and `biome-ignore`. */
-const SUPPRESSION_RE = /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|biome-ignore|nosemgrep|\bas\s+any\b|\bas\s+unknown\s+as\b/g;
+const SUPPRESSION_RE = /@ts-ignore|@ts-nocheck|@ts-expect-error|eslint-disable|biome-ignore|nosemgrep|\bnolint\b|\bas\s+any\b|\bas\s+unknown\s+as\b/g;
 /** `.from("table")` / `.from('table')` data access in Supabase/SQL client code. */
 const FROM_RE = /\.from\(\s*['"`]([A-Za-z_][\w]*)['"`]/g;
 /** A flagged file is "gutted" if its meaningful body collapses below this fraction of its prior size … */
