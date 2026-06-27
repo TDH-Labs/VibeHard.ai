@@ -17,13 +17,14 @@ rls-enforce.ts`); the security remediation in [`REMEDIATION.md`](./REMEDIATION.m
 (P0+P1) is complete, each fix backed by a test that would fail if the bug were
 still live.
 
-**E1 — the live acceptance test — is GREEN** (2026-06-26). The generated backend was
-applied to a real Supabase project, two tenants were seeded with private data, and
-a cross-tenant attack ran against the live REST API: every tenant-scoped table
-showed each tenant seeing ONLY its own row (zero overlap) and an anonymous caller
-seeing nothing. The database refused the attack in *production*, not just in the
-test harness (`scripts/e1-live.ts`). Tenant isolation is now demonstrated end to
-end on a live deploy, not only asserted by the gates.
+**E1 — live smoke test** (2026-06-26): a one-time manual run of `scripts/e1-live.ts`
+applied a generated schema to a real Supabase project, seeded two tenants, and
+confirmed cross-tenant queries returned 0 rows. This is a *spot-check*, not a
+reproducible CI gate — it requires live credentials and the throwaway project was
+deleted. The durable, reproducible proof is the **`rls-enforce` gate**
+(`src/gate/rls-enforce.ts`), which runs cross-tenant queries against embedded
+Postgres on every `bun test` invocation and asserts denial — that is what "tenant
+isolation is enforced" means in the test suite.
 
 Still aspirational: a polished, continuously-running hosted product (auth UI,
 managed sandbox infra, billing). "Production-ready" for the security boundary is

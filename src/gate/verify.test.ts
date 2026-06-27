@@ -11,6 +11,7 @@ import {
   pythonStartCommand,
   isUp,
   parseEnvKeys,
+  safeToolEnv,
   summarizeBuild,
   summarizeShutdown,
   summarizeVerify,
@@ -276,5 +277,37 @@ describe("summarizeBuild (pure)", () => {
 
   test("a failed install is attributed to install, not build", () => {
     expect(summarizeBuild({ stage: "install", exitCode: 1 })[0]).toMatchObject({ ruleId: "install-failed" });
+  });
+});
+
+describe("safeToolEnv — CRITICAL-2: platform secrets must not leak into generated-code subprocess env", () => {
+  test("does not include secrets from process.env", async () => {
+    const dir = await scratch({ ".env.example": "DATABASE_URL=dummy\n" });
+    const saved = { ...process.env };
+    process.env.OPENCODE_API_KEY = "sk-test-secret-leaked";
+    process.env.FLY_API_TOKEN = "fly-secret-leaked";
+    process.env.ANTHROPIC_API_KEY = "anthropic-secret-leaked";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "supabase-secret-leaked";
+    try {
+      const env = safeToolEnv(dir);
+      expect(env.OPENCODE_API_KEY).toBeUndefined();
+      expect(env.FLY_API_TOKEN).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+    } finally {
+      Object.assign(process.env, saved);
+      for (const k of ["OPENCODE_API_KEY", "FLY_API_TOKEN", "ANTHROPIC_API_KEY", "SUPABASE_SERVICE_ROLE_KEY"]) {
+        if (!(k in saved)) delete process.env[k];
+      }
+    }
+  });
+
+  test("does include allowlisted toolchain vars and synthetic app dummies", async () => {
+    const dir = await scratch({ ".env.example": "DATABASE_URL=dummy\n" });
+    const env = safeToolEnv(dir);
+    expect(env.PATH).toBeDefined();
+    expect(env.HOME).toBeDefined();
+    expect(env.DATABASE_URL).toBeDefined(); // synthEnv dummy
+    expect(env.DATABASE_URL).not.toBe(""); // has a placeholder, not empty
   });
 });

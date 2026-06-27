@@ -23,6 +23,32 @@ export interface FlyHostOptions {
   flyBin?: string[]; // default ["fly"]
 }
 
+/** Client-side / public env vars that are safe in a plaintext config file (H6 fix).
+ *  NEXT_PUBLIC_* and VITE_* are intentionally embedded in the browser bundle.
+ *  SUPABASE_URL and SUPABASE_ANON_KEY are RLS-gated public values (service-role excluded upstream).
+ *  Everything else (STRIPE_SECRET_KEY, API tokens, …) is a secret → fly secrets set. */
+export function isPublicEnvVar(key: string): boolean {
+  return (
+    key.startsWith("NEXT_PUBLIC_") ||
+    key.startsWith("VITE_") ||
+    key === "SUPABASE_URL" ||
+    key === "SUPABASE_ANON_KEY" ||
+    key === "NODE_ENV" ||
+    key === "PORT"
+  );
+}
+
+/** Partition env into { publicEnv, secretEnv }. publicEnv → fly.toml [env]; secretEnv → fly secrets set. */
+export function partitionEnv(env: Record<string, string>): { publicEnv: Record<string, string>; secretEnv: Record<string, string> } {
+  const publicEnv: Record<string, string> = {};
+  const secretEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (isPublicEnvVar(k)) publicEnv[k] = v;
+    else secretEnv[k] = v;
+  }
+  return { publicEnv, secretEnv };
+}
+
 /** Minimal fly.toml: build from the workspace Dockerfile, the injected env, one cheap auto-stopping machine. */
 export function renderFlyToml(app: string, region: string, internalPort: number, env: Record<string, string>): string {
   const envLines = Object.entries(env)
@@ -75,12 +101,20 @@ export class FlyHostProvider implements HostProvider {
     // duration of the deploy and remove it after: a secret-bearing manifest must never linger in the
     // gated workspace, or it trips the secrets gate on the next ship (a real recurrence, since we
     // regenerate fly.toml every deploy and the app config lives on Fly's side once deployed).
+    // H6 fix: never write third-party secrets (STRIPE_SECRET_KEY, etc.) to plaintext fly.toml.
+    // Public vars (NEXT_PUBLIC_*, VITE_*, SUPABASE_URL/ANON_KEY) → [env]; secrets → fly secrets set.
+    const { publicEnv, secretEnv } = partitionEnv(env);
     const flyTomlPath = join(workspacePath, "fly.toml");
-    writeFileSync(flyTomlPath, renderFlyToml(app, this.region, this.internalPort, env));
+    writeFileSync(flyTomlPath, renderFlyToml(app, this.region, this.internalPort, publicEnv));
     const flyEnv = { FLY_API_TOKEN: this.token };
     try {
       // best-effort create (harmlessly non-zero if the app already exists → idempotent redeploy)
       await this.runner.run([...this.flyBin, "apps", "create", app, "--org", this.org], { cwd: workspacePath, env: flyEnv });
+      // Inject secrets before deploy so they're available at container start (Fly resolves them server-side).
+      if (Object.keys(secretEnv).length > 0) {
+        const pairs = Object.entries(secretEnv).map(([k, v]) => `${k}=${v}`);
+        await this.runner.run([...this.flyBin, "secrets", "set", "--app", app, "--stage", ...pairs], { cwd: workspacePath, env: flyEnv });
+      }
       const res = await this.runner.run([...this.flyBin, "deploy", "--app", app, "--remote-only", "--ha=false"], { cwd: workspacePath, env: flyEnv });
       if (res.exitCode !== 0) throw new Error(`fly deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(0, 400)}`);
       return { url: `https://${app}.fly.dev`, hostRef: app };

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultSubstrateDeps, deployApp, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
-import { SENTINEL_REL } from "../gate/index.ts";
+import { stampSentinel } from "../gate/index.ts";
 import type { SubstrateDeps } from "./orchestrator.ts";
 
 describe("tablesFromMigrations", () => {
@@ -42,8 +42,7 @@ describe("deployApp — derives input + runs the orchestrator", () => {
   test("derives migrations + RLS tables + app name, and provisions through to live", async () => {
     const ws = mkdtempSync(join(tmpdir(), "dd-app-"));
     try {
-      mkdirSync(join(ws, ".gate"), { recursive: true });
-      writeFileSync(join(ws, SENTINEL_REL), "ok"); // a gated, passing workspace
+      await stampSentinel(ws, true); // write HMAC-authenticated sentinel (C3)
       const md = join(ws, "supabase", "migrations");
       mkdirSync(md, { recursive: true });
       writeFileSync(join(md, "001_init.sql"), "create table notes (id int);\nalter table notes enable row level security;");
