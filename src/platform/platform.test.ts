@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Platform, type DeployFn, type PlatformOptions } from "./platform.ts";
+import { FileTenantStore } from "./tenant-store.ts";
 import { LocalBillingProvider } from "./billing.ts";
 import type { UsageEvent } from "./types.ts";
 import { FileRecordStore } from "../substrate/record.ts";
@@ -187,6 +188,64 @@ describe("Platform — isolation + delegation", () => {
       expect(platform.usage("t1")).toEqual([{ kind: "deploy", app: "my-app", at: "2026-01-01T00:00:00Z" }]); // …AND persisted to the durable ledger
     } finally {
       cleanup();
+    }
+  });
+});
+
+describe("Platform.open — durable tenant store", () => {
+  // Embedded mode (no DATABASE_URL): tenant records persist to disk, the same engine prod uses.
+  const saved: Record<string, string | undefined> = {};
+  function useTempDb(): string {
+    saved.DATABASE_URL = process.env.DATABASE_URL;
+    saved.VIBEHARD_DB_DIR = process.env.VIBEHARD_DB_DIR;
+    delete process.env.DATABASE_URL; // force embedded mode (no external Postgres in tests)
+    const dir = mkdtempSync(join(tmpdir(), "dd-plat-db-"));
+    process.env.VIBEHARD_DB_DIR = dir;
+    return dir;
+  }
+  function restoreEnv(): void {
+    for (const k of ["DATABASE_URL", "VIBEHARD_DB_DIR"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+
+  test("signUp persists to the durable DB and survives a reopen (restart simulation)", async () => {
+    const dir = useTempDb();
+    try {
+      const a = await Platform.open({ baseDir: dir });
+      const t = await a.platform.signUp("Acme");
+      expect(t.status).toBe("active");
+      await a.db.close();
+      // reopen the SAME on-disk DB — simulates the cloud box restarting/redeploying
+      const b = await Platform.open({ baseDir: dir });
+      try {
+        expect((await b.platform.getTenant(t.id))?.name).toBe("Acme");
+        expect((await b.platform.listTenants()).map((x) => x.id)).toEqual([t.id]);
+      } finally {
+        await b.db.close();
+      }
+    } finally {
+      restoreEnv();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an explicitly-supplied tenants store still wins over the durable default", async () => {
+    const dir = useTempDb();
+    try {
+      const tenants = new FileTenantStore(join(dir, "explicit"));
+      const { platform, db } = await Platform.open({ baseDir: dir, tenants });
+      try {
+        await platform.signUp("Beta");
+        // it went to the injected file store, not the PG default
+        expect((await tenants.list()).map((t) => t.name)).toEqual(["Beta"]);
+      } finally {
+        await db.close();
+      }
+    } finally {
+      restoreEnv();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

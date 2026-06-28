@@ -14,6 +14,8 @@ import { deployApp, type DeployAppOptions } from "../substrate/deploy-app.ts";
 import type { DeployOutcome } from "../substrate/orchestrator.ts";
 import { LocalBillingProvider } from "./billing.ts";
 import { FileTenantStore } from "./tenant-store.ts";
+import { openDb, type Db } from "./db.ts";
+import { PgTenantStore } from "./pg-store.ts";
 import { FileUsageLedger, type UsageLedger } from "./usage.ts";
 import { dayAgo, FileBuildStore, type BuildJob, type BuildRunner, type BuildStore } from "./build.ts";
 import { DEFAULT_PLAN } from "./plans.ts";
@@ -54,6 +56,19 @@ export class Platform {
     this.deploy = opts.deploy ?? deployApp;
     this.now = opts.now ?? (() => new Date().toISOString());
     this.newId = opts.newId ?? (() => randomUUID());
+  }
+
+  /**
+   * Open a Platform whose TENANT records live in the DURABLE database — managed Postgres in the
+   * cloud (`DATABASE_URL`) or embedded disk-persisted Postgres locally — so signups + plan/status
+   * survive a restart or redeploy (the default FileTenantStore is wiped by an ephemeral cloud box).
+   * All other opts pass through, and an explicitly-supplied `tenants` store still wins. Returns the
+   * db handle alongside so the caller owns its lifecycle (`await db.close()` on shutdown).
+   */
+  static async open(opts: PlatformOptions = {}): Promise<{ platform: Platform; db: Db }> {
+    const db = await openDb();
+    const platform = new Platform({ ...opts, tenants: opts.tenants ?? new PgTenantStore(db.sql) });
+    return { platform, db };
   }
 
   /** Meter a usage event: persist it to the durable ledger AND push it to the billing seam. */
