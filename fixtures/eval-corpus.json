@@ -1,0 +1,8 @@
+[
+  { "id": "private-todo", "prompt": "A simple to-do list app where I can sign in and only see my own tasks", "mustImplement": ["auth", "per-user tasks"] },
+  { "id": "barber-booking", "prompt": "A booking page for my barbershop where customers pick an available time slot", "mustImplement": ["time slots", "booking"] },
+  { "id": "lead-crm", "prompt": "A CRM to track my sales leads with notes and follow-up dates", "mustImplement": ["leads", "notes", "follow-up dates"] },
+  { "id": "shop-inventory", "prompt": "An inventory tracker for my small shop with low-stock alerts", "mustImplement": ["inventory", "low-stock alert"] },
+  { "id": "team-expenses", "prompt": "A team expense tracker where staff submit receipts and an admin approves them", "mustImplement": ["roles", "submit receipt", "admin approval"] },
+  { "id": "club-directory", "prompt": "A member directory for my club, visible only to logged-in members", "mustImplement": ["auth", "members-only visibility"] }
+]
