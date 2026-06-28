@@ -517,7 +517,14 @@ function renderOrch(){
 // EPIC #34: if Clerk is configured server-side, load ClerkJS (CDN) and let it drive auth; otherwise
 // fall through to the legacy email/OAuth flow entirely unchanged.
 function mountClerkSignIn(){const c=$("#card-auth");if(!c)return;c.innerHTML='<div id="clerk-signin"></div>';try{window.Clerk.mountSignIn(document.getElementById("clerk-signin"))}catch{}}
-function loadClerk(cfg){return new Promise(res=>{const pk=cfg.publishableKey;let fapi=cfg.frontendApi;try{if(!fapi)fapi=atob(pk.split("_")[2]).replace(/\$$/,"")}catch{}if(!fapi)return res();const s=document.createElement("script");s.setAttribute("data-clerk-publishable-key",pk);s.async=true;s.crossOrigin="anonymous";s.src="https://"+fapi+"/npm/@clerk/clerk-js@6/dist/clerk.browser.js";s.onload=async()=>{try{await window.Clerk.load()}catch{}res()};s.onerror=()=>res();document.head.appendChild(s)})}
+function loadScript(src,attrs){return new Promise((res,rej)=>{const s=document.createElement("script");if(attrs)for(const k in attrs)s.setAttribute(k,attrs[k]);s.async=true;s.crossOrigin="anonymous";s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error("script load failed: "+src));document.head.appendChild(s)})}
+async function loadClerk(cfg){const pk=cfg.publishableKey;let fapi=cfg.frontendApi;try{if(!fapi)fapi=atob(pk.split("_")[2]).replace(/\$$/,"")}catch{}if(!fapi)return;try{
+  // Clerk's vanilla-JS integration needs BOTH bundles: @clerk/ui provides the prebuilt components
+  // (SignIn/UserButton) via window.__internal_ClerkUICtor; without it mountSignIn renders nothing.
+  await loadScript("https://"+fapi+"/npm/@clerk/ui@1/dist/ui.browser.js");
+  await loadScript("https://"+fapi+"/npm/@clerk/clerk-js@6/dist/clerk.browser.js",{"data-clerk-publishable-key":pk});
+  await window.Clerk.load({ui:{ClerkUI:window.__internal_ClerkUICtor}});
+}catch(e){console.error("Clerk load failed",e)}}
 async function boot(){
   let cfg=null;try{cfg=(await api("/api/auth-config")).body}catch{}
   if(cfg&&cfg.clerk&&cfg.publishableKey){window.__CLERK=cfg;await loadClerk(cfg);return load()}
