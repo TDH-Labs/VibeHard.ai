@@ -101,27 +101,29 @@ export function decideBillingEvent(e: BillingEvent, priceToPlan: Record<string, 
   return { action: "ignore", reason: `unhandled event type ${e.type || "(none)"}` };
 }
 
-/** The platform mutations the webhook needs (injected → testable; matches Platform's surface). */
+/** The platform mutations the webhook needs (injected → testable; matches Platform's surface).
+ *  Results may be sync or async — Platform's mutations are async (durable store), a test spy is sync. */
 export interface BillingOps {
-  setPlan(tenantId: string, plan: string): void;
-  suspend(tenantId: string): void;
-  resume(tenantId: string): void;
+  setPlan(tenantId: string, plan: string): void | Promise<unknown>;
+  suspend(tenantId: string): void | Promise<unknown>;
+  resume(tenantId: string): void | Promise<unknown>;
 }
 
 /** Apply a decision. Returns a one-line audit string. set-plan/downgrade also RESUME (a paid-up or
- *  free tenant must not stay suspended from a prior delinquency). */
-export function applyBillingDecision(d: BillingDecision, ops: BillingOps): string {
+ *  free tenant must not stay suspended from a prior delinquency). Awaits the ops so a durable-store
+ *  failure surfaces to the caller (rather than an unhandled rejection). */
+export async function applyBillingDecision(d: BillingDecision, ops: BillingOps): Promise<string> {
   switch (d.action) {
     case "set-plan":
-      ops.setPlan(d.tenantId, d.plan);
-      ops.resume(d.tenantId);
+      await ops.setPlan(d.tenantId, d.plan);
+      await ops.resume(d.tenantId);
       return `tenant ${d.tenantId} → plan ${d.plan} (active)`;
     case "suspend":
-      ops.suspend(d.tenantId);
+      await ops.suspend(d.tenantId);
       return `tenant ${d.tenantId} suspended (payment issue)`;
     case "downgrade-free":
-      ops.setPlan(d.tenantId, "free");
-      ops.resume(d.tenantId);
+      await ops.setPlan(d.tenantId, "free");
+      await ops.resume(d.tenantId);
       return `tenant ${d.tenantId} → free (subscription ended)`;
     case "ignore":
       return `ignored: ${d.reason}`;

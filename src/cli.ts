@@ -419,29 +419,29 @@ export async function main(argv: string[]): Promise<number> {
         console.error('usage: vibehard tenant signup "<name>" [plan]');
         return 2;
       }
-      const t = platform.signUp(name, argv[3] ?? "free");
+      const t = await platform.signUp(name, argv[3] ?? "free");
       console.log(`✅ tenant ${t.id} created — ${t.name} [${t.plan}], ${t.status}`);
       console.log(`   isolated state dir: ${platform.stateDir(t.id)}`);
       return 0;
     }
     if (sub === "list") {
-      const tenants = platform.listTenants();
+      const tenants = await platform.listTenants();
       if (!tenants.length) {
         console.log('no tenants yet — `vibehard tenant signup "<name>"`');
         return 0;
       }
       for (const t of tenants) {
-        console.log(`${t.id}  ${t.name}  [${t.plan}]  ${t.status}  ${platform.projectCount(t.id)}/${planFor(t).maxProjects} projects`);
+        console.log(`${t.id}  ${t.name}  [${t.plan}]  ${t.status}  ${await platform.projectCount(t.id)}/${planFor(t).maxProjects} projects`);
       }
       return 0;
     }
     if (sub === "show" && name) {
-      const t = platform.getTenant(name);
+      const t = await platform.getTenant(name);
       if (!t) {
         console.error(`no tenant "${name}"`);
         return 1;
       }
-      console.log(JSON.stringify({ ...t, projects: platform.projectCount(t.id), projectLimit: planFor(t).maxProjects }, null, 2));
+      console.log(JSON.stringify({ ...t, projects: await platform.projectCount(t.id), projectLimit: planFor(t).maxProjects }, null, 2));
       return 0;
     }
     if (sub === "deploy") {

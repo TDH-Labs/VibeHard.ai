@@ -49,8 +49,9 @@ export interface ClerkTenantDeps {
   getEmail: (userId: string) => Promise<string | null>;
   /** existing local account for this email, or null */
   findTenantByEmail: (email: string) => string | null;
-  /** create a local tenant+user for a first-seen Clerk user; returns the new tenantId */
-  createTenant: (email: string, name: string, userId: string) => string;
+  /** create a local tenant+user for a first-seen Clerk user; returns the new tenantId (durable
+   *  tenant creation is async, so this may return a promise) */
+  createTenant: (email: string, name: string, userId: string) => string | Promise<string>;
   /** display name for a first-seen user (optional; falls back to the email local-part) */
   getName?: (userId: string) => Promise<string | null>;
 }
@@ -66,5 +67,5 @@ export async function resolveTenantForClerkUser(userId: string, deps: ClerkTenan
   const existing = deps.findTenantByEmail(email);
   if (existing) return { email, tenantId: existing };
   const name = (await deps.getName?.(userId))?.trim() || email.split("@")[0]!;
-  return { email, tenantId: deps.createTenant(email, name, userId) };
+  return { email, tenantId: await deps.createTenant(email, name, userId) };
 }

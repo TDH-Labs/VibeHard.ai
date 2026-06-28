@@ -26,12 +26,13 @@ export interface Plan {
   maxBuildsPerDay: number; // build-rate cap (enforced by the build sandbox later; carried here)
 }
 
-/** Persistence for Tenants (file-backed v1; platform DB later). Synchronous — tiny files. */
+/** Persistence for Tenants. Async so a durable Postgres store (PgTenantStore) drops in behind the
+ *  same seam as the file-backed local store; both await the same way. */
 export interface TenantStore {
-  create(tenant: Tenant): void;
-  get(id: string): Tenant | null;
-  list(): Tenant[];
-  update(tenant: Tenant): void;
+  create(tenant: Tenant): Promise<void>;
+  get(id: string): Promise<Tenant | null>;
+  list(): Promise<Tenant[]>;
+  update(tenant: Tenant): Promise<void>;
 }
 
 /** A metered event for billing (stub discards; Stripe usage records later). */

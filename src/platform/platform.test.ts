@@ -31,26 +31,26 @@ function makePlatform(extra: Partial<PlatformOptions> = {}) {
 }
 
 describe("Platform — sign-up + lifecycle", () => {
-  test("signUp creates an active tenant on the default (free) plan and persists it", () => {
+  test("signUp creates an active tenant on the default (free) plan and persists it", async () => {
     const { platform, cleanup } = makePlatform();
     try {
-      const t = platform.signUp("Acme");
+      const t = await platform.signUp("Acme");
       expect(t).toEqual({ id: "t1", name: "Acme", plan: "free", status: "active", createdAt: "2026-01-01T00:00:00Z" });
-      expect(platform.getTenant("t1")).toEqual(t);
-      expect(platform.listTenants().map((x) => x.id)).toEqual(["t1"]);
+      expect(await platform.getTenant("t1")).toEqual(t);
+      expect((await platform.listTenants()).map((x) => x.id)).toEqual(["t1"]);
     } finally {
       cleanup();
     }
   });
 
-  test("suspend / resume / setPlan mutate the tenant; unknown id throws", () => {
+  test("suspend / resume / setPlan mutate the tenant; unknown id throws", async () => {
     const { platform, cleanup } = makePlatform();
     try {
-      platform.signUp("Acme");
-      expect(platform.suspend("t1").status).toBe("suspended");
-      expect(platform.resume("t1").status).toBe("active");
-      expect(platform.setPlan("t1", "pro").plan).toBe("pro");
-      expect(() => platform.suspend("ghost")).toThrow(/unknown tenant/);
+      await platform.signUp("Acme");
+      expect((await platform.suspend("t1")).status).toBe("suspended");
+      expect((await platform.resume("t1")).status).toBe("active");
+      expect((await platform.setPlan("t1", "pro")).plan).toBe("pro");
+      await expect(platform.suspend("ghost")).rejects.toThrow(/unknown tenant/);
     } finally {
       cleanup();
     }
@@ -61,12 +61,12 @@ describe("Platform — quota enforcement", () => {
   test("free plan allows 1 project: a 2nd NEW app is blocked, a redeploy of an existing app is not", async () => {
     const { platform, cleanup } = makePlatform({ deploy: seedingDeploy });
     try {
-      platform.signUp("Acme"); // t1, free → maxProjects 1
+      await platform.signUp("Acme"); // t1, free → maxProjects 1
       await platform.deployForTenant("t1", "/ws/app-a", { app: "app-a" }); // ok (0 → 1)
-      expect(platform.projectCount("t1")).toBe(1);
+      expect(await platform.projectCount("t1")).toBe(1);
       await expect(platform.deployForTenant("t1", "/ws/app-b", { app: "app-b" })).rejects.toThrow(/quota exceeded/);
       await platform.deployForTenant("t1", "/ws/app-a", { app: "app-a" }); // redeploy of existing → allowed
-      expect(platform.projectCount("t1")).toBe(1); // still 1 (redeploy didn't add)
+      expect(await platform.projectCount("t1")).toBe(1); // still 1 (redeploy didn't add)
     } finally {
       cleanup();
     }
@@ -75,13 +75,13 @@ describe("Platform — quota enforcement", () => {
   test("a failed deploy does NOT occupy a quota slot (transient failures don't block a free-tier tenant)", async () => {
     const { platform, cleanup } = makePlatform({ deploy: seedingDeploy });
     try {
-      platform.signUp("Acme"); // free → maxProjects 1
+      await platform.signUp("Acme"); // free → maxProjects 1
       const dir = join(platform.stateDir("t1"), "deployments");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "broken.json"), JSON.stringify({ ...REC, app: "broken", status: "failed" }));
-      expect(platform.projectCount("t1")).toBe(0); // the failed record is not counted
+      expect(await platform.projectCount("t1")).toBe(0); // the failed record is not counted
       await platform.deployForTenant("t1", "/ws/good", { app: "good" }); // still allowed despite the failed one
-      expect(platform.projectCount("t1")).toBe(1); // only the live one counts
+      expect(await platform.projectCount("t1")).toBe(1); // only the live one counts
     } finally {
       cleanup();
     }
@@ -90,12 +90,12 @@ describe("Platform — quota enforcement", () => {
   test("upgrading the plan raises the quota", async () => {
     const { platform, cleanup } = makePlatform({ deploy: seedingDeploy });
     try {
-      platform.signUp("Acme"); // free → 1
+      await platform.signUp("Acme"); // free → 1
       await platform.deployForTenant("t1", "/ws/a", { app: "a" });
       await expect(platform.deployForTenant("t1", "/ws/b", { app: "b" })).rejects.toThrow(/quota/);
-      platform.setPlan("t1", "starter"); // 5
+      await platform.setPlan("t1", "starter"); // 5
       await platform.deployForTenant("t1", "/ws/b", { app: "b" }); // now allowed
-      expect(platform.projectCount("t1")).toBe(2);
+      expect(await platform.projectCount("t1")).toBe(2);
     } finally {
       cleanup();
     }
@@ -104,8 +104,8 @@ describe("Platform — quota enforcement", () => {
   test("a suspended or unknown tenant cannot deploy (fail closed)", async () => {
     const { platform, cleanup } = makePlatform({ deploy: seedingDeploy });
     try {
-      platform.signUp("Acme");
-      platform.suspend("t1");
+      await platform.signUp("Acme");
+      await platform.suspend("t1");
       await expect(platform.deployForTenant("t1", "/ws/a", { app: "a" })).rejects.toThrow(/suspended/);
       await expect(platform.deployForTenant("ghost", "/ws/a", { app: "a" })).rejects.toThrow(/unknown tenant/);
     } finally {
@@ -118,8 +118,8 @@ describe("Platform — isolation + delegation", () => {
   test("tenants are isolated: one cannot see another's deployment records or secrets", async () => {
     const { platform, cleanup } = makePlatform();
     try {
-      const a = platform.signUp("A");
-      const b = platform.signUp("B");
+      const a = await platform.signUp("A");
+      const b = await platform.signUp("B");
       // records
       const recA = new FileRecordStore(join(platform.stateDir(a.id), "deployments"));
       const recB = new FileRecordStore(join(platform.stateDir(b.id), "deployments"));
@@ -140,7 +140,7 @@ describe("Platform — isolation + delegation", () => {
   test("build runs a queued job through the runner and records the outcome (incl. failures)", async () => {
     const { platform, cleanup } = makePlatform();
     try {
-      platform.signUp("Acme"); // t1
+      await platform.signUp("Acme"); // t1
       const ok = await platform.build("t1", "myapp", { run: async () => ({ ok: true }) });
       expect(ok.status).toBe("succeeded");
       expect(ok.app).toBe("myapp");
@@ -159,11 +159,11 @@ describe("Platform — isolation + delegation", () => {
   test("build-rate quota: the free plan allows N builds/day, then blocks (fail closed)", async () => {
     const { platform, cleanup } = makePlatform();
     try {
-      platform.signUp("Acme"); // free → maxBuildsPerDay 10
+      await platform.signUp("Acme"); // free → maxBuildsPerDay 10
       for (let i = 0; i < 10; i++) await platform.submitBuild("t1", "app");
       await expect(platform.submitBuild("t1", "app")).rejects.toThrow(/build rate limit/);
       expect(platform.usageCountSince("t1", "build", "2025-01-01T00:00:00Z")).toBe(10);
-      platform.suspend("t1");
+      await platform.suspend("t1");
       await expect(platform.submitBuild("t1", "app")).rejects.toThrow(/suspended/);
     } finally {
       cleanup();
@@ -178,7 +178,7 @@ describe("Platform — isolation + delegation", () => {
     };
     const { platform, usage, cleanup } = makePlatform({ deploy });
     try {
-      const t = platform.signUp("Acme");
+      const t = await platform.signUp("Acme");
       await platform.deployForTenant(t.id, "/work/my-app");
       expect(captured?.app).toBe("my-app"); // derived from the path basename
       expect(captured?.stateDir).toBe(platform.stateDir(t.id)); // the tenant's isolated dir

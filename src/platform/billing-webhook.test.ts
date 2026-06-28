@@ -88,24 +88,24 @@ describe("applyBillingDecision", () => {
       resume: (id) => void calls.push(`resume(${id})`),
     };
   }
-  test("set-plan sets the plan AND resumes", () => {
+  test("set-plan sets the plan AND resumes", async () => {
     const ops = spyOps();
-    applyBillingDecision({ action: "set-plan", tenantId: "t1", plan: "pro" }, ops);
+    await applyBillingDecision({ action: "set-plan", tenantId: "t1", plan: "pro" }, ops);
     expect(ops.calls).toEqual(["setPlan(t1,pro)", "resume(t1)"]);
   });
-  test("suspend only suspends", () => {
+  test("suspend only suspends", async () => {
     const ops = spyOps();
-    applyBillingDecision({ action: "suspend", tenantId: "t1" }, ops);
+    await applyBillingDecision({ action: "suspend", tenantId: "t1" }, ops);
     expect(ops.calls).toEqual(["suspend(t1)"]);
   });
-  test("downgrade-free sets free AND resumes", () => {
+  test("downgrade-free sets free AND resumes", async () => {
     const ops = spyOps();
-    applyBillingDecision({ action: "downgrade-free", tenantId: "t1" }, ops);
+    await applyBillingDecision({ action: "downgrade-free", tenantId: "t1" }, ops);
     expect(ops.calls).toEqual(["setPlan(t1,free)", "resume(t1)"]);
   });
-  test("ignore touches nothing", () => {
+  test("ignore touches nothing", async () => {
     const ops = spyOps();
-    const out = applyBillingDecision({ action: "ignore", reason: "x" } as BillingDecision, ops);
+    const out = await applyBillingDecision({ action: "ignore", reason: "x" } as BillingDecision, ops);
     expect(ops.calls).toEqual([]);
     expect(out).toContain("ignored");
   });

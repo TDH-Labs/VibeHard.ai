@@ -288,8 +288,8 @@ async function authenticate(req: Request): Promise<{ email: string; user: User }
         return email;
       },
       findTenantByEmail: (email) => users()[email]?.tenantId ?? null,
-      createTenant: (email, name, id) => {
-        const t = platform.signUp(name);
+      createTenant: async (email, name, id) => {
+        const t = await platform.signUp(name);
         putUser(email, { tenantId: t.id, name, hash: `clerk:${id}` }); // hash marks a Clerk-owned account (no password)
         return t.id;
       },
@@ -337,10 +337,10 @@ const startSession = (email: string): string => setSession(email); // TTL-backed
  *  log into a pre-existing PASSWORD account via OAuth (that's account takeover — the OAuth side proves
  *  control of the provider identity, not of the local password account). Same-email OAuth accounts are
  *  fine (the verified email is the same person across providers). */
-function ensureUser(email: string, name: string, provider: string): { ok: true } | { ok: false; reason: string } {
+async function ensureUser(email: string, name: string, provider: string): Promise<{ ok: true } | { ok: false; reason: string }> {
   const existing = users()[email];
   if (!existing) {
-    const tenant = platform.signUp(name || email.split("@")[0]!);
+    const tenant = await platform.signUp(name || email.split("@")[0]!);
     putUser(email, { tenantId: tenant.id, name: name || email, hash: `oauth:${provider}` });
     return { ok: true };
   }
@@ -385,7 +385,7 @@ async function handleOAuth(url: URL, path: string): Promise<Response> {
   const { email, name, verified } = await cfg.userInfo(tok.access_token);
   if (!email) return redirect("/app?error=oauth-email");
   if (!verified) return redirect("/app?error=oauth-unverified-email"); // audit2 C-6: never trust an unverified address
-  const res = ensureUser(email, name || email, provider);
+  const res = await ensureUser(email, name || email, provider);
   if (!res.ok) return redirect("/app?error=use-password-login"); // a password account owns this email — no silent merge
   return redirect("/app", `vh=${startSession(email)}; Path=/; HttpOnly; SameSite=Lax`);
 }
@@ -578,7 +578,7 @@ const server = Bun.serve({
       const { email, password, name } = (await req.json()) as { email?: string; password?: string; name?: string };
       if (!email || !password || password.length < 8) return json({ error: "email and an 8+ char password are required" }, 400);
       if (users()[email]) return json({ error: "an account with that email already exists" }, 409);
-      const tenant = platform.signUp(name || email.split("@")[0]!);
+      const tenant = await platform.signUp(name || email.split("@")[0]!);
       putUser(email, { tenantId: tenant.id, name: name || email, hash: await Bun.password.hash(password) });
       const token = setSession(email);
       return json({ ok: true, tenantId: tenant.id }, 200, { "set-cookie": `vh=${token}; Path=/; HttpOnly; SameSite=Lax` });
@@ -642,7 +642,7 @@ const server = Bun.serve({
 
     if (path === "/api/me") {
       if (!auth) return json({ authed: false });
-      const t = platform.getTenant(auth.user.tenantId);
+      const t = await platform.getTenant(auth.user.tenantId);
       return json({
         authed: true,
         email: auth.email,
@@ -714,10 +714,10 @@ const server = Bun.serve({
       }
       const decision = decideBillingEvent(event, PRICE_TO_PLAN);
       try {
-        const note = applyBillingDecision(decision, {
-          setPlan: (id, plan) => void platform.setPlan(id, plan),
-          suspend: (id) => void platform.suspend(id),
-          resume: (id) => void platform.resume(id),
+        const note = await applyBillingDecision(decision, {
+          setPlan: (id, plan) => platform.setPlan(id, plan),
+          suspend: (id) => platform.suspend(id),
+          resume: (id) => platform.resume(id),
         });
         console.log(`[billing] ${note}`);
       } catch (e) {

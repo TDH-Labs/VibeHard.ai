@@ -15,13 +15,14 @@ export class FileTenantStore implements TenantStore {
     return join(this.dir, `${safeId(id)}.json`);
   }
 
-  create(tenant: Tenant): void {
+  // Methods are async to satisfy the TenantStore seam (Postgres is async); the fs work is sync.
+  async create(tenant: Tenant): Promise<void> {
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
     if (existsSync(this.path(tenant.id))) throw new Error(`tenant ${tenant.id} already exists`);
     writeFileSync(this.path(tenant.id), JSON.stringify(tenant, null, 2));
   }
 
-  get(id: string): Tenant | null {
+  async get(id: string): Promise<Tenant | null> {
     const p = this.path(id);
     if (!existsSync(p)) return null;
     try {
@@ -31,7 +32,7 @@ export class FileTenantStore implements TenantStore {
     }
   }
 
-  list(): Tenant[] {
+  async list(): Promise<Tenant[]> {
     if (!existsSync(this.dir)) return [];
     const out: Tenant[] = [];
     for (const f of readdirSync(this.dir)) {
@@ -45,7 +46,7 @@ export class FileTenantStore implements TenantStore {
     return out;
   }
 
-  update(tenant: Tenant): void {
+  async update(tenant: Tenant): Promise<void> {
     if (!existsSync(this.path(tenant.id))) throw new Error(`tenant ${tenant.id} not found`);
     writeFileSync(this.path(tenant.id), JSON.stringify(tenant, null, 2));
   }
