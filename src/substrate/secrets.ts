@@ -10,12 +10,9 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { sealJson, unsealJson } from "./seal.ts";
 import type { BackendSecrets, SecretsStore } from "./types.ts";
 
-const SALT_LEN = 16;
-const IV_LEN = 12;
-const TAG_LEN = 16;
 const safe = (app: string): string => app.replace(/[^a-zA-Z0-9_-]/g, "_");
 
 export class LocalEncryptedSecretsStore implements SecretsStore {
@@ -37,14 +34,8 @@ export class LocalEncryptedSecretsStore implements SecretsStore {
 
   async put(app: string, secrets: BackendSecrets): Promise<string> {
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
-    const salt = randomBytes(SALT_LEN);
-    const iv = randomBytes(IV_LEN);
-    const key = scryptSync(this.passphrase, salt, 32);
-    const cipher = createCipheriv("aes-256-gcm", key, iv);
-    const ct = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(secrets), "utf8")), cipher.final()]);
-    const blob = Buffer.concat([salt, iv, cipher.getAuthTag(), ct]).toString("base64");
     const p = this.path(app);
-    writeFileSync(p, blob);
+    writeFileSync(p, sealJson(secrets, this.passphrase)); // AES-256-GCM via the shared seal helper
     return p; // the secretsRef
   }
 
@@ -52,21 +43,9 @@ export class LocalEncryptedSecretsStore implements SecretsStore {
     const p = this.path(app);
     if (!existsSync(p)) return null;
     try {
-      const blob = Buffer.from(readFileSync(p, "utf8"), "base64");
-      const salt = blob.subarray(0, SALT_LEN);
-      const iv = blob.subarray(SALT_LEN, SALT_LEN + IV_LEN);
-      const tag = blob.subarray(SALT_LEN + IV_LEN, SALT_LEN + IV_LEN + TAG_LEN);
-      const ct = blob.subarray(SALT_LEN + IV_LEN + TAG_LEN);
-      if (tag.length !== TAG_LEN) return null; // reject a truncated blob outright
-      const key = scryptSync(this.passphrase, salt, 32);
-      // Pin the GCM auth-tag length (sast gcm-no-tag-length): without it Node accepts a shorter-than-
-      // expected tag, weakening the forgery bound. We always wrote a full 16-byte tag, so require it.
-      const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
-      decipher.setAuthTag(tag);
-      const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
-      return JSON.parse(pt.toString("utf8")) as BackendSecrets;
+      return unsealJson<BackendSecrets>(readFileSync(p, "utf8"), this.passphrase); // null on wrong key/tamper
     } catch {
-      // wrong passphrase or tampered ciphertext → auth tag check fails → null
+      // unreadable file → null
       return null;
     }
   }
