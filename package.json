@@ -24,6 +24,7 @@
     "@ai-sdk/openai-compatible": "^2.0.51",
     "@clerk/backend": "^3.8.4",
     "@electric-sql/pglite": "^0.5.3",
-    "ai": "^6.0.208"
+    "ai": "^6.0.208",
+    "postgres": "^3.4.9"
   }
 }
