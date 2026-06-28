@@ -12,6 +12,9 @@
  *   - `gate(dir)`     → pass/blocking-gates (default: the real runGate).
  * Tests inject fakes (or score existing fixtures) → the harness logic is verified with zero token spend.
  */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runGate } from "../gate/index.ts";
 
 /** One prompt to evaluate. `mustImplement` is optional feature-coverage the scorer can later check. */
@@ -46,6 +49,20 @@ export interface EvalDeps {
   build: (prompt: string, id: string) => Promise<{ dir: string | null; error?: string }>;
   /** Score a built workspace. Default: the real gate chain. */
   gate?: (dir: string) => Promise<{ passed: boolean; blockingGates: string[] }>;
+}
+
+/** Live builder: shells out to the real `vibehard build` per prompt (LLM tokens + Docker), each app in
+ *  its own temp dir. Explicit/opt-in only — the unit tests never use this; the CLI gates it behind --live. */
+export function cliBuild(cliEntry: string): EvalDeps["build"] {
+  return async (prompt, id) => {
+    const dir = mkdtempSync(join(tmpdir(), `vibehard-eval-${id}-`));
+    const proc = Bun.spawnSync(["bun", cliEntry, "build", prompt, dir], { stdout: "pipe", stderr: "pipe" });
+    if ((proc.exitCode ?? 1) !== 0) {
+      const log = `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`.trim();
+      return { dir: null, error: `build exited ${proc.exitCode}${log ? `: ${log.slice(-300)}` : ""}` };
+    }
+    return { dir };
+  };
 }
 
 /** Default scorer: the real gate chain. A built app "passes" iff no gate blocks. */
