@@ -8,7 +8,7 @@
  * postgres.js adapter added at wiring time. The legacy stores are synchronous; Postgres is async, so
  * these are async and Platform/web move to async to use them (the follow-on increment).
  */
-import type { Tenant } from "./types.ts";
+import type { Tenant, TenantStore } from "./types.ts";
 import type { BackendSecrets, DeploymentRecord } from "../substrate/types.ts";
 import { sealJson, unsealJson } from "../substrate/seal.ts";
 
@@ -48,7 +48,7 @@ function rowToTenant(r: Row): Tenant {
  * Postgres-backed tenant store — the async durable equivalent of FileTenantStore. Holds the
  * tenant + plan + status that billing/quota decisions read, so it MUST survive restarts.
  */
-export class PgTenantStore {
+export class PgTenantStore implements TenantStore {
   constructor(private readonly sql: Sql) {}
 
   async create(t: Tenant): Promise<void> {

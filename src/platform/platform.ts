@@ -78,43 +78,43 @@ export class Platform {
   }
 
   /** Sign up a new tenant (the builder). Returns the created record. */
-  signUp(name: string, plan: string = DEFAULT_PLAN): Tenant {
+  async signUp(name: string, plan: string = DEFAULT_PLAN): Promise<Tenant> {
     const tenant: Tenant = { id: this.newId(), name, plan, status: "active", createdAt: this.now() };
-    this.tenants.create(tenant);
+    await this.tenants.create(tenant);
     return tenant;
   }
 
-  getTenant(id: string): Tenant | null {
+  async getTenant(id: string): Promise<Tenant | null> {
     return this.tenants.get(id);
   }
 
-  listTenants(): Tenant[] {
+  async listTenants(): Promise<Tenant[]> {
     return this.tenants.list();
   }
 
-  private mutate(id: string, fn: (t: Tenant) => Tenant): Tenant {
-    const t = this.tenants.get(id);
+  private async mutate(id: string, fn: (t: Tenant) => Tenant): Promise<Tenant> {
+    const t = await this.tenants.get(id);
     if (!t) throw new Error(`unknown tenant ${id}`);
     const next = fn(t);
-    this.tenants.update(next);
+    await this.tenants.update(next);
     return next;
   }
 
   /** Tenant lifecycle: suspend (blocks deploys), resume, or change plan (changes the quota). */
-  suspend(tenantId: string): Tenant {
+  async suspend(tenantId: string): Promise<Tenant> {
     return this.mutate(tenantId, (t) => ({ ...t, status: "suspended" }));
   }
-  resume(tenantId: string): Tenant {
+  async resume(tenantId: string): Promise<Tenant> {
     return this.mutate(tenantId, (t) => ({ ...t, status: "active" }));
   }
-  setPlan(tenantId: string, plan: string): Tenant {
+  async setPlan(tenantId: string, plan: string): Promise<Tenant> {
     return this.mutate(tenantId, (t) => ({ ...t, plan }));
   }
 
   /** Count a tenant's ACTIVE projects (deployment records, excluding failed/destroyed). A failed
    *  deploy doesn't occupy a quota slot — provisioning already best-effort-cleans its resources,
    *  so a transient failure shouldn't permanently block a free-tier tenant. */
-  projectCount(tenantId: string): number {
+  async projectCount(tenantId: string): Promise<number> {
     const dir = join(this.stateDir(tenantId), "deployments");
     if (!existsSync(dir)) return 0;
     let n = 0;
@@ -139,13 +139,13 @@ export class Platform {
    * Enforce tenant status + plan quota. A REDEPLOY of an existing app is always allowed; only a
    * NEW app counts against maxProjects. Throws (not returns) on violation — fail closed.
    */
-  assertCanDeploy(tenantId: string, app: string): void {
-    const t = this.tenants.get(tenantId);
+  async assertCanDeploy(tenantId: string, app: string): Promise<void> {
+    const t = await this.tenants.get(tenantId);
     if (!t) throw new Error(`unknown tenant ${tenantId}`);
     if (t.status !== "active") throw new Error(`tenant ${tenantId} is ${t.status} — cannot deploy`);
     const plan = this.billing.planFor(t);
     const isExisting = existsSync(join(this.stateDir(tenantId), "deployments", `${safeSeg(app)}.json`));
-    if (!isExisting && this.projectCount(tenantId) >= plan.maxProjects) {
+    if (!isExisting && (await this.projectCount(tenantId)) >= plan.maxProjects) {
       throw new Error(`quota exceeded: plan "${plan.name}" allows ${plan.maxProjects} project(s) — upgrade to add more`);
     }
   }
@@ -160,7 +160,7 @@ export class Platform {
     opts: Omit<DeployAppOptions, "stateDir" | "deps"> = {},
   ): Promise<DeployOutcome> {
     const app = opts.app ?? basename(workspacePath);
-    this.assertCanDeploy(tenantId, app);
+    await this.assertCanDeploy(tenantId, app);
     // FORCE managed: every tenant app gets its OWN auto-provisioned project in its OWN isolated
     // dir — never the operator's shared project (which a global VIBEHARD_MANAGED flag couldn't guarantee).
     const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId), managed: true });
@@ -174,7 +174,7 @@ export class Platform {
    * on a suspended/unknown tenant or an exceeded rate — fail closed, BEFORE any work runs.
    */
   async submitBuild(tenantId: string, app: string, workspacePath?: string): Promise<BuildJob> {
-    const t = this.tenants.get(tenantId);
+    const t = await this.tenants.get(tenantId);
     if (!t) throw new Error(`unknown tenant ${tenantId}`);
     if (t.status !== "active") throw new Error(`tenant ${tenantId} is ${t.status} — cannot build`);
     const plan = this.billing.planFor(t);
