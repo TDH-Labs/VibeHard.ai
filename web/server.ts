@@ -27,6 +27,8 @@ import { realBuildTools } from "../src/orchestrator/build-tools.ts";
 import { llmClassifier } from "../src/orchestrator/orchestrator-llm.ts";
 import { validateSupabaseConnection, supabaseKeychainEntries, stripeConnectAuthUrl, exchangeStripeConnectCode, stripeKeychainEntries } from "../src/connectors/index.ts";
 import { isSafeAppName } from "../src/util/safe-path.ts";
+import { createClerkClient } from "@clerk/backend";
+import { clerkConfig, resolveTenantForClerkUser, frontendApiFromPublishableKey } from "../src/auth/clerk.ts";
 
 const ROOT = join(homedir(), ".vibehard");
 const WEB = join(ROOT, "web");
@@ -257,6 +259,52 @@ async function serveStatic(path: string): Promise<Response> {
 
 // ── social login (Google + GitHub OAuth) ────────────────────────────────────────
 const BASE_URL = process.env.BASE_URL || `http://localhost:${Number(process.env.PORT) || 4100}`;
+
+// ── Clerk auth (EPIC #34) — ENV-GATED. Active iff CLERK_SECRET_KEY + CLERK_PUBLISHABLE_KEY are set.
+//    With them, Clerk verifies the session and the legacy hand-rolled auth is disabled; without them,
+//    nothing changes (legacy auth stays). Adding the two keys is the single switch that flips it on. ──
+const CLERK = clerkConfig();
+const clerkClient = CLERK.enabled ? createClerkClient({ secretKey: CLERK.secretKey, publishableKey: CLERK.publishableKey }) : null;
+const clerkEmailCache = new Map<string, string>(); // Clerk userId → email, to avoid a getUser per request
+
+/** The single auth seam: with Clerk on, verify the Clerk session + map it to a local tenant; else the
+ *  legacy session store. Returns null (unauthenticated) on any verification failure — never throws. */
+async function authenticate(req: Request): Promise<{ email: string; user: User } | null> {
+  if (!CLERK.enabled || !clerkClient) return userOf(req);
+  try {
+    const rs = await clerkClient.authenticateRequest(req, { authorizedParties: [BASE_URL] });
+    if (!rs.isAuthenticated) return null;
+    const userId = rs.toAuth().userId;
+    if (!userId) return null;
+    let userPromise: ReturnType<typeof clerkClient.users.getUser> | null = null;
+    const getUserOnce = () => (userPromise ??= clerkClient.users.getUser(userId));
+    const resolved = await resolveTenantForClerkUser(userId, {
+      getEmail: async (id) => {
+        const cached = clerkEmailCache.get(id);
+        if (cached) return cached;
+        const u = await getUserOnce();
+        const email = u.emailAddresses.find((e) => e.id === u.primaryEmailAddressId)?.emailAddress ?? u.emailAddresses[0]?.emailAddress ?? null;
+        if (email) clerkEmailCache.set(id, email);
+        return email;
+      },
+      findTenantByEmail: (email) => users()[email]?.tenantId ?? null,
+      createTenant: (email, name, id) => {
+        const t = platform.signUp(name);
+        putUser(email, { tenantId: t.id, name, hash: `clerk:${id}` }); // hash marks a Clerk-owned account (no password)
+        return t.id;
+      },
+      getName: async (id) => {
+        const u = await getUserOnce();
+        return [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username || null;
+      },
+    });
+    if (!resolved) return null;
+    const user = users()[resolved.email];
+    return user ? { email: resolved.email, user } : null;
+  } catch {
+    return null; // a failed/forged session → unauthenticated, fail-closed, never a crash
+  }
+}
 // audit2 C-6: userInfo MUST report whether the provider VERIFIED the email. We only accept a verified
 // address — otherwise a user could set any unverified email at the provider and sign in as that
 // identity (→ silent merge onto a victim's account).
@@ -303,6 +351,7 @@ const redirect = (location: string, cookie?: string): Response =>
   new Response(null, { status: 302, headers: { location, ...(cookie ? { "set-cookie": cookie } : {}) } });
 
 async function handleOAuth(url: URL, path: string): Promise<Response> {
+  if (CLERK.enabled) return redirect("/app?error=use-clerk"); // Clerk owns auth — legacy social login off
   const parts = path.split("/"); // ["", "auth", provider, action?]
   const provider = parts[2] || "";
   const action = parts[3] || "";
@@ -347,7 +396,7 @@ async function handleStripeConnect(req: Request, url: URL, path: string): Promis
   if (!STRIPE_CONNECT_CLIENT_ID || !STRIPE_SECRET) return redirect("/app?connect=stripe-not-configured");
 
   if (path === "/auth/stripe/connect") {
-    const who = userOf(req);
+    const who = await authenticate(req);
     if (!who) return redirect("/app?connect=signin-first");
     const state = randomUUID();
     stripeConnectStates.set(state, who.user.tenantId);
@@ -510,6 +559,21 @@ const server = Bun.serve({
     if (path === "/auth/stripe/connect" || path === "/auth/stripe/callback") return handleStripeConnect(req, url, path);
     if (path.startsWith("/auth/")) return handleOAuth(url, path);
 
+    // Public: tells the frontend whether to render Clerk's UI (+ the publishable key, which is
+    // public-safe) or the legacy login form. No auth required.
+    if (path === "/api/auth-config") {
+      return json({
+        clerk: CLERK.enabled,
+        publishableKey: CLERK.enabled ? CLERK.publishableKey : "",
+        frontendApi: CLERK.enabled ? frontendApiFromPublishableKey(CLERK.publishableKey) : "",
+      });
+    }
+
+    // Clerk on → the legacy email/password endpoints are a parallel auth surface; disable them.
+    if (CLERK.enabled && (path === "/api/signup" || path === "/api/login" || path === "/api/forgot" || path === "/api/reset")) {
+      return json({ error: "authentication is handled by Clerk" }, 400);
+    }
+
     if (path === "/api/signup" && req.method === "POST") {
       const { email, password, name } = (await req.json()) as { email?: string; password?: string; name?: string };
       if (!email || !password || password.length < 8) return json({ error: "email and an 8+ char password are required" }, 400);
@@ -574,7 +638,7 @@ const server = Bun.serve({
       return json({ ok: true }, 200, { "set-cookie": "vh=; Path=/; Max-Age=0" });
     }
 
-    const auth = userOf(req);
+    const auth = await authenticate(req);
 
     if (path === "/api/me") {
       if (!auth) return json({ authed: false });
