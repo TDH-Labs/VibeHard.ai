@@ -2,6 +2,20 @@
 
 Newest entries on top. One entry per run. Keep the tree clean at the end of every run.
 
+## 2026-06-28 — durable tenant store wired via `Platform.open()` (EPIC #33, increment 5)
+Added a static async factory `Platform.open(opts)` that wires the durable `PgTenantStore`
+(via `openDb()` → managed Postgres on `DATABASE_URL`, else embedded disk Postgres) as the
+default tenant store, returning `{ platform, db }` so the caller owns the db lifecycle. An
+explicitly-supplied `tenants` store still wins, so every existing test/path is unchanged —
+purely additive behind the constructor seam. Exported `openDb`/`Db`/`PgTenantStore` from the
+platform barrel. Two new tests in `platform.test.ts`: signup survives an open→close→reopen
+(restart simulation) in embedded mode, and the injected-store-wins path. `bun test` = 884
+pass / 0 fail, `bun run typecheck` clean. Commit scoped to platform.ts + index.ts +
+platform.test.ts + this journal.
+**Next increment:** flip `web/server.ts`'s module-level `new Platform({...})` to
+`await Platform.open({...})` so the hosted server actually uses the durable store (needs
+making web init async — top-level await or an async bootstrap fn; close `db` on shutdown).
+
 ## 2026-06-28 — async-flip SALVAGED + loop hardened (interactive, with Adam)
 The first batch of ~9 autonomous runs (14:07–18:36Z) **thrashed**: they made the
 async-flip source edits across 8 files but never finished, never committed, never wrote
