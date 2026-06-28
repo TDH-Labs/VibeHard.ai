@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
+import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
 import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
 import { SPECIALTIES } from "./escalation/routing.ts";
@@ -520,6 +521,35 @@ export async function main(argv: string[]): Promise<number> {
       if ("sentinel" in result) console.log("   no sentinel written");
     }
     return result.passed ? 0 : 1;
+  }
+
+  if (cmd === "eval") {
+    // Generation-reliability eval: build every corpus prompt, score each through the gate chain,
+    // report a success rate. LIVE generation costs LLM tokens + Docker time, so it is OPT-IN.
+    const corpusPath = arg && !arg.startsWith("--") ? resolve(arg) : join(import.meta.dir, "..", "fixtures", "eval-corpus.json");
+    const live = argv.includes("--live") || process.env.VIBEHARD_EVAL_LIVE === "1";
+    if (!existsSync(corpusPath)) {
+      console.error(`eval: corpus not found: ${corpusPath}`);
+      return 2;
+    }
+    let corpus: EvalCase[];
+    try {
+      corpus = JSON.parse(readFileSync(corpusPath, "utf8")) as EvalCase[];
+    } catch (e) {
+      console.error(`eval: could not parse corpus ${corpusPath}: ${e instanceof Error ? e.message : String(e)}`);
+      return 2;
+    }
+    if (!live) {
+      console.log(`eval corpus: ${corpus.length} prompt(s) from ${corpusPath}`);
+      for (const c of corpus) console.log(`  • ${c.id} — ${c.prompt}`);
+      console.log(`\nThis is a dry listing. A real run BUILDS each app (LLM tokens + Docker) and scores it through the gate chain.`);
+      console.log(`Re-run with --live (or VIBEHARD_EVAL_LIVE=1) to measure the generation success rate.`);
+      return 0;
+    }
+    console.log(`running LIVE eval over ${corpus.length} prompt(s) — this generates + gates each app…\n`);
+    const report = await runEval(corpus, { build: cliBuild(import.meta.path) });
+    console.log(formatReport(report));
+    return report.successRate === 1 ? 0 : 1;
   }
 
   if (cmd === "intake") {
