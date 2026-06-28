@@ -1,0 +1,25 @@
+name: CI
+
+# Production-readiness loop, gate 0: the platform's own quality bar runs on every push.
+# Unit tests (844) + typecheck. Container-scanner integration tests are env-gated
+# (VIBEHARD_INTEGRATION) and excluded here; they get a separate Docker-enabled job later.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Unit tests
+        run: bun test
