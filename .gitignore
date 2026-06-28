@@ -11,6 +11,11 @@ dist/
 !fixtures/build-logs/*.log
 .DS_Store
 
+# Autonomous loop runtime (scripts/loop-run.sh): single-run lock + per-run telemetry.
+# LOOP_NOTES.md (committed milestone journal) and LOOP_BACKLOG.md are NOT ignored.
+.loop/
+.loop.lock/
+
 # Local env / secrets — never commit
 .env
 .env.*

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Repo invariant: a commit must pass typecheck AND tests. This is the deterministic
+# backstop behind the autonomous loop — even a hand-rolled `git commit` cannot land
+# broken code on this clone. Intentional human WIP can bypass with: git commit --no-verify
+#
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+echo "[pre-commit] typecheck…"
+if ! bun run typecheck; then
+  echo "[pre-commit] BLOCKED — typecheck failed. (bypass for human WIP: git commit --no-verify)"; exit 1
+fi
+echo "[pre-commit] tests…"
+if ! bun test; then
+  echo "[pre-commit] BLOCKED — tests failed. (bypass for human WIP: git commit --no-verify)"; exit 1
+fi
+echo "[pre-commit] green ✓"
