@@ -14,6 +14,13 @@ describe("clerkConfig — enabled only when both keys present", () => {
     expect(clerkConfig({ CLERK_PUBLISHABLE_KEY: "pk_test_y" }).enabled).toBe(false);
     expect(clerkConfig({}).enabled).toBe(false);
   });
+
+  test("accepts framework-prefixed publishable-key names (what people paste from snippets)", () => {
+    expect(clerkConfig({ CLERK_SECRET_KEY: "sk_test_x", NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_n" })).toMatchObject({ enabled: true, publishableKey: "pk_test_n" });
+    expect(clerkConfig({ CLERK_SECRET_KEY: "sk_test_x", VITE_CLERK_PUBLISHABLE_KEY: "pk_test_v" })).toMatchObject({ enabled: true, publishableKey: "pk_test_v" });
+    // the plain name wins when several are set
+    expect(clerkConfig({ CLERK_SECRET_KEY: "s", CLERK_PUBLISHABLE_KEY: "pk_plain", NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_next" }).publishableKey).toBe("pk_plain");
+  });
 });
 
 describe("frontendApiFromPublishableKey", () => {

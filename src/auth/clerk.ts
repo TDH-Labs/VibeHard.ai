@@ -17,10 +17,12 @@ export interface ClerkConfig {
   publishableKey: string;
 }
 
-/** Read Clerk config from env. `enabled` iff both keys are present. */
+/** Read Clerk config from env. `enabled` iff both keys are present. The publishable key's VALUE is the
+ *  same across frameworks — only the env-var prefix differs — so we accept the names people actually
+ *  paste from dashboard snippets (Next.js `NEXT_PUBLIC_`, Vite `VITE_`) as well as the plain name. */
 export function clerkConfig(env: Record<string, string | undefined> = process.env): ClerkConfig {
   const secretKey = env.CLERK_SECRET_KEY ?? "";
-  const publishableKey = env.CLERK_PUBLISHABLE_KEY ?? "";
+  const publishableKey = env.CLERK_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
   return { enabled: Boolean(secretKey && publishableKey), secretKey, publishableKey };
 }
 
