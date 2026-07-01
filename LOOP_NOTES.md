@@ -211,3 +211,6 @@ feat: #deploy1/#deploy2/#package1 — Dockerfile, fly.toml, start script (config
 
 ## 2026-07-01T17:32:40Z — DONE
 fix: CI failure — deploy-app.test.ts stubs Supabase/secrets env hermetically (not ambient .env)
+
+## 2026-07-01T20:04:27Z — DONE
+feat: enable allow_promotion_codes on checkout so coupon codes (e.g. beta testers) actually work
