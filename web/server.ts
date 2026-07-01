@@ -559,7 +559,7 @@ const server = Bun.serve({
     const url = new URL(req.url);
     const path = url.pathname;
 
-    if (path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML));
+    if (path === "/" || path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML));
     if (path === "/auth/stripe/connect" || path === "/auth/stripe/callback") return handleStripeConnect(req, url, path);
     if (path.startsWith("/auth/")) return handleOAuth(url, path);
 
