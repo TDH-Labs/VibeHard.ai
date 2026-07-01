@@ -83,6 +83,7 @@ export class StripeClient {
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       "subscription_data[metadata][tenantId]": input.tenantId,
+      allow_promotion_codes: "true", // lets a customer enter a coupon/promo code at checkout (e.g. a beta-tester discount)
     })) as { id: string; url: string };
     return { id: j.id, url: j.url };
   }

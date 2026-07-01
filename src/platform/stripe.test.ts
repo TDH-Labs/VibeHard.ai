@@ -44,6 +44,7 @@ describe("StripeClient", () => {
     const checkout = calls.find((x) => x.path === "/v1/checkout/sessions");
     expect(checkout?.body?.["line_items[0][price]"]).toBe("price_practice"); // form-encoded params landed
     expect(checkout?.body?.mode).toBe("subscription");
+    expect(checkout?.body?.allow_promotion_codes).toBe("true"); // lets a customer enter a coupon/promo code (beta-tester discounts)
     expect(calls.every((x) => x.auth === "Bearer sk_test_x")).toBe(true); // key in the header, never the path
     expect(calls.every((x) => !x.path.includes("sk_test_x"))).toBe(true);
   });
