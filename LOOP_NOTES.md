@@ -2,6 +2,54 @@
 
 Newest entries on top. One entry per run. Keep the tree clean at the end of every run.
 
+## 2026-07-01 — web/server.ts wired to Platform.open() + real launch-readiness audit (increment 10 / #33e)
+Adam: "figure out why this isn't ready on a server somewhere for users to sign up." Instead of
+grinding the next backlog item blind, did a direct investigation of the actual running
+production entrypoint and its real `.env` (boolean presence checks only — no values read/printed):
+
+- **`web/server.ts` never adopted this session's EPIC #33 work.** Still had
+  `new Platform({ baseDir: ROOT, billing: stripeBilling })` — the synchronous, file-backed
+  constructor. All of #33a-d was fully built, tested, and completely inert in the one process
+  that actually runs in production. FIXED: `const { platform, db: platformDb } = await
+  Platform.open({...})` (top-level await — package is `"type": "module"`, Bun supports it
+  natively) + `SIGTERM`/`SIGINT` handlers that call `await platformDb.close()` (a container
+  stop/redeploy sends SIGTERM, not a clean process.exit). VERIFIED BY ACTUALLY BOOTING IT
+  (`bun web/server.ts`), not just typecheck: got `HTTP 200` on `/app`, confirmed the embedded
+  pglite data directory materialized as real Postgres files on disk at `~/.vibehard/db`, and
+  confirmed SIGTERM closes cleanly. This is the highest-leverage fix in the whole session — it's
+  what actually turns EPIC #33 on.
+- **A real signup would fail on their first deploy TODAY**, independent of DATABASE_URL:
+  `Platform.deployForTenant` always forces `managed: true`, and managed mode constructs a
+  `SupabaseManagementClient` which throws `"missing SUPABASE_ACCESS_TOKEN"` if unset
+  (`src/substrate/supabase-management.ts:65`) — confirmed by reading the code path, not assumed.
+  `.env`'s `SUPABASE_ACCESS_TOKEN` is unset. This is a credential-only blocker (the code is
+  already correct/fail-closed) — added to LOOP_BACKLOG.md's "Blocked" section with the exact
+  file:line so it's unambiguous, not vague "needs Supabase creds."
+- **No sandbox isolation** (`#32a`, already tracked, unchanged) — untrusted generated builds run
+  as a plain child process on the host today.
+- **`.env.example` was missing `DATABASE_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+  `VIBEHARD_STRIPE_PRICE_MAP`** entirely, despite all being real load-bearing vars in shipped
+  code. Documented all four + upgraded the `SUPABASE_ACCESS_TOKEN` comment to state the forced-
+  managed-mode requirement plainly.
+- **Stale backlog item found and removed:** the old `#36a — Stripe checkout endpoint` item
+  claimed this was still TODO. It's not — `/api/billing/checkout` + `/api/billing/webhook` are
+  fully built in `web/server.ts` (confirmed by reading the code). Moved the REAL remaining gap
+  (missing `STRIPE_WEBHOOK_SECRET`/`VIBEHARD_STRIPE_PRICE_MAP` — checkout sessions can be
+  created but the plan never syncs after payment) into "Blocked — needs Adam." Lesson: verify
+  LOOP_BACKLOG.md's claims against actual code before trusting them as the task list — it can
+  drift stale, same as any todo list nobody re-audits against reality.
+- **No git remote configured at all** (`git remote -v` empty) — CI has never run, there's no
+  git-based deploy pipeline possible, and nothing is backed up off this machine. Needs Adam
+  (repo creation is an account action, and push always needs explicit authorization anyway).
+
+`bun test` = 891 pass / 0 fail, typecheck clean throughout. Commit `f9f7fce`.
+
+**Net effect:** the code-only gaps are now closed as far as they can go without secrets/accounts
+only Adam holds. What remains is entirely operator config + accounts, itemized precisely (with
+file:line where relevant) in LOOP_BACKLOG.md's "Blocked" section — not vague "needs more setup."
+
+**Next increment:** #32a — sandbox gating. See LOOP_BACKLOG.md.
+
 ## 2026-07-01 — EPIC #33 durable state COMPLETE (increment 9 / backlog #33d)
 `Platform` now retains its constructor's `sql` as a private field, and `deployForTenant` passes
 `sql: this.sql, scope: tenantId` into `this.deploy(...)`'s opts — closing the gap #33c's note
