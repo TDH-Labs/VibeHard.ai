@@ -2,6 +2,37 @@
 
 Newest entries on top. One entry per run. Keep the tree clean at the end of every run.
 
+## 2026-07-01 — secrets + records durable stores wired (EPIC #33, increments 7-8 / backlog #33b, #33c)
+Continued straight through from increment 6 in the same session (Adam: "we never handed off, I
+want you to continue" — no Hermes handoff this round).
+
+**#33b (secrets):** `defaultSubstrateDeps` (`src/substrate/deploy-app.ts`) gained `sql?: Sql` +
+`scope?: string`; when `sql` is set it builds `PgSecretsStore(sql, passphrase, scope)` instead of
+`LocalEncryptedSecretsStore`. `PgSecretsStore` already satisfied the async `SecretsStore`
+interface, so this was a clean drop-in. Threaded through `DeployAppOptions`/`deployApp`. Commit
+`a01c8ec`.
+
+**#33c (records):** Discovered `RecordStore` was still a SYNC interface (9 call sites in
+`orchestrator.ts`), so `PgRecordStore` (already async) didn't structurally fit — split this out
+rather than force it into #33b. Flipped `RecordStore` to async: `orchestrator.ts`'s
+`provisionAndDeploy`/`destroy` were already `async` functions, so every call site just needed an
+`await` added (not a redesign) — this is NOT the same risk shape as the original Platform
+async-flip (ca86369), which had to flip previously-sync callers. Updated 4 test files with sync
+fakes (`record.test.ts`, `orchestrator.test.ts`, `deploy-app.test.ts`, `platform.test.ts`). Came
+back green in one pass (889/889), so — per the backlog item's own contingency — also wired
+`PgRecordStore(sql, scope)` into `defaultSubstrateDeps` in the same run, mirroring #33b's pattern
+exactly. Commit `a9adfb9`.
+
+**EPIC #33 status:** all three durable-state seams (tenants/secrets/records) now select Postgres
+vs. file-backed behind the same `sql`/`scope` factory pattern, unit-tested against embedded
+pglite, zero live `DATABASE_URL` needed. NOT yet wired end-to-end: `Platform.deployForTenant`
+doesn't currently pass its own `sql` through to `this.deploy(...)`'s `opts` — so a `Platform`
+opened via `Platform.open()` (durable tenants) still deploys apps with file-backed
+secrets/records unless the caller explicitly passes `sql`/`scope` into `deployForTenant`'s opts.
+That's a small follow-up (thread `this.sql` — Platform would need to retain it as a field — into
+`deployForTenant`'s call to `this.deploy`) but is genuinely a distinct, separately-testable slice;
+left as a new backlog item rather than scope-creeping this run further.
+
 ## 2026-07-01 — store factory: constructor `sql` seam (EPIC #33, increment 6 / backlog #33a)
 Adam asked to continue directly (no Hermes handoff) after noticing a stalled scheduled run
 (journal shows a `START @ 93858b2` at 15:10:41Z with no matching `finish`/`abort` — the
