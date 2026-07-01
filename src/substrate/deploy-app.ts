@@ -18,6 +18,7 @@ import { refFromUrl, SupabaseBackendProvider } from "./supabase.ts";
 import { VercelHostProvider } from "./vercel.ts";
 import { FlyHostProvider } from "./fly.ts";
 import { provisionAndDeploy, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
+import { PgSecretsStore, type Sql } from "../platform/pg-store.ts";
 import type { Migration } from "./types.ts";
 
 /** Read the workspace's Supabase migrations (sorted by filename), each file → one Migration. */
@@ -48,17 +49,32 @@ export function rlsEnabledTablesFromMigrations(migrations: Migration[]): string[
 }
 
 /**
- * Assemble the real providers from env. Records + secrets live under stateDir (default ~/.vibehard).
- * The HOST is chosen by artifact: a Dockerfile in the workspace → Fly (container deploy, any
- * language); otherwise Vercel (JS/TS-native). One signal — the presence of a Dockerfile — used
- * consistently with the verify gate's launch detection and FlyHostProvider's own precondition.
+ * Assemble the real providers from env. Records + secrets live under stateDir (default ~/.vibehard),
+ * UNLESS a durable-DB `sql` runner is injected (EPIC #33b), in which case secrets go to the
+ * Postgres-backed store instead (scoped per tenant so a cloud box restart/redeploy doesn't lose
+ * them) — records stay file-based for now (`RecordStore` is still a sync interface; PgRecordStore
+ * needs its own async-flip, tracked separately). The HOST is chosen by artifact: a Dockerfile in
+ * the workspace → Fly (container deploy, any language); otherwise Vercel (JS/TS-native). One
+ * signal — the presence of a Dockerfile — used consistently with the verify gate's launch
+ * detection and FlyHostProvider's own precondition.
  */
 export function defaultSubstrateDeps(
-  opts: { stateDir?: string; onStep?: (m: string) => void; workspacePath?: string; managed?: boolean; appName?: string } = {},
+  opts: {
+    stateDir?: string;
+    onStep?: (m: string) => void;
+    workspacePath?: string;
+    managed?: boolean;
+    appName?: string;
+    sql?: Sql; // durable-DB query runner; when set, secrets use PgSecretsStore instead of the local file store
+    scope?: string; // tenant id the Pg-backed secrets are scoped under (defaults to appName, then "default")
+  } = {},
 ): SubstrateDeps {
   const stateDir = opts.stateDir ?? join(homedir(), ".vibehard");
   const containerized = !!opts.workspacePath && existsSync(join(opts.workspacePath, "Dockerfile"));
-  const secrets = new LocalEncryptedSecretsStore(join(stateDir, "secrets"), process.env.VIBEHARD_SECRETS_KEY ?? "");
+  const passphrase = process.env.VIBEHARD_SECRETS_KEY ?? "";
+  const secrets = opts.sql
+    ? new PgSecretsStore(opts.sql, passphrase, opts.scope ?? opts.appName ?? "default")
+    : new LocalEncryptedSecretsStore(join(stateDir, "secrets"), passphrase);
   return {
     // Managed mode → auto-CREATE a Supabase project per app (Management API); else adopt the
     // project named in the environment (single-project v1). Managed needs no SUPABASE_URL/keys.
@@ -80,6 +96,8 @@ export interface DeployAppOptions {
   stateDir?: string;
   onStep?: (message: string) => void;
   managed?: boolean; // force managed (auto-create a project); defaults to the VIBEHARD_MANAGED env flag
+  sql?: Sql; // durable-DB query runner; when set, secrets use PgSecretsStore (EPIC #33b)
+  scope?: string; // tenant id the Pg-backed secrets are scoped under
 }
 
 /** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
@@ -88,7 +106,9 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   // Managed (auto-create a project per app): forced by the caller (e.g. deployForTenant) or,
   // failing that, opt-in via VIBEHARD_MANAGED=1. Default = adopt the env project.
   const managed = opts.managed ?? process.env.VIBEHARD_MANAGED === "1";
-  const deps = opts.deps ?? defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app });
+  const deps =
+    opts.deps ??
+    defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app, sql: opts.sql, scope: opts.scope });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
   const rlsEnabledTables = rlsEnabledTablesFromMigrations(migrations);
