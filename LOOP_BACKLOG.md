@@ -10,14 +10,6 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Next up (ordered — do the top one)
 
-- [ ] **#33d — thread `sql` from Platform into deployForTenant.** `Platform.deployForTenant`
-  (`src/platform/platform.ts`) calls `this.deploy(workspacePath, {...opts, app, stateDir, managed})`
-  but never passes `sql`/`scope` — so even a `Platform` opened via `Platform.open()` (durable
-  tenants) still deploys apps with file-backed secrets/records (#33b/#33c stay dormant unless a
-  caller manually threads `sql` into `deployForTenant`'s opts). Retain the constructor's `sql` as
-  a private field on `Platform`, and pass `sql: this.sql, scope: tenantId` into the `this.deploy(...)`
-  call in `deployForTenant`. Test: a `Platform` constructed with an injected `sql` deploys through
-  the injected `deploy` fn and the opts it receives include `sql`/`scope: tenantId`.
 - [ ] **#32a — sandbox gating.** Wire `runInFlySandbox` (`src/substrate/fly-sandbox.ts`) into
   the build/verify path so untrusted generated build+boot runs isolated WHEN `FLY_API_TOKEN`
   is present; fall back to local execution when absent. Test the gating decision only — DO NOT
@@ -61,3 +53,14 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
   same run: wired `PgRecordStore(sql, scope)` into `defaultSubstrateDeps` alongside the #33b
   secrets selection (same `sql`/`scope` option, same pattern). Test: file-backed by default,
   Pg-backed + tenant-scoped round-trip. `bun test` = 889 pass / 0 fail, typecheck clean.
+- [x] **#33d — thread `sql` from Platform into deployForTenant.** `Platform` now retains its
+  constructor's `sql` as a private field; `deployForTenant` passes `sql: this.sql, scope: tenantId`
+  into `this.deploy(...)`'s opts, so a `Platform` opened via `Platform.open()` (durable tenants)
+  now ALSO deploys with Pg-backed secrets/records (#33b/#33c), scoped per tenant — closing the gap
+  the #33c note flagged. Test: a `Platform` constructed with a real pglite-backed `sql` (through
+  which signup goes via `PgTenantStore`, proving the constructor seam end-to-end) deploys through
+  an injected `deploy` fn whose captured opts show the SAME `sql` + `scope: tenantId`; a second
+  test confirms `sql` stays `undefined` when the Platform wasn't given one (file-backed path
+  unchanged). EPIC #33 durable state is now fully wired end-to-end behind existing seams — every
+  piece is additive/opt-in and needs no live `DATABASE_URL` to exercise. `bun test` = 891 pass /
+  0 fail, typecheck clean.

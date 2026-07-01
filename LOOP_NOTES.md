@@ -99,3 +99,6 @@ feat: #33b secrets store factory — PgSecretsStore wired into defaultSubstrateD
 
 ## 2026-07-01T15:26:38Z — DONE
 feat: #33c RecordStore async-flip + PgRecordStore wired into defaultSubstrateDeps (EPIC #33)
+
+## 2026-07-01T15:30:43Z — DONE
+feat: #33d thread Platform's sql/tenant scope into deployForTenant (EPIC #33 complete)
