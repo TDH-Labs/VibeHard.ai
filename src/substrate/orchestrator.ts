@@ -71,13 +71,13 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     throw new Error("runtime substrate refused: sentinel absent or HMAC invalid — the gate must pass before deploy");
   }
 
-  let record = deps.records.get(input.app) ?? freshRecord(input, now());
+  let record = (await deps.records.get(input.app)) ?? freshRecord(input, now());
   record = { ...record, status: "provisioning", updatedAt: now() };
-  deps.records.put(record);
+  await deps.records.put(record);
 
-  const abort = (at: string, reason: string): DeployOutcome => {
+  const abort = async (at: string, reason: string): Promise<DeployOutcome> => {
     record = { ...record, status: "failed", updatedAt: now() };
-    deps.records.put(record);
+    await deps.records.put(record);
     return { live: false, url: null, abortedAt: at, reason, record };
   };
 
@@ -86,14 +86,14 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     step(`provisioning backend (reuse=${Boolean(record.projectRef)})`);
     const { handle, secrets } = await deps.backend.ensureProject(record, input.org);
     record = { ...record, projectRef: handle.projectRef, updatedAt: now() };
-    deps.records.put(record);
+    await deps.records.put(record);
 
     // 2. apply only NEW migrations; a SQL error is a hard stop (first place it runs)
     step("applying migrations");
     const mig = await deps.backend.applyMigrations(handle, input.migrations, record.appliedMigrations);
     if (!mig.ok) return abort("apply-migrations", `migration failed: ${mig.error ?? "unknown"}`);
     record = { ...record, appliedMigrations: [...record.appliedMigrations, ...mig.appliedNow], updatedAt: now() };
-    deps.records.put(record);
+    await deps.records.put(record);
 
     // 3. ⭐ verify RLS is enforced LIVE — the gate guarantee carried into runtime
     step("verifying live RLS");
@@ -112,7 +112,7 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     step("storing secrets");
     const secretsRef = await deps.secrets.put(input.app, secrets);
     record = { ...record, secretsRef, updatedAt: now() };
-    deps.records.put(record);
+    await deps.records.put(record);
 
     // 6. deploy the frontend (idempotent on hostRef). Inject url + anon under the canonical
     //    AND the framework-public names (Next's NEXT_PUBLIC_*, Vite's VITE_*) so the
@@ -132,11 +132,11 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     };
     const deployed = await deps.host.deploy(input.workspacePath, hostEnv, record.hostRef);
     record = { ...record, url: deployed.url, hostRef: deployed.hostRef, updatedAt: now() };
-    deps.records.put(record);
+    await deps.records.put(record);
 
     // 7. live — only reachable if steps 1–6 all succeeded
     record = { ...record, status: "live", updatedAt: now() };
-    deps.records.put(record);
+    await deps.records.put(record);
     step(`live at ${deployed.url}`);
     return { live: true, url: deployed.url, abortedAt: null, reason: "deployed", record };
   } catch (e) {
@@ -146,11 +146,11 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
 
 /** Crude teardown (R9, v1): delete the app's resources + clear its record. */
 export async function destroy(app: string, deps: SubstrateDeps): Promise<{ destroyed: boolean }> {
-  const record = deps.records.get(app);
+  const record = await deps.records.get(app);
   if (!record) return { destroyed: false };
   if (record.projectRef) await deps.backend.deleteProject({ projectRef: record.projectRef });
   if (record.hostRef) await deps.host.teardown(record.hostRef);
   await deps.secrets.remove(app);
-  deps.records.remove(app);
+  await deps.records.remove(app);
   return { destroyed: true };
 }

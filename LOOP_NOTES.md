@@ -65,3 +65,6 @@ feat: #33a store factory — Platform constructor sql seam wires PgTenantStore (
 
 ## 2026-07-01T15:21:09Z — DONE
 feat: #33b secrets store factory — PgSecretsStore wired into defaultSubstrateDeps (EPIC #33)
+
+## 2026-07-01T15:26:38Z — DONE
+feat: #33c RecordStore async-flip + PgRecordStore wired into defaultSubstrateDeps (EPIC #33)

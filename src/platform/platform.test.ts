@@ -125,9 +125,9 @@ describe("Platform — isolation + delegation", () => {
       // records
       const recA = new FileRecordStore(join(platform.stateDir(a.id), "deployments"));
       const recB = new FileRecordStore(join(platform.stateDir(b.id), "deployments"));
-      recA.put({ ...REC, app: "notes" });
-      expect(recA.get("notes")).not.toBeNull();
-      expect(recB.get("notes")).toBeNull(); // B's store cannot reach A's app
+      await recA.put({ ...REC, app: "notes" });
+      expect(await recA.get("notes")).not.toBeNull();
+      expect(await recB.get("notes")).toBeNull(); // B's store cannot reach A's app
       // secrets
       const secA = new LocalEncryptedSecretsStore(join(platform.stateDir(a.id), "secrets"), "test-key");
       const secB = new LocalEncryptedSecretsStore(join(platform.stateDir(b.id), "secrets"), "test-key");

@@ -29,16 +29,16 @@ const rec: DeploymentRecord = {
 describe("FileRecordStore", () => {
   test("put → get round-trips, and persists across a fresh store instance", async () => {
     const d = await dir();
-    new FileRecordStore(d).put(rec);
-    expect(new FileRecordStore(d).get("my app/1")).toEqual(rec); // a new instance reads it off disk
+    await new FileRecordStore(d).put(rec);
+    expect(await new FileRecordStore(d).get("my app/1")).toEqual(rec); // a new instance reads it off disk
   });
 
   test("missing → null; remove deletes it", async () => {
     const d = await dir();
     const s = new FileRecordStore(d);
-    expect(s.get("nope")).toBeNull();
-    s.put(rec);
-    s.remove("my app/1");
-    expect(s.get("my app/1")).toBeNull();
+    expect(await s.get("nope")).toBeNull();
+    await s.put(rec);
+    await s.remove("my app/1");
+    expect(await s.get("my app/1")).toBeNull();
   });
 });

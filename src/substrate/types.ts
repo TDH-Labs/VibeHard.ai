@@ -107,7 +107,7 @@ export interface DeploymentRecord {
 
 /** Persistence for DeploymentRecords (file-backed v1; platform DB later). */
 export interface RecordStore {
-  get(app: string): DeploymentRecord | null;
-  put(record: DeploymentRecord): void;
-  remove(app: string): void;
+  get(app: string): Promise<DeploymentRecord | null>;
+  put(record: DeploymentRecord): Promise<void>;
+  remove(app: string): Promise<void>;
 }

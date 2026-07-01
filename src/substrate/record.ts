@@ -1,8 +1,9 @@
 /**
  * DeploymentRecord persistence (docs/runtime-substrate § W4). v1 is a simple
  * file-backed store — one JSON file per app under a directory. The record is the
- * idempotency key + lifecycle backbone; a platform DB drops in behind `RecordStore`
- * later. Synchronous on purpose: tiny files, called between async provider steps.
+ * idempotency key + lifecycle backbone. `RecordStore` is async so a durable-DB
+ * implementation (`PgRecordStore`, EPIC #33c) drops in behind the same interface;
+ * this file-backed one just wraps synchronous fs calls in a resolved Promise.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ export class FileRecordStore implements RecordStore {
     return join(this.dir, `${safe(app)}.json`);
   }
 
-  get(app: string): DeploymentRecord | null {
+  async get(app: string): Promise<DeploymentRecord | null> {
     const p = this.path(app);
     if (!existsSync(p)) return null;
     try {
@@ -27,12 +28,12 @@ export class FileRecordStore implements RecordStore {
     }
   }
 
-  put(record: DeploymentRecord): void {
+  async put(record: DeploymentRecord): Promise<void> {
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
     writeFileSync(this.path(record.app), JSON.stringify(record, null, 2));
   }
 
-  remove(app: string): void {
+  async remove(app: string): Promise<void> {
     const p = this.path(app);
     if (existsSync(p)) rmSync(p, { force: true });
   }
