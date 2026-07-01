@@ -205,3 +205,6 @@ feat: web/server.ts adopts Platform.open() (durable store finally live) + docume
 
 ## 2026-07-01T15:50:27Z — DONE
 feat: #32a sandbox gating — container verify path prefers an ephemeral Fly machine over the host (EPIC #32)
+
+## 2026-07-01T16:43:11Z — DONE
+feat: #deploy1/#deploy2/#package1 — Dockerfile, fly.toml, start script (config only, no deploy)
