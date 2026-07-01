@@ -2,6 +2,26 @@
 
 Newest entries on top. One entry per run. Keep the tree clean at the end of every run.
 
+## 2026-07-01 — EPIC #33 durable state COMPLETE (increment 9 / backlog #33d)
+`Platform` now retains its constructor's `sql` as a private field, and `deployForTenant` passes
+`sql: this.sql, scope: tenantId` into `this.deploy(...)`'s opts — closing the gap #33c's note
+flagged: a `Platform` opened via `Platform.open()` now ALSO deploys its tenants' apps through the
+Pg-backed secrets/records stores (#33b/#33c), scoped per tenant, not just the Pg-backed tenant
+store (#33a). Two tests: a `Platform` built with a real pglite-backed `sql` (signup goes through
+`PgTenantStore`, proving the constructor seam end-to-end) deploys through an injected `deploy` fn
+whose captured opts carry the SAME `sql` + `scope: tenantId`; a second confirms `sql` stays
+`undefined` when the Platform wasn't given one (file-backed default unchanged). `bun test` = 891
+pass / 0 fail, typecheck clean. Commit `a10b88d`.
+
+**EPIC #33 is now fully wired end-to-end**, all four sub-increments (#33a tenants, #33b secrets,
+#33c records + the RecordStore async-flip, #33d threading) behind existing constructor/opts
+seams, unit-tested against embedded pglite, zero live `DATABASE_URL` required to exercise any of
+it. What's left before this is exercised against a REAL managed Postgres: nothing on the code
+side — that's launch-blocker territory (Adam needs to provide `DATABASE_URL`; see HANDOFF.md §5).
+
+**Next increment:** #32a — sandbox gating (wire `runInFlySandbox` into the build/verify path
+behind `FLY_API_TOKEN`). See LOOP_BACKLOG.md.
+
 ## 2026-07-01 — secrets + records durable stores wired (EPIC #33, increments 7-8 / backlog #33b, #33c)
 Continued straight through from increment 6 in the same session (Adam: "we never handed off, I
 want you to continue" — no Hermes handoff this round).
