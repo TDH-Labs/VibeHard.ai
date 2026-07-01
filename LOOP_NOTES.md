@@ -208,3 +208,6 @@ feat: #32a sandbox gating — container verify path prefers an ephemeral Fly mac
 
 ## 2026-07-01T16:43:11Z — DONE
 feat: #deploy1/#deploy2/#package1 — Dockerfile, fly.toml, start script (config only, no deploy)
+
+## 2026-07-01T17:32:40Z — DONE
+fix: CI failure — deploy-app.test.ts stubs Supabase/secrets env hermetically (not ambient .env)
