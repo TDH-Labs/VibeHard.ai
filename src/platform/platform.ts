@@ -15,7 +15,7 @@ import type { DeployOutcome } from "../substrate/orchestrator.ts";
 import { LocalBillingProvider } from "./billing.ts";
 import { FileTenantStore } from "./tenant-store.ts";
 import { openDb, type Db } from "./db.ts";
-import { PgTenantStore } from "./pg-store.ts";
+import { PgTenantStore, type Sql } from "./pg-store.ts";
 import { FileUsageLedger, type UsageLedger } from "./usage.ts";
 import { dayAgo, FileBuildStore, type BuildJob, type BuildRunner, type BuildStore } from "./build.ts";
 import { DEFAULT_PLAN } from "./plans.ts";
@@ -29,6 +29,7 @@ export type DeployFn = (workspacePath: string, opts?: DeployAppOptions) => Promi
 export interface PlatformOptions {
   baseDir?: string; // default ~/.vibehard
   tenants?: TenantStore;
+  sql?: Sql; // durable-DB query runner (managed or embedded Postgres); selects PgTenantStore when set
   billing?: BillingProvider;
   ledger?: UsageLedger; // durable usage record (default: FileUsageLedger under baseDir)
   builds?: BuildStore; // build-job records (default: FileBuildStore under baseDir)
@@ -49,7 +50,7 @@ export class Platform {
 
   constructor(opts: PlatformOptions = {}) {
     this.baseDir = opts.baseDir ?? join(homedir(), ".vibehard");
-    this.tenants = opts.tenants ?? new FileTenantStore(join(this.baseDir, "tenants"));
+    this.tenants = opts.tenants ?? (opts.sql ? new PgTenantStore(opts.sql) : new FileTenantStore(join(this.baseDir, "tenants")));
     this.billing = opts.billing ?? new LocalBillingProvider();
     this.ledger = opts.ledger ?? new FileUsageLedger(this.baseDir);
     this.builds = opts.builds ?? new FileBuildStore(this.baseDir);
@@ -67,7 +68,7 @@ export class Platform {
    */
   static async open(opts: PlatformOptions = {}): Promise<{ platform: Platform; db: Db }> {
     const db = await openDb();
-    const platform = new Platform({ ...opts, tenants: opts.tenants ?? new PgTenantStore(db.sql) });
+    const platform = new Platform({ ...opts, sql: opts.sql ?? db.sql });
     return { platform, db };
   }
 

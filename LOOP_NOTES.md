@@ -37,3 +37,6 @@ Fixed interactively:
 **Next increment (do this first):** swap file stores → Postgres when `DATABASE_URL` is set,
 behind the existing `Platform`/`web` constructor seams (use `openDb()` + the `Pg*Store`
 classes that already exist + are tested). Small, additive, one test. See SKILL.md task #1.
+
+## 2026-07-01T15:15:47Z — DONE
+feat: #33a store factory — Platform constructor sql seam wires PgTenantStore (EPIC #33)

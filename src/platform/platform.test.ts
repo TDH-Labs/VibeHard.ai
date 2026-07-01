@@ -10,6 +10,7 @@ import { FileRecordStore } from "../substrate/record.ts";
 import { LocalEncryptedSecretsStore } from "../substrate/secrets.ts";
 import type { DeploymentRecord } from "../substrate/types.ts";
 import type { DeployOutcome } from "../substrate/orchestrator.ts";
+import { ensurePlatformSchema, pgliteSql } from "./pg-store.ts";
 
 const REC: DeploymentRecord = { app: "x", customerOrgRef: "o", projectRef: "r", hostRef: "h", url: "https://x", appliedMigrations: [], secretsRef: null, status: "live", updatedAt: "t" };
 const OUTCOME: DeployOutcome = { live: true, url: "https://x", abortedAt: null, reason: "ok", record: REC };
@@ -246,6 +247,26 @@ describe("Platform.open — durable tenant store", () => {
     } finally {
       restoreEnv();
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Platform — constructor `sql` seam (EPIC #33a)", () => {
+  test("a Platform constructed with an injected Sql signs up a tenant to Postgres and reads it back", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    try {
+      const sql = pgliteSql(db);
+      await ensurePlatformSchema(sql);
+      const { platform, cleanup } = makePlatform({ sql });
+      try {
+        const t = await platform.signUp("Acme");
+        expect((await platform.getTenant(t.id))?.name).toBe("Acme");
+      } finally {
+        cleanup();
+      }
+    } finally {
+      await db.close();
     }
   });
 });
