@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { defaultSubstrateDeps, deployApp, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
 import { stampSentinel } from "../gate/index.ts";
 import type { SubstrateDeps } from "./orchestrator.ts";
+import { ensurePlatformSchema, ensureSubstrateSchema, PgSecretsStore, pgliteSql } from "../platform/pg-store.ts";
 
 describe("tablesFromMigrations", () => {
   test("extracts table names across forms, deduped + lowercased families", () => {
@@ -143,6 +144,44 @@ describe("defaultSubstrateDeps — host is chosen by artifact (Dockerfile → Fl
       expect(defaultSubstrateDeps({ stateDir: state }).host.name).toBe("vercel");
     } finally {
       rmSync(state, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("defaultSubstrateDeps — secrets store selection (EPIC #33b)", () => {
+  const prevKey = process.env.VIBEHARD_SECRETS_KEY;
+  beforeAll(() => {
+    if (!process.env.VIBEHARD_SECRETS_KEY) process.env.VIBEHARD_SECRETS_KEY = "test-passphrase-not-a-real-secret";
+  });
+  afterAll(() => {
+    if (prevKey === undefined) delete process.env.VIBEHARD_SECRETS_KEY;
+  });
+
+  test("no `sql` injected → LocalEncryptedSecretsStore (file-backed, today's default)", () => {
+    const state = mkdtempSync(join(tmpdir(), "dd-secrets-"));
+    try {
+      expect(defaultSubstrateDeps({ stateDir: state }).secrets.name).toBe("local-encrypted");
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  test("a `sql` injected → PgSecretsStore, and it durably round-trips a secret", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    try {
+      const sql = pgliteSql(db);
+      await ensurePlatformSchema(sql);
+      await ensureSubstrateSchema(sql);
+      const deps = defaultSubstrateDeps({ sql, scope: "tenant-1" });
+      expect(deps.secrets).toBeInstanceOf(PgSecretsStore);
+      await deps.secrets.put("my-app", { url: "u", anonKey: "a", serviceKey: "s" });
+      expect(await deps.secrets.get("my-app")).toEqual({ url: "u", anonKey: "a", serviceKey: "s" });
+      // scoped: a different tenant's store can't read it
+      const other = defaultSubstrateDeps({ sql, scope: "tenant-2" }).secrets;
+      expect(await other.get("my-app")).toBeNull();
+    } finally {
+      await db.close();
     }
   });
 });
