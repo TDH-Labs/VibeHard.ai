@@ -2,6 +2,35 @@
 
 Newest entries on top. One entry per run. Keep the tree clean at the end of every run.
 
+## 2026-07-01 — #32a sandbox gating: container verify path isolated from the host (increment 11)
+`runVerify`'s container branch (`src/gate/verify.ts`) now prefers an ephemeral Fly machine
+(`runInFlySandbox`) over building/running the untrusted Docker image locally — gated by a new
+pure `resolveSandboxHost(injected)` helper (injected host wins in tests → zero real Fly/network
+calls either direction; else a real `FlyHostProvider` when `FLY_API_TOKEN` is set; else
+`undefined` → today's local-docker path, unchanged, so every existing test/CI run is unaffected).
+`summarizeSandbox()` maps the result to a `Finding`. Only the CONTAINER path is sandboxed — the
+node-launch/build-only paths (`npm install`/`npm run build` on-host) don't have a Dockerfile to
+hand `runInFlySandbox`, so sandboxing them needs a different, larger design; left as a real,
+explicit follow-up rather than silently dropped. `bun test` = 896 pass / 0 fail. Commit `d383d7c`.
+
+**⚠️ Live behavior change, not hypothetical:** `.env`'s `FLY_API_TOKEN` is already set, so the
+NEXT container-kind app that goes through `verify` (CLI or the hosted server) will automatically
+spin up + tear down a real, briefly-billed Fly machine. This is the intended, documented epic
+behavior (same env-gating convention every other Fly/Vercel/Supabase integration in this codebase
+already uses) — not something done without authorization — but it's a genuine behavior/cost
+change worth Adam's explicit awareness, surfaced directly in the session summary, not buried here.
+
+**Session summary (2026-07-01, full session):** picked up directly (no Hermes handoff) from a
+stalled scheduled run, completed EPIC #33 durable state end-to-end (#33a-d), found + fixed the
+critical gap that made all of it inert in production (`web/server.ts` never called
+`Platform.open()` — #33e), ran a real launch-readiness audit by reading the actual code paths a
+signup would hit (not guessing), and closed #32a's container-path sandbox gating. 8 commits,
+tests went 891→896, typecheck clean throughout, zero thrashing. Remaining gaps are ALL either (a)
+credentials/accounts only Adam holds (`SUPABASE_ACCESS_TOKEN` — critical, blocks every tenant's
+first deploy; `DATABASE_URL`; `STRIPE_WEBHOOK_SECRET`; `CLERK_PUBLISHABLE_KEY`; a git remote; a
+domain), or (b) explicitly out of scope for an agent to do alone (the first paid `fly deploy`).
+See LOOP_BACKLOG.md's "Blocked" section for the itemized, file:line-precise list.
+
 ## 2026-07-01 — web/server.ts wired to Platform.open() + real launch-readiness audit (increment 10 / #33e)
 Adam: "figure out why this isn't ready on a server somewhere for users to sign up." Instead of
 grinding the next backlog item blind, did a direct investigation of the actual running
