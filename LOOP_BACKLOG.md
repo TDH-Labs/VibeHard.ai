@@ -10,6 +10,14 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Next up (ordered — do the top one)
 
+- [ ] **#33d — thread `sql` from Platform into deployForTenant.** `Platform.deployForTenant`
+  (`src/platform/platform.ts`) calls `this.deploy(workspacePath, {...opts, app, stateDir, managed})`
+  but never passes `sql`/`scope` — so even a `Platform` opened via `Platform.open()` (durable
+  tenants) still deploys apps with file-backed secrets/records (#33b/#33c stay dormant unless a
+  caller manually threads `sql` into `deployForTenant`'s opts). Retain the constructor's `sql` as
+  a private field on `Platform`, and pass `sql: this.sql, scope: tenantId` into the `this.deploy(...)`
+  call in `deployForTenant`. Test: a `Platform` constructed with an injected `sql` deploys through
+  the injected `deploy` fn and the opts it receives include `sql`/`scope: tenantId`.
 - [ ] **#32a — sandbox gating.** Wire `runInFlySandbox` (`src/substrate/fly-sandbox.ts`) into
   the build/verify path so untrusted generated build+boot runs isolated WHEN `FLY_API_TOKEN`
   is present; fall back to local execution when absent. Test the gating decision only — DO NOT
