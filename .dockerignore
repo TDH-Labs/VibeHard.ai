@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.git
+.loop
+.loop.lock
+node_modules
+landing
+design
+docs
+*.md
+fixtures

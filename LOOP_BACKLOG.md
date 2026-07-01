@@ -10,14 +10,7 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Next up (ordered — do the top one)
 
-- [ ] **#deploy1 — platform Dockerfile.** Add a `Dockerfile` that runs `web/server.ts` on the
-  Bun runtime, reading `DATABASE_URL` + the existing env vars. Config only; do not build/push.
-- [ ] **#deploy2 — platform fly.toml.** Add a `fly.toml` for the platform web app (internal
-  port, health check, env passthrough). Config only; do not deploy.
-- [ ] **#package1 — add a `start` script.** `package.json` has `test`/`typecheck` but no way to
-  boot the web server other than knowing to run `bun web/server.ts` directly. Add
-  `"start": "bun web/server.ts"` (trivial, but a real Dockerfile/fly.toml CMD should reference
-  a script name, not a hardcoded path duplicated in two places).
+(none — every code-only item is done; everything left needs Adam's accounts/credentials, below)
 
 ## Blocked — needs Adam (do NOT attempt; listed so the loop skips them)
 
@@ -115,3 +108,17 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
   `.env`, the next time a container-kind app runs through `verify` (CLI or the hosted server),
   it will now automatically spin up + tear down a real, briefly-billed Fly machine — not
   hypothetical, this is live the moment this commit is running code.
+- [x] **#deploy1/#deploy2/#package1 — Dockerfile + fly.toml + `start` script.** Added a `start`
+  script (`bun web/server.ts`) to `package.json` so the Dockerfile CMD references a stable name
+  instead of a hardcoded path duplicated in two places. `Dockerfile`: `oven/bun:1`, installs
+  `--production` (no devDependencies at runtime), `PORT=8080`, `CMD ["bun", "run", "start"]`.
+  Added `.dockerignore` (`.env`/`.env.*` excluded — .env must never enter the build context even
+  though it's gitignored, since docker build context isn't governed by .gitignore). `fly.toml`:
+  app name `vibehard-platform` (a PLACEHOLDER — Fly app names are globally unique, may need
+  renaming before the real `fly launch`), `primary_region = "iad"`, `internal_port = 8080`,
+  health check on `/app` (the same endpoint already smoke-tested green in #33e). Config only —
+  no `docker build`, no `fly launch`, no `fly deploy`, nothing pushed or created. Docker's CLI is
+  present in this sandbox but its daemon isn't running, so the Dockerfile was hand-reviewed, NOT
+  build-tested live — flagged to Adam to run `docker build -t vibehard-platform .` himself once
+  before the real deploy. `bun test` = 896 pass / 0 fail (files are non-code, but ran verify
+  anyway per the harness's own discipline).

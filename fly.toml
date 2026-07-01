@@ -1,0 +1,25 @@
+# VibeHard platform web server (backlog #deploy2). App name is a proposed placeholder — rename
+# before the first `fly deploy` if you want something else; Fly app names are globally unique,
+# so this one may already be taken. This file is config only — writing it does not deploy or
+# create anything; that's a separate, explicit `fly launch` / `fly deploy` step.
+app = "vibehard-platform"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "15s"
+  method = "GET"
+  timeout = "5s"
+  path = "/app"
