@@ -173,3 +173,6 @@ feat: #33d thread Platform's sql/tenant scope into deployForTenant (EPIC #33 com
 
 ## 2026-07-01T15:41:49Z — DONE
 feat: web/server.ts adopts Platform.open() (durable store finally live) + document undocumented env vars
+
+## 2026-07-01T15:50:27Z — DONE
+feat: #32a sandbox gating — container verify path prefers an ephemeral Fly machine over the host (EPIC #32)

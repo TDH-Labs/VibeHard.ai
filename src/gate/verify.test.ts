@@ -11,14 +11,18 @@ import {
   pythonStartCommand,
   isUp,
   parseEnvKeys,
+  resolveSandboxHost,
   safeToolEnv,
   summarizeBuild,
+  summarizeSandbox,
   summarizeShutdown,
   summarizeVerify,
   synthEnv,
   verifyRuns,
 } from "./verify.ts";
 import { verdictOf } from "../types.ts";
+import type { HostProvider } from "../substrate/types.ts";
+import { FlyHostProvider } from "../substrate/fly.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
 
@@ -314,5 +318,51 @@ describe("safeToolEnv — CRITICAL-2: platform secrets must not leak into genera
     expect(env.HOME).toBeDefined();
     expect(env.DATABASE_URL).toBeDefined(); // synthEnv dummy
     expect(env.DATABASE_URL).not.toBe(""); // has a placeholder, not empty
+  });
+});
+
+describe("resolveSandboxHost — the container path's isolation gating (EPIC #32a)", () => {
+  const fakeHost: HostProvider = {
+    name: "fake-fly",
+    deploy: async () => ({ url: "https://fake.example", hostRef: "fake-ref" }),
+    teardown: async () => {},
+  };
+  const saved = process.env.FLY_API_TOKEN;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.FLY_API_TOKEN;
+    else process.env.FLY_API_TOKEN = saved;
+  });
+
+  test("an injected host ALWAYS wins, regardless of FLY_API_TOKEN (tests/callers never touch real Fly)", () => {
+    delete process.env.FLY_API_TOKEN;
+    expect(resolveSandboxHost(fakeHost)).toBe(fakeHost);
+    process.env.FLY_API_TOKEN = "some-token";
+    expect(resolveSandboxHost(fakeHost)).toBe(fakeHost); // still the injected one, not a real FlyHostProvider
+  });
+
+  test("no injected host + no FLY_API_TOKEN → undefined (falls back to local docker, today's behavior)", () => {
+    delete process.env.FLY_API_TOKEN;
+    expect(resolveSandboxHost(undefined)).toBeUndefined();
+  });
+
+  test("no injected host + FLY_API_TOKEN set → a real FlyHostProvider (constructing it does no I/O)", () => {
+    process.env.FLY_API_TOKEN = "some-token";
+    const host = resolveSandboxHost(undefined);
+    expect(host).toBeInstanceOf(FlyHostProvider);
+    expect(host?.name).toBe("fly");
+  });
+});
+
+describe("summarizeSandbox — a Fly-sandboxed container result → findings (EPIC #32a)", () => {
+  test("ok → no findings (pass)", () => {
+    expect(summarizeSandbox({ ok: true, status: 200, url: "https://x", log: "" })).toEqual([]);
+  });
+
+  test("not ok → one high-severity finding carrying the log tail", () => {
+    const findings = summarizeSandbox({ ok: false, status: 0, url: null, log: "boot crashed: ECONNREFUSED" });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.severity).toBe("high");
+    expect(findings[0]!.ruleId).toBe("sandbox-boot-failed");
+    expect(findings[0]!.message).toContain("ECONNREFUSED");
   });
 });
