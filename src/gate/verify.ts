@@ -29,6 +29,9 @@ import { verdictOf } from "../types.ts";
 import { coerceSpec, decideRigor, type Rigor } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 import { parseBuildErrors } from "./build-errors.ts";
+import type { HostProvider } from "../substrate/types.ts";
+import { FlyHostProvider } from "../substrate/fly.ts";
+import { runInFlySandbox, type SandboxResult } from "../substrate/fly-sandbox.ts";
 
 const RUNS = 3; // default when rigor is unknown; see verifyRuns
 const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
@@ -272,6 +275,21 @@ export function summarizeBuild(outcome: BuildOutcome, projectPath?: string): Fin
       severity: "high",
       file: "package.json",
       message: `${what} exited ${outcome.exitCode} — the app does not build, so it cannot be deployed${tail}`,
+    },
+  ];
+}
+
+/** A Fly-sandboxed container verify result → findings (EPIC #32a). Mirrors `summarizeBuild`'s
+ *  shape: ok → no findings (pass); not ok → one finding carrying the sandbox's log tail. */
+export function summarizeSandbox(result: SandboxResult): Finding[] {
+  if (result.ok) return [];
+  return [
+    {
+      tool: "verify",
+      ruleId: "sandbox-boot-failed",
+      severity: "high",
+      file: "Dockerfile",
+      message: `sandboxed boot did not serve a healthy response (status ${result.status}) — the container cannot be deployed${result.log ? ` — error: ${result.log.slice(-600)}` : ""}`,
     },
   ];
 }
@@ -561,10 +579,30 @@ async function probeOnce(
   return { status, log: err.trim() || out.trim(), cleanShutdown };
 }
 
+export interface VerifyDeps {
+  /** Injectable Fly HostProvider for the container path's sandboxed build+boot (EPIC #32a —
+   *  untrusted generated code must never execute on the platform host). Tests inject a fake
+   *  (never touches real Fly resources); production constructs a real `FlyHostProvider` when
+   *  `FLY_API_TOKEN` is set. Omitted + no token → falls back to the LOCAL docker build+run
+   *  path below (today's behavior, unchanged — this is what every existing test/CI run hits,
+   *  since none of them set FLY_API_TOKEN). */
+  flyHost?: HostProvider;
+}
+
+/** Which HostProvider (if any) sandboxes the container verify path: an injected one always
+ *  wins (tests — never touches real Fly); otherwise a real `FlyHostProvider` when
+ *  `FLY_API_TOKEN` is set (production); else `undefined` (local docker fallback). Extracted
+ *  as its own pure function so the GATING DECISION is unit-testable without docker or a real
+ *  Fly call either way (constructing `FlyHostProvider` does no I/O — only `.deploy()` would). */
+export function resolveSandboxHost(injected: HostProvider | undefined): HostProvider | undefined {
+  return injected ?? (process.env.FLY_API_TOKEN ? new FlyHostProvider() : undefined);
+}
+
 /** Verify `projectPath` boots: launch-probe a server, or build-verify a static app. */
 export async function runVerify(
   projectPath: string,
   ranAt: string = new Date().toISOString(),
+  deps: VerifyDeps = {},
 ): Promise<GateVerdict> {
   const plan = detectLaunch(projectPath);
 
@@ -593,10 +631,20 @@ export async function runVerify(
   // install + build. Runs ONCE, before the path-specific check.
   if (rigor === "production") findings.push(...(await cleanEnvVerify(projectPath, env)));
 
-  // Containerized app: build the image (this IS the clean-env check) and run+probe it in
-  // its own runtime — the actual deploy artifact, the right language version + isolated
-  // deps. Dummy env only (never the host's real secrets).
+  // Containerized app: build + boot it in its own runtime — the actual deploy artifact, the
+  // right language version + isolated deps. Dummy env only (never the host's real secrets).
   if (plan.kind === "container") {
+    // EPIC #32a: prefer an ISOLATED, ephemeral Fly machine over building/running the
+    // untrusted image on the platform host — the whole point of the sandbox primitive
+    // (src/substrate/fly-sandbox.ts). Only available when a Fly host is configured; falls
+    // back to local docker below otherwise (unchanged path, what CI/every test hits).
+    const flyHost = resolveSandboxHost(deps.flyHost);
+    if (flyHost) {
+      const containerEnv = synthEnv(readEnvTemplates(projectPath));
+      const result = await runInFlySandbox(projectPath, containerEnv, { host: flyHost });
+      findings.push(...summarizeSandbox(result));
+      return verdictOf("verify", findings, ranAt);
+    }
     const tag = dockerTag(projectPath);
     const buildFinding = buildContainerImage(projectPath, tag);
     if (buildFinding) {

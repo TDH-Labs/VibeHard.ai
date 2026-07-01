@@ -10,11 +10,6 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Next up (ordered — do the top one)
 
-- [ ] **#32a — sandbox gating.** Wire `runInFlySandbox` (`src/substrate/fly-sandbox.ts`) into
-  the build/verify path so untrusted generated build+boot runs isolated WHEN `FLY_API_TOKEN`
-  is present; fall back to local execution when absent. Test the gating decision only — DO NOT
-  run a live deploy. Security-relevant before public signup: today builds run as a plain child
-  process on the host (no isolation from a stranger's generated code).
 - [ ] **#deploy1 — platform Dockerfile.** Add a `Dockerfile` that runs `web/server.ts` on the
   Bun runtime, reading `DATABASE_URL` + the existing env vars. Config only; do not build/push.
 - [ ] **#deploy2 — platform fly.toml.** Add a `fly.toml` for the platform web app (internal
@@ -102,3 +97,21 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
   being real, load-bearing vars), and upgraded the `SUPABASE_ACCESS_TOKEN` comment to state
   plainly that it's required for any tenant deploy (managed mode is forced, and throws without
   it — see the "Blocked" section below). `bun test` = 891 pass / 0 fail, typecheck clean.
+- [x] **#32a — sandbox gating.** `runVerify`'s container path (`src/gate/verify.ts`) now prefers
+  an isolated, ephemeral Fly machine (`runInFlySandbox`, `src/substrate/fly-sandbox.ts`) over
+  building/running the untrusted Docker image on the platform host — the whole point of the
+  sandbox primitive, previously built but wired nowhere. Extracted the gating logic as its own
+  pure `resolveSandboxHost(injected)` function (injected host always wins → tests never touch
+  real Fly; else a real `FlyHostProvider` when `FLY_API_TOKEN` is set; else `undefined` → the
+  EXISTING local-docker path, unchanged, so every current test/CI run — none of which set
+  `FLY_API_TOKEN` — is unaffected). `summarizeSandbox()` maps the sandbox result to a `Finding`,
+  mirroring `summarizeBuild`'s shape. Tests are fully pure — no docker, no real Fly/network call
+  either direction, per the item's own "test the gating decision only" instruction. Only the
+  CONTAINER path is sandboxed this increment (the one shape `runInFlySandbox` already fits — a
+  Dockerfile-having workspace); the node-launch/build-only paths still run `npm install`/`npm run
+  build` on-host and would need a different, larger redesign to sandbox (no Dockerfile to deploy)
+  — noted as a real follow-up, not silently dropped. `bun test` = 896 pass / 0 fail, typecheck
+  clean. ⚠️ Behavior change worth knowing: since `FLY_API_TOKEN` is ALREADY set in the real
+  `.env`, the next time a container-kind app runs through `verify` (CLI or the hosted server),
+  it will now automatically spin up + tear down a real, briefly-billed Fly machine — not
+  hypothetical, this is live the moment this commit is running code.
