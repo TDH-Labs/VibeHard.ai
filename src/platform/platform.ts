@@ -41,6 +41,7 @@ export interface PlatformOptions {
 export class Platform {
   private readonly baseDir: string;
   private readonly tenants: TenantStore;
+  private readonly sql: Sql | undefined;
   private readonly billing: BillingProvider;
   private readonly ledger: UsageLedger;
   private readonly builds: BuildStore;
@@ -50,6 +51,7 @@ export class Platform {
 
   constructor(opts: PlatformOptions = {}) {
     this.baseDir = opts.baseDir ?? join(homedir(), ".vibehard");
+    this.sql = opts.sql;
     this.tenants = opts.tenants ?? (opts.sql ? new PgTenantStore(opts.sql) : new FileTenantStore(join(this.baseDir, "tenants")));
     this.billing = opts.billing ?? new LocalBillingProvider();
     this.ledger = opts.ledger ?? new FileUsageLedger(this.baseDir);
@@ -179,7 +181,10 @@ export class Platform {
     await this.assertCanDeploy(tenantId, app);
     // FORCE managed: every tenant app gets its OWN auto-provisioned project in its OWN isolated
     // dir — never the operator's shared project (which a global VIBEHARD_MANAGED flag couldn't guarantee).
-    const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId), managed: true });
+    // sql/scope: when this Platform has a durable-DB runner (Platform.open()), the tenant's own
+    // deploy's secrets + records go to the SAME Postgres store instead of the ephemeral file store
+    // (EPIC #33b/#33c) — scoped to this tenant so it can't reach another tenant's app data.
+    const outcome = await this.deploy(workspacePath, { ...opts, app, stateDir: this.stateDir(tenantId), managed: true, sql: this.sql, scope: tenantId });
     await this.meter(tenantId, { kind: "deploy", app, at: this.now() });
     return outcome;
   }

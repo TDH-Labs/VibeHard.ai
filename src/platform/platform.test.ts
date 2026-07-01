@@ -191,6 +191,47 @@ describe("Platform — isolation + delegation", () => {
       cleanup();
     }
   });
+
+  test("deployForTenant threads the Platform's `sql` + the tenant id (as `scope`) into the deploy opts (EPIC #33d)", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    try {
+      const sql = pgliteSql(db);
+      await ensurePlatformSchema(sql);
+      let captured: { sql?: unknown; scope?: string } | undefined;
+      const deploy: DeployFn = async (_ws, opts) => {
+        captured = { sql: opts?.sql, scope: opts?.scope };
+        return OUTCOME;
+      };
+      const { platform, cleanup } = makePlatform({ deploy, sql });
+      try {
+        const t = await platform.signUp("Acme"); // goes through PgTenantStore(sql) — #33a's constructor seam
+        await platform.deployForTenant(t.id, "/work/my-app");
+        expect(captured?.sql).toBe(sql); // the SAME runner the Platform was constructed with
+        expect(captured?.scope).toBe(t.id); // scoped to this tenant, not shared across tenants
+      } finally {
+        cleanup();
+      }
+    } finally {
+      await db.close();
+    }
+  });
+
+  test("deployForTenant with no `sql` configured → deploy opts carry sql: undefined (unchanged, file-backed path)", async () => {
+    let captured: { sql?: unknown } | undefined;
+    const deploy: DeployFn = async (_ws, opts) => {
+      captured = { sql: opts?.sql };
+      return OUTCOME;
+    };
+    const { platform, cleanup } = makePlatform({ deploy });
+    try {
+      const t = await platform.signUp("Acme");
+      await platform.deployForTenant(t.id, "/work/my-app");
+      expect(captured?.sql).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe("Platform.open — durable tenant store", () => {
