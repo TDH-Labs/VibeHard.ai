@@ -2,6 +2,28 @@
 
 Newest entries on top. One entry per run. Keep the tree clean at the end of every run.
 
+## 2026-07-01 — store factory: constructor `sql` seam (EPIC #33, increment 6 / backlog #33a)
+Adam asked to continue directly (no Hermes handoff) after noticing a stalled scheduled run
+(journal shows a `START @ 93858b2` at 15:10:41Z with no matching `finish`/`abort` — the
+tool-permission-approval gap flagged in HANDOFF.md §3 struck again). Recovered per the
+harness's own design: confirmed no live `loop-run.sh` process held the lock (`ps aux`), then
+manually released the stale `.loop.lock` (same effect as the 90-min auto-steal, just judged
+safe early since the leftover WIP was a 4-line fragment) and ran `start` clean.
+
+Implemented #33a: `PlatformOptions` gained `sql?: Sql`; the constructor now does
+`opts.tenants ?? (opts.sql ? new PgTenantStore(opts.sql) : new FileTenantStore(...))` — a
+synchronous constructor-level seam, distinct from the existing async `Platform.open()`
+factory (which resolves `DATABASE_URL`/embedded pglite via `openDb()`). `Platform.open()`
+simplified to `new Platform({ ...opts, sql: opts.sql ?? db.sql })`, reusing the same seam
+instead of constructing `PgTenantStore` itself. New test: a `Platform` built with an injected
+in-memory pglite `Sql` (matching the `freshSql()` pattern in `pg-store.test.ts`) signs up a
+tenant and reads it back via `getTenant`. `bun test` = 885 pass / 0 fail, typecheck clean.
+Committed `0aa972b` via `scripts/loop-run.sh finish`.
+
+**Next increment:** #33b — extend the same factory so per-tenant `PgRecordStore`/
+`PgSecretsStore` are selected when `sql` is present (scoped by tenant id), else the file
+stores, behind `Platform`'s existing per-tenant store accessors. See LOOP_BACKLOG.md.
+
 ## 2026-06-28 — durable tenant store wired via `Platform.open()` (EPIC #33, increment 5)
 Added a static async factory `Platform.open(opts)` that wires the durable `PgTenantStore`
 (via `openDb()` → managed Postgres on `DATABASE_URL`, else embedded disk Postgres) as the

@@ -10,12 +10,6 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Next up (ordered — do the top one)
 
-- [ ] **#33a — store factory.** In `src/platform/platform.ts`, add an internal helper that
-  picks the tenant/record/secrets stores from env: when `process.env.DATABASE_URL` is set,
-  build `PgTenantStore` from `openDb()` (`src/platform/db.ts` + `src/platform/pg-store.ts`);
-  otherwise keep today's `FileTenantStore` default. Behind the existing constructor seam — no
-  call-site changes. Test: a `Platform` constructed with an injected pglite-backed `Sql`
-  signs up a tenant and reads it back via `getTenant`. (DATABASE_URL itself stays unset in CI.)
 - [ ] **#33b — record/secrets stores from the same factory.** Extend the factory so
   per-tenant `PgRecordStore`/`PgSecretsStore` are used when `DATABASE_URL` is set (scoped by
   tenant id), else the file stores. Test the selection logic with an injected `Sql`. No live DB.
@@ -40,4 +34,7 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Done
 
-(none yet — the loop appends here as items complete; see git log + LOOP_NOTES.md)
+- [x] **#33a — store factory.** `Platform`'s constructor now accepts `sql?: Sql`; when set (and
+  no explicit `tenants` given) it builds `PgTenantStore(sql)`, else falls back to
+  `FileTenantStore`. `Platform.open()` simplified to pass `sql: db.sql` through the same seam.
+  Test: constructor injected with a pglite `Sql` signs up + reads back a tenant. Commit `0aa972b`.
