@@ -10,17 +10,6 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
 
 ## Next up (ordered — do the top one)
 
-- [ ] **#33c — RecordStore async-flip, then PgRecordStore.** `RecordStore` (`src/substrate/types.ts`)
-  is still a SYNC interface (`get/put/remove` return non-Promise) — confirmed by 9 sync call sites
-  in `src/substrate/orchestrator.ts` (`deps.records.get/put/remove`) plus the sync fake in
-  `deploy-app.test.ts`. `PgRecordStore` (`src/platform/pg-store.ts`) is already async, so it does
-  NOT structurally satisfy `RecordStore` today — this is why #33b split records out. Do this as
-  its OWN increment (same shape as the original Platform async-flip, ca86369): flip `RecordStore`
-  to async, `await` the 9 call sites in `orchestrator.ts`, update `deploy-app.test.ts`'s fake +
-  any other sync `RecordStore` implementers/tests, THEN wire `PgRecordStore` into
-  `defaultSubstrateDeps` behind the `sql`/`scope` option added in #33b (mirror the secrets-store
-  selection). If the async-flip alone doesn't finish green in one run, land it alone first and
-  leave the `PgRecordStore` wiring as a follow-up item — do not let it thrash like ca86369 did.
 - [ ] **#32a — sandbox gating.** Wire `runInFlySandbox` (`src/substrate/fly-sandbox.ts`) into
   the build/verify path so untrusted generated build+boot runs isolated WHEN `FLY_API_TOKEN`
   is present; fall back to local execution when absent. Test the gating decision only — DO NOT
@@ -53,3 +42,14 @@ existing seam (no redesign), a test covers it, and `scripts/loop-run.sh finish` 
   already satisfied the async `SecretsStore` interface, so this was a clean drop-in; `PgRecordStore`
   did NOT (RecordStore is still sync) — split out as #33c rather than force an oversized increment.
   Test: file-backed by default, Pg-backed + tenant-scoped round-trip with an injected pglite `Sql`.
+- [x] **#33c — RecordStore async-flip + PgRecordStore wiring.** `RecordStore`
+  (`src/substrate/types.ts`) flipped to async (`get/put/remove` → `Promise<...>`); all 9 call
+  sites in `orchestrator.ts` (`provisionAndDeploy` + `destroy`, both already `async` functions, so
+  this was a mechanical `await` addition, not a redesign) now await. `FileRecordStore` methods
+  marked `async`. Updated the 4 consumers with sync fakes/calls: `record.test.ts`,
+  `orchestrator.test.ts`'s `memRecords()` fake, `deploy-app.test.ts`'s inline fake,
+  `platform.test.ts`'s isolation test. The flip alone came back 887/887 green in one pass (no
+  thrashing, unlike ca86369), so — per its own contingency note — completed the full item in the
+  same run: wired `PgRecordStore(sql, scope)` into `defaultSubstrateDeps` alongside the #33b
+  secrets selection (same `sql`/`scope` option, same pattern). Test: file-backed by default,
+  Pg-backed + tenant-scoped round-trip. `bun test` = 889 pass / 0 fail, typecheck clean.

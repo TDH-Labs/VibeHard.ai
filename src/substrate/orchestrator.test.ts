@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { destroy, provisionAndDeploy, type DeployInput, type SubstrateDeps } from "./orchestrator.ts";
 import { stampSentinel } from "../gate/index.ts";
-import type { BackendProvider, BackendSecrets, HostProvider, RecordStore, SecretsStore } from "./types.ts";
+import type { BackendProvider, BackendSecrets, DeploymentRecord, HostProvider, RecordStore, SecretsStore } from "./types.ts";
 
 const ts = "2026-06-22T00:00:00.000Z";
 const tmps: string[] = [];
@@ -21,11 +21,11 @@ async function passingWorkspace(): Promise<string> {
 }
 
 function memRecords(): RecordStore {
-  const m = new Map<string, ReturnType<RecordStore["get"]>>();
+  const m = new Map<string, DeploymentRecord>();
   return {
-    get: (a) => m.get(a) ?? null,
-    put: (r) => void m.set(r.app, structuredClone(r)),
-    remove: (a) => void m.delete(a),
+    get: async (a) => m.get(a) ?? null,
+    put: async (r) => void m.set(r.app, structuredClone(r)),
+    remove: async (a) => void m.delete(a),
   };
 }
 function memSecrets(): SecretsStore & { has: (a: string) => boolean } {
@@ -153,7 +153,7 @@ describe("destroy", () => {
     expect(deleted).toBe(true);
     expect(tore).toBe(true);
     expect(secrets.has("myapp")).toBe(false);
-    expect(records.get("myapp")).toBeNull();
+    expect(await records.get("myapp")).toBeNull();
   });
 
   test("destroy on an unknown app is a no-op", async () => {

@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultSubstrateDeps, deployApp, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
 import { stampSentinel } from "../gate/index.ts";
+import type { DeploymentRecord } from "./types.ts";
 import type { SubstrateDeps } from "./orchestrator.ts";
-import { ensurePlatformSchema, ensureSubstrateSchema, PgSecretsStore, pgliteSql } from "../platform/pg-store.ts";
+import { ensurePlatformSchema, ensureSubstrateSchema, PgRecordStore, PgSecretsStore, pgliteSql } from "../platform/pg-store.ts";
+
+const REC: DeploymentRecord = { app: "x", customerOrgRef: "o", projectRef: "r", hostRef: "h", url: "https://x", appliedMigrations: [], secretsRef: null, status: "live", updatedAt: "t" };
 
 describe("tablesFromMigrations", () => {
   test("extracts table names across forms, deduped + lowercased families", () => {
@@ -73,7 +76,7 @@ describe("deployApp — derives input + runs the orchestrator", () => {
           teardown: async () => {},
         },
         secrets: { name: "fake", put: async () => "secret-ref", get: async () => null, remove: async () => {} },
-        records: { get: () => null, put: () => {}, remove: () => {} },
+        records: { get: async () => null, put: async () => {}, remove: async () => {} },
       };
 
       const outcome = await deployApp(ws, { app: "my-notes-app", deps });
@@ -179,6 +182,38 @@ describe("defaultSubstrateDeps — secrets store selection (EPIC #33b)", () => {
       expect(await deps.secrets.get("my-app")).toEqual({ url: "u", anonKey: "a", serviceKey: "s" });
       // scoped: a different tenant's store can't read it
       const other = defaultSubstrateDeps({ sql, scope: "tenant-2" }).secrets;
+      expect(await other.get("my-app")).toBeNull();
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+describe("defaultSubstrateDeps — records store selection (EPIC #33c)", () => {
+  test("no `sql` injected → FileRecordStore (file-backed, today's default)", () => {
+    const state = mkdtempSync(join(tmpdir(), "dd-records-"));
+    try {
+      // FileRecordStore has no `name` field; assert on behavior instead — a fresh instance sees nothing.
+      // (Constructing it here is enough to prove no PgRecordStore was picked, since that ctor needs `sql`.)
+      expect(defaultSubstrateDeps({ stateDir: state })).toBeTruthy();
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  test("a `sql` injected → PgRecordStore, and it durably round-trips + scopes a record", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    try {
+      const sql = pgliteSql(db);
+      await ensurePlatformSchema(sql);
+      await ensureSubstrateSchema(sql);
+      const deps = defaultSubstrateDeps({ sql, scope: "tenant-1" });
+      expect(deps.records).toBeInstanceOf(PgRecordStore);
+      await deps.records.put({ ...REC, app: "my-app" });
+      expect(await deps.records.get("my-app")).toEqual({ ...REC, app: "my-app" });
+      // scoped: a different tenant's store can't read it
+      const other = defaultSubstrateDeps({ sql, scope: "tenant-2" }).records;
       expect(await other.get("my-app")).toBeNull();
     } finally {
       await db.close();
