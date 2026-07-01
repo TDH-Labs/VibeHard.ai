@@ -217,3 +217,6 @@ feat: enable allow_promotion_codes on checkout so coupon codes (e.g. beta tester
 
 ## 2026-07-01T20:35:20Z — DONE
 fix: embedded pglite fallback ENOENT on a fresh container filesystem (recursive mkdir)
+
+## 2026-07-01T23:48:02Z — DONE
+fix: serve the app UI at the bare root path (was 404 — only /app and /reset were handled)
