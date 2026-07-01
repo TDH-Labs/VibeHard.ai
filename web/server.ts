@@ -80,7 +80,11 @@ const stripeBilling = STRIPE_SECRET ? new StripeBillingProvider({ client: new St
 // BOTH are present; otherwise the button reports "not configured" instead of dead-ending.
 const STRIPE_CONNECT_CLIENT_ID = process.env.STRIPE_CONNECT_CLIENT_ID || "";
 const stripeConnectStates = new Map<string, string>(); // state → tenantId (CSRF + carries who is connecting)
-const platform = new Platform({ baseDir: ROOT, billing: stripeBilling });
+// Platform.open() (EPIC #33) wires the DURABLE tenant/secrets/deployment stores — managed Postgres
+// via DATABASE_URL in the cloud, else embedded disk-persisted Postgres locally — so signups and
+// deployed apps survive a restart/redeploy. `new Platform(...)` (file-backed only, wiped by an
+// ephemeral cloud box) would silently lose this guarantee; Platform.open() is required here.
+const { platform, db: platformDb } = await Platform.open({ baseDir: ROOT, billing: stripeBilling });
 const seenBillingEvents = new Set<string>(); // processed Stripe event ids → drop replays (idempotency)
 
 // ── tiny encrypted store for the per-tenant LLM key (AES-256-GCM) ───────────────
@@ -1028,3 +1032,16 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
 
 sweepStaleRunning(); // resolve any builds left "running" by a previous server stop
 console.log(`\n  VibeHard alpha → http://localhost:${server.port}\n  (sign up, add your LLM key, describe an app — the real pipeline runs)\n`);
+
+// Close the durable-DB connection cleanly on shutdown (container stop/redeploy sends SIGTERM).
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n  ${signal} received — closing the durable-DB connection…`);
+  server.stop();
+  await platformDb.close();
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
