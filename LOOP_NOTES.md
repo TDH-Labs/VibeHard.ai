@@ -214,3 +214,6 @@ fix: CI failure — deploy-app.test.ts stubs Supabase/secrets env hermetically (
 
 ## 2026-07-01T20:04:27Z — DONE
 feat: enable allow_promotion_codes on checkout so coupon codes (e.g. beta testers) actually work
+
+## 2026-07-01T20:35:20Z — DONE
+fix: embedded pglite fallback ENOENT on a fresh container filesystem (recursive mkdir)

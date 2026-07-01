@@ -7,6 +7,7 @@
  *
  * Schema is ensured on open (idempotent), so a fresh deploy or a fresh laptop just works.
  */
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
@@ -44,6 +45,9 @@ export async function openDb(): Promise<Db> {
   }
   const { PGlite } = await import("@electric-sql/pglite");
   const dataDir = process.env.VIBEHARD_DB_DIR ?? join(homedir(), ".vibehard", "db");
+  // pglite's own NodeFS wrapper does a single-level mkdir (not recursive) — on a fresh container
+  // filesystem (no prior ~/.vibehard) that throws ENOENT before pglite ever gets a chance to run.
+  mkdirSync(dataDir, { recursive: true });
   const db = new PGlite(dataDir); // persisted to disk → durable across restarts, no external service
   const sql = pgliteSql(db);
   await ensureAllSchema(sql);

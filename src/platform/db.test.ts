@@ -50,4 +50,23 @@ describe("openDb — embedded mode (no DATABASE_URL)", () => {
       await db2.close();
     }
   });
+
+  test("a FRESH container filesystem (parent dir doesn't exist yet) still opens, not ENOENT", async () => {
+    // Reproduces a real crash: on a brand-new Fly/Docker container, ~/.vibehard doesn't exist yet —
+    // pglite's own NodeFS wrapper does a single-level (non-recursive) mkdir, so it threw ENOENT.
+    // mkdtempSync always creates its own leaf dir, which masked this in every other test here.
+    savedEnv.DATABASE_URL = process.env.DATABASE_URL;
+    savedEnv.VIBEHARD_DB_DIR = process.env.VIBEHARD_DB_DIR;
+    delete process.env.DATABASE_URL;
+    const scratchRoot = mkdtempSync(join(tmpdir(), "vibehard-db-fresh-"));
+    tmps.push(scratchRoot);
+    const unbornDir = join(scratchRoot, "does", "not", "exist", "yet", "db"); // multiple missing parents
+    process.env.VIBEHARD_DB_DIR = unbornDir;
+    const db = await openDb();
+    try {
+      expect(db.mode).toBe("embedded");
+    } finally {
+      await db.close();
+    }
+  });
 });
