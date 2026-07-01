@@ -122,3 +122,6 @@ feat: #33c RecordStore async-flip + PgRecordStore wired into defaultSubstrateDep
 
 ## 2026-07-01T15:30:43Z — DONE
 feat: #33d thread Platform's sql/tenant scope into deployForTenant (EPIC #33 complete)
+
+## 2026-07-01T15:41:49Z — DONE
+feat: web/server.ts adopts Platform.open() (durable store finally live) + document undocumented env vars
