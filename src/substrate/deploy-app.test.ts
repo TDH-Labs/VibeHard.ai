@@ -10,6 +10,25 @@ import { ensurePlatformSchema, ensureSubstrateSchema, PgRecordStore, PgSecretsSt
 
 const REC: DeploymentRecord = { app: "x", customerOrgRef: "o", projectRef: "r", hostRef: "h", url: "https://x", appliedMigrations: [], secretsRef: null, status: "live", updatedAt: "t" };
 
+// `defaultSubstrateDeps` without `managed: true` constructs a REAL (non-managed) SupabaseBackendProvider,
+// which reads SUPABASE_URL/SUPABASE_ANON_KEY/SUPABASE_SERVICE_ROLE_KEY from process.env even though these
+// tests never make a network call — and LocalEncryptedSecretsStore/PgSecretsStore fail closed without a
+// passphrase. Stub dummy values file-wide (only if unset) so these tests are hermetic in CI, which has no
+// operator .env — an operator's real .env was masking this locally (audit: first-ever CI run caught it).
+const savedEnv: Record<string, string | undefined> = {};
+const DUMMY_ENV = { VIBEHARD_SECRETS_KEY: "test-passphrase-not-a-real-secret", SUPABASE_URL: "https://dummy.supabase.co", SUPABASE_ANON_KEY: "dummy-anon", SUPABASE_SERVICE_ROLE_KEY: "dummy-service" };
+beforeAll(() => {
+  for (const [k, v] of Object.entries(DUMMY_ENV)) {
+    savedEnv[k] = process.env[k];
+    if (!process.env[k]) process.env[k] = v;
+  }
+});
+afterAll(() => {
+  for (const k of Object.keys(DUMMY_ENV)) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+  }
+});
+
 describe("tablesFromMigrations", () => {
   test("extracts table names across forms, deduped + lowercased families", () => {
     const tables = tablesFromMigrations([
@@ -110,16 +129,6 @@ describe("deployApp — derives input + runs the orchestrator", () => {
 });
 
 describe("defaultSubstrateDeps — host is chosen by artifact (Dockerfile → Fly, else Vercel)", () => {
-  // The store fails closed without a passphrase; provide a dummy so construction succeeds
-  // regardless of whether an operator .env is loaded. This test only inspects host selection.
-  const prevKey = process.env.VIBEHARD_SECRETS_KEY;
-  beforeAll(() => {
-    if (!process.env.VIBEHARD_SECRETS_KEY) process.env.VIBEHARD_SECRETS_KEY = "test-passphrase-not-a-real-secret";
-  });
-  afterAll(() => {
-    if (prevKey === undefined) delete process.env.VIBEHARD_SECRETS_KEY;
-  });
-
   test("a workspace WITH a Dockerfile → Fly (container deploy, any language)", () => {
     const ws = mkdtempSync(join(tmpdir(), "dd-host-"));
     try {
@@ -152,14 +161,6 @@ describe("defaultSubstrateDeps — host is chosen by artifact (Dockerfile → Fl
 });
 
 describe("defaultSubstrateDeps — secrets store selection (EPIC #33b)", () => {
-  const prevKey = process.env.VIBEHARD_SECRETS_KEY;
-  beforeAll(() => {
-    if (!process.env.VIBEHARD_SECRETS_KEY) process.env.VIBEHARD_SECRETS_KEY = "test-passphrase-not-a-real-secret";
-  });
-  afterAll(() => {
-    if (prevKey === undefined) delete process.env.VIBEHARD_SECRETS_KEY;
-  });
-
   test("no `sql` injected → LocalEncryptedSecretsStore (file-backed, today's default)", () => {
     const state = mkdtempSync(join(tmpdir(), "dd-secrets-"));
     try {
