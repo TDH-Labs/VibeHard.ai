@@ -226,3 +226,6 @@ fix: login loop — validate Clerk sessions + CSRF origin against ALL served hos
 
 ## 2026-07-02T02:04:47Z — DONE
 feat: turnkey onboarding — product-first dashboard, platform LLM key by default, BYO keys/services tucked into Advanced
+
+## 2026-07-02T02:18:13Z — DONE
+feat: sustainable turnkey quotas — build caps sized so worst-case platform token spend stays under plan price
