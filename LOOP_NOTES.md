@@ -238,3 +238,6 @@ feat: new marketing site at root — seven-gates craftsmanship tour, honest-copy
 
 ## 2026-07-02T03:59:56Z — DONE
 fix: SECURITY_AUDIT_4 D-1 — sensitive-data classification is now falsifiable (code scan can't be switched off by the spec); build gate requires artifacts; completeness docstring corrected
+
+## 2026-07-02T04:17:03Z — DONE
+fix: add sensitive-signals module missing from 65b8c38 (new files need explicit git add — the D-1 commit was incomplete without them)
