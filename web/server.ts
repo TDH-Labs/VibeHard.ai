@@ -244,7 +244,7 @@ function sameOrigin(req: Request): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true; // top-level navigations / same-origin GETs often omit it
   try {
-    return new URL(origin).host === new URL(BASE_URL).host;
+    return ALLOWED_HOSTS.has(new URL(origin).host);
   } catch {
     return false;
   }
@@ -263,6 +263,12 @@ async function serveStatic(path: string): Promise<Response> {
 
 // ── social login (Google + GitHub OAuth) ────────────────────────────────────────
 const BASE_URL = process.env.BASE_URL || `http://localhost:${Number(process.env.PORT) || 4100}`;
+// Every origin this app is legitimately served from: BASE_URL plus VIBEHARD_EXTRA_ORIGINS
+// (comma-separated). Used by BOTH the Clerk azp check and the sameOrigin CSRF guard — the app
+// answers on several hostnames in prod (vibehard.ai, www, *.fly.dev), and validating against
+// BASE_URL alone rejects every session from the other hostnames (the launch-day login loop).
+const ALLOWED_ORIGINS: string[] = [BASE_URL, ...(process.env.VIBEHARD_EXTRA_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean)];
+const ALLOWED_HOSTS = new Set(ALLOWED_ORIGINS.map((o) => { try { return new URL(o).host; } catch { return ""; } }).filter(Boolean));
 
 // ── Clerk auth (EPIC #34) — ENV-GATED. Active iff CLERK_SECRET_KEY + CLERK_PUBLISHABLE_KEY are set.
 //    With them, Clerk verifies the session and the legacy hand-rolled auth is disabled; without them,
@@ -276,7 +282,7 @@ const clerkEmailCache = new Map<string, string>(); // Clerk userId → email, to
 async function authenticate(req: Request): Promise<{ email: string; user: User } | null> {
   if (!CLERK.enabled || !clerkClient) return userOf(req);
   try {
-    const rs = await clerkClient.authenticateRequest(req, { authorizedParties: [BASE_URL] });
+    const rs = await clerkClient.authenticateRequest(req, { authorizedParties: ALLOWED_ORIGINS });
     if (!rs.isAuthenticated) return null;
     const userId = rs.toAuth().userId;
     if (!userId) return null;
