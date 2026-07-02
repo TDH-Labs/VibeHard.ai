@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VibeHard — Describe it once. It ships right, or it doesn't ship.</title>
-<meta name="description" content="You describe the software. A factory builds it and an eleven-gate inspection line refuses to release it until it's proven safe, runnable, and complete. Deterministic verdicts. Signed deploys. Fail-closed by design.">
+<meta name="description" content="You describe the software. A factory builds it, and eleven deterministic gates decide whether it's safe, runnable, and complete before it deploys.">
 <meta property="og:title" content="VibeHard — It ships right, or it doesn't ship.">
 <meta property="og:description" content="AI writes the software. Eleven deterministic gates decide if it leaves the building. The deploy refuses to run without their signed verdict.">
 <meta property="og:type" content="website">
@@ -309,8 +309,8 @@ footer .col a:hover{color:var(--amber-t)}
 
     <div class="ticks" role="list">
       <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>11 gates · deterministic verdicts</div>
-      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>Signed deploy sentinel — no pass, no ship</div>
-      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>Fail-closed: a gate that can't run, blocks</div>
+      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>Signed deploy sentinel required to ship</div>
+      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>A gate that fails to run counts as blocked</div>
     </div>
   </div>
 </section>
@@ -401,7 +401,7 @@ footer .col a:hover{color:var(--amber-t)}
       <p class="lbl" aria-hidden="true">INSPECTION FLOOR · FIXED ORDER · FAIL-CLOSED</p>
     </div>
     <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>Eleven gates. <span style="color:var(--amber)">Zero appeals.</span></h2>
-    <p style="max-width:660px;font-size:17px" data-rv>Every build the factory produces is treated as contraband until proven otherwise. Eleven independent inspections run in fixed order, each with unilateral authority to stop the line. None of them negotiates, and none of them cares that your demo is tomorrow. If one crashes, that counts as a <b style="color:var(--text)">block</b> — a gate that can't run never waves anything through.</p>
+    <p style="max-width:660px;font-size:17px" data-rv>Every build the factory produces is treated as contraband until proven otherwise. Eleven independent inspections run in fixed order, each with unilateral authority to stop the line, indifferent to your launch date. A gate that crashes mid-run still counts as a <b style="color:var(--text)">block</b>.</p>
 
     <div class="matrix" role="listbox" aria-label="The eleven gates and the sentinel — select one to read its readout" id="matrix"></div>
 
@@ -450,7 +450,7 @@ footer .col a:hover{color:var(--amber-t)}
     <p style="max-width:680px;font-size:17px" data-rv>Your application, running. A verdict board carrying eleven signatures. Every finding the gates raised, and the fix that closed each one. Migrations that have already executed on a real database. A boot record with no asterisks. A sentinel signed against this exact build — <b style="color:var(--text)">the deploy accepts no other.</b> Hand the folder to any developer you trust; they can read precisely what was checked and what it survived. Every build leaves the floor this way.</p>
 
     <div class="manifest" data-rv role="list" aria-label="The delivery manifest — receipts every release ships with">
-      <div class="ptile" role="listitem"><span class="lbl">Verdict board</span><span class="v">11/11 PASS</span><span class="n">every gate, signed off — or it isn't here</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Verdict board</span><span class="v">11/11 PASS</span><span class="n">a release with a lower score doesn't exist</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Boot probes</span><span class="v">N/N HEALTHY</span><span class="n">clean-room build · every run must boot</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Tenant isolation</span><span class="v">0 ROWS LEAKED</span><span class="n">proven live against a real database</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Blocking findings</span><span class="v">0 AT RELEASE</span><span class="n">sast · secrets · CVEs · PII — all clear</span></div>
@@ -463,16 +463,16 @@ footer .col a:hover{color:var(--amber-t)}
 
     <div class="vs" data-rv aria-label="Consumer generators compared with VibeHard">
       <div class="vshead"><div>Consumer code generators</div><div>VibeHard</div></div>
-      <div class="row"><div>Ships when the model stops typing.</div><div>Ships when <b>eleven gates sign</b> — and not one second before.</div></div>
+      <div class="row"><div>Ships when the model stops typing.</div><div>Ships after <b>eleven gates sign off</b>, in order, every time.</div></div>
       <div class="row"><div>Security is a suggestion in a prompt.</div><div>Security is <b>a live attack the database has to refuse</b>, two tenants seeded, every table probed.</div></div>
-      <div class="row"><div>"Done" means the page rendered.</div><div>"Done" means <b>every promised feature exists in code</b> — checked against the contract you approved.</div></div>
-      <div class="row"><div>Breaks quietly three weeks after launch.</div><div><b>Pinned dependencies, executed migrations, repeated boot proof</b> — built to survive the handoff.</div></div>
-      <div class="row"><div>The burden of proof lands on you. And you can't read code.</div><div><b>The burden of proof is the product.</b> You get the verdicts, the findings, the signed sentinel.</div></div>
+      <div class="row"><div>"Done" means the page rendered.</div><div>"Done" means <b>every promised feature exists in code</b>, checked against the contract you approved.</div></div>
+      <div class="row"><div>Breaks quietly three weeks after launch.</div><div><b>Pinned dependencies, executed migrations, repeated boot proof</b> before it ever reaches you.</div></div>
+      <div class="row"><div>You get an app and your own judgment about whether it's safe.</div><div>You get the app, plus <b>the verdicts, the findings, and the signed sentinel</b> behind it.</div></div>
     </div>
 
     <div class="who" data-rv>
       <div><h4>Solo founders</h4><p>Your SaaS idea, built like it already has customers to lose. Multi-tenant isolation proven before user #2 ever signs up.</p></div>
-      <div><h4>Therapists &amp; clinics</h4><p>Client data is classified as sensitive on day one — auth demanded in front of it, hard-delete paths required, leaks into logs blocked.</p></div>
+      <div><h4>Therapists &amp; clinics</h4><p>Client data gets classified as sensitive from the first pass, which is what pulls in the auth requirement, the hard-delete path, and the log scan that catches a note leaking where it shouldn't.</p></div>
       <div><h4>Bookkeepers &amp; firms</h4><p>Financial records get the financial-data controls, deterministically. Your client portal shouldn't be the riskiest thing in your practice.</p></div>
       <div><h4>Agencies</h4><p>Hand a client a build with receipts: verdict board, pinned deps, a README that exists. The handoff survives you leaving the room.</p></div>
     </div>
@@ -713,7 +713,7 @@ footer .col a:hover{color:var(--amber-t)}
      d:'Every other check reads your database migrations as text. This one <b>runs them</b> — against a real embedded Postgres, in about a second, no LLM anywhere. Syntax that would only explode on deploy day explodes here instead, localized to the exact file and the exact database error.',
      m:['MECHANISM|embedded Postgres (pglite) · real DDL apply','RUNTIME|~1s · deterministic','ON FAIL|BLOCK']},
     {n:'06',id:'rls-enforce',one:'Two tenants seeded. The attack is attempted.',
-     d:'The keystone. It stands up a live database, applies your migrations, seeds <b>two tenants</b> — then attacks: as tenant A, and as an anonymous session, it attempts to read, update, delete, and insert tenant B’s rows across every isolated table. One leaked row blocks. “The policy text looks right” is an opinion. <b>The database refusing the attack is a fact.</b>',
+     d:'The keystone. It stands up a live database, applies your migrations, and seeds <b>two tenants</b>. Then, as tenant A and as an anonymous session, it attempts to read, update, delete, and insert tenant B’s rows across every isolated table. One leaked row blocks. Nobody has to trust that the policy reads correctly — <b>the database gets attacked, and either it holds or it doesn’t.</b>',
      m:['MECHANISM|live two-tenant probe · embedded Postgres','ASSERTS|read/write/delete/insert all denied','ON FAIL|BLOCK · harness error = BLOCK']},
     {n:'07',id:'compliance',one:'Sensitive data demands its controls.',
      d:'Reads the binding sensitivity classification from the spec and demands the controls that class of data requires — authentication in front of it, a real hard-delete path — with the org-level judgment items routed to a human instead of hand-waved. <b>The classification can’t be talked out of:</b> declare “no sensitive data” while the schema stores diagnoses, and an independent code scan falsifies the claim and blocks.',
@@ -730,8 +730,8 @@ footer .col a:hover{color:var(--amber-t)}
     {n:'11',id:'completeness',one:'Promised features, checked off in code.',
      d:'An app can pass every security gate and still be missing half of what you asked for. Feature by feature, the code is held against the PRD’s contract list — and <b>a promised feature that is entirely missing blocks the release.</b> The next fix round generates it. If the reviewer itself goes down, that’s a block too: unverifiable is unshippable.',
      m:['MECHANISM|per-feature review vs PRD contract','REVIEWER DOWN|fails closed = BLOCK','ON FAIL|BLOCK']},
-    {n:'12',id:'the sentinel',s:1,one:'Signed proof. The deploy’s only key.',
-     d:'The matrix’s only exit. When every gate passes — and at least one did substantive work, because a board of “not applicable” is not a pass — a cryptographically signed sentinel is written, bound to this exact build in this exact directory. <b>The deploy refuses to run without it.</b> Copy it elsewhere: invalid. Fail a later run: destroyed. A past pass can never ship a present failure.',
+    {n:'12',id:'the sentinel',s:1,one:'The deploy checks for one signature.',
+     d:'The matrix’s only exit. Once every gate passes, with at least one doing substantive work (a board of eleven “not applicable” verdicts doesn’t count), a cryptographically signed sentinel gets written and bound to that exact build in that exact directory. <b>The deploy won’t run without it</b>, a copy of it elsewhere won’t validate, and it gets deleted the moment a later run fails.',
      m:['MECHANISM|HMAC-signed · path-bound · single writer','VACUOUS PASS|refused (all-n/a ≠ pass)','WITHOUT IT|NO DEPLOY']}
   ];
   var mx=document.getElementById('matrix');if(!mx)return;
