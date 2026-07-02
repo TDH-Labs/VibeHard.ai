@@ -15,7 +15,8 @@ import { join, resolve, sep } from "node:path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
-import { llmInterviewer, type InterviewTurn } from "../src/spec/index.ts";
+import { decideRigor, llmInterviewer, llmIntake, reviewSpec, type InterviewTurn } from "../src/spec/index.ts";
+import { isBlocking } from "../src/types.ts";
 import { byoModelFactory } from "../src/engine/bolt/driver.ts";
 import { applyBillingDecision, decideBillingEvent, parseStripeEvent, verifyStripeSignature } from "../src/platform/billing-webhook.ts";
 import { LocalEscalationSink } from "../src/escalation/index.ts";
@@ -559,6 +560,11 @@ function getOrchestrator(tenantId: string, app: string): Orchestrator {
   return o;
 }
 
+// /api/spec-preview faucet state — in-memory like the session store (durable-state EPIC owns the rest).
+const specPreviewHits = new Map<string, number[]>(); // ip → timestamps within the hour window
+let specPreviewDay = "";
+let specPreviewDayCount = 0;
+
 const server = Bun.serve({
   port: Number(process.env.PORT) || 4000,
   idleTimeout: 240, // builds stream for minutes
@@ -741,6 +747,35 @@ const server = Bun.serve({
         console.log(`[billing] apply skipped: ${e instanceof Error ? e.message : e}`); // unknown tenant etc — still ack
       }
       return json({ received: true });
+    }
+
+    if (path === "/api/spec-preview" && req.method === "POST") {
+      // THE FREE SAMPLE (landing hero): an anonymous visitor's first real artifact. One LLM pass
+      // drafts the same Spec the pipeline starts from; deterministic reviewSpec grades readiness.
+      // Unauthenticated by design, so it's guarded like a paid faucet: same-origin only, prompt
+      // length cap, 3/hour per IP, and a global daily ceiling. It reads/writes NO tenant state.
+      if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403);
+      const { prompt } = (await req.json().catch(() => ({}))) as { prompt?: string };
+      const idea = (prompt ?? "").trim();
+      if (!idea) return json({ error: "describe the app first" }, 400);
+      if (idea.length > 600) return json({ error: "keep it under 600 characters — one plain sentence is enough" }, 400);
+      const ip = req.headers.get("fly-client-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+      const now = Date.now();
+      const hits = (specPreviewHits.get(ip) ?? []).filter((t) => now - t < 3_600_000);
+      if (hits.length >= 3) return json({ error: "that's three free spec drafts this hour — create a free account to keep going" }, 429);
+      const day = new Date().toISOString().slice(0, 10);
+      if (day !== specPreviewDay) { specPreviewDay = day; specPreviewDayCount = 0; }
+      if (specPreviewDayCount >= 300) return json({ error: "the drafting desk is at capacity today — create a free account to build" }, 429);
+      hits.push(now);
+      specPreviewHits.set(ip, hits);
+      specPreviewDayCount++;
+      try {
+        const spec = await llmIntake()(idea, null);
+        const gaps = reviewSpec(spec);
+        return json({ spec, rigor: decideRigor(spec), ready: !gaps.some(isBlocking), gaps: gaps.filter(isBlocking).length });
+      } catch {
+        return json({ error: "the drafting desk hiccuped — try again in a minute" }, 503);
+      }
     }
 
     if (path === "/api/intake/next" && req.method === "POST") {
