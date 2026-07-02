@@ -224,6 +224,8 @@ nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter
 @media(max-width:560px){.who{grid-template-columns:1fr}}
 .who>div{border-left:1px solid var(--line);padding:24px 22px;background:var(--k)}
 .who h4{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
+.who h4 a{color:var(--amber);text-decoration:none;border-bottom:1px solid var(--amber-dim)}
+.who h4 a:hover{color:var(--amber-t);border-color:var(--amber-t)}
 .who p{font-size:14px;line-height:1.6}
 /* trust strip */
 #trust{border:1px solid var(--amber-dim);background:#120e04;margin-top:64px;padding:30px clamp(20px,3vw,40px)}
@@ -472,8 +474,8 @@ footer .col a:hover{color:var(--amber-t)}
 
     <div class="who" data-rv>
       <div><h4>Solo founders</h4><p>Your SaaS idea, built like it already has customers to lose. Multi-tenant isolation proven before user #2 ever signs up.</p></div>
-      <div><h4>Therapists &amp; clinics</h4><p>Client data gets classified as sensitive from the first pass, which is what pulls in the auth requirement, the hard-delete path, and the log scan that catches a note leaking where it shouldn't.</p></div>
-      <div><h4>Bookkeepers &amp; firms</h4><p>Financial records get the financial-data controls, deterministically. Your client portal shouldn't be the riskiest thing in your practice.</p></div>
+      <div><h4><a href="/therapists.html">Therapists &amp; clinics ▸</a></h4><p>Client data gets classified as sensitive from the first pass, which is what pulls in the auth requirement, the hard-delete path, and the log scan that catches a note leaking where it shouldn't.</p></div>
+      <div><h4><a href="/bookkeepers.html">Bookkeepers &amp; firms ▸</a></h4><p>Financial records get the financial-data controls, deterministically. Your client portal shouldn't be the riskiest thing in your practice.</p></div>
       <div><h4>Agencies</h4><p>Hand a client a build with receipts: verdict board, pinned deps, a README that exists. The handoff survives you leaving the room.</p></div>
     </div>
 
