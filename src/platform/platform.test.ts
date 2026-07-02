@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Platform, type DeployFn, type PlatformOptions } from "./platform.ts";
+import { PLANS } from "./plans.ts";
 import { FileTenantStore } from "./tenant-store.ts";
 import { LocalBillingProvider } from "./billing.ts";
 import type { UsageEvent } from "./types.ts";
@@ -143,6 +144,7 @@ describe("Platform — isolation + delegation", () => {
     const { platform, cleanup } = makePlatform();
     try {
       await platform.signUp("Acme"); // t1
+      await platform.setPlan("t1", "pro"); // this test does 3 builds — needs headroom over the free cap, it's not a quota test
       const ok = await platform.build("t1", "myapp", { run: async () => ({ ok: true }) });
       expect(ok.status).toBe("succeeded");
       expect(ok.app).toBe("myapp");
@@ -161,10 +163,11 @@ describe("Platform — isolation + delegation", () => {
   test("build-rate quota: the free plan allows N builds/day, then blocks (fail closed)", async () => {
     const { platform, cleanup } = makePlatform();
     try {
-      await platform.signUp("Acme"); // free → maxBuildsPerDay 10
-      for (let i = 0; i < 10; i++) await platform.submitBuild("t1", "app");
+      await platform.signUp("Acme");
+      const cap = PLANS.free!.maxBuildsPerDay; // derived, not hard-coded — plan numbers are a business decision
+      for (let i = 0; i < cap; i++) await platform.submitBuild("t1", "app");
       await expect(platform.submitBuild("t1", "app")).rejects.toThrow(/build rate limit/);
-      expect(platform.usageCountSince("t1", "build", "2025-01-01T00:00:00Z")).toBe(10);
+      expect(platform.usageCountSince("t1", "build", "2025-01-01T00:00:00Z")).toBe(cap);
       await platform.suspend("t1");
       await expect(platform.submitBuild("t1", "app")).rejects.toThrow(/suspended/);
     } finally {
