@@ -24,6 +24,7 @@ import type { Finding, GateVerdict } from "../types.ts";
 import { notApplicable, verdictOf } from "../types.ts";
 import type { SensitiveClass } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
+import { classificationMismatch, detectSensitiveSignals, inferredClasses } from "./sensitive-signals.ts";
 
 const SENSITIVE_CLASSES: readonly SensitiveClass[] = ["pii", "phi", "financial", "credentials"];
 
@@ -168,10 +169,26 @@ function detectSensitiveLogging(projectPath: string): string[] {
   return sites;
 }
 
-/** Run the compliance-posture assessment. No classification or non-sensitive → PASS. */
+/** Run the compliance-posture assessment. Classification-driven, but the classification is
+ *  FALSIFIABLE (D-1): a "none" declaration is cross-checked against the code's own data model,
+ *  and a contradiction forces the assessment to run on the inferred classes + blocks for human
+ *  confirmation. Genuinely non-sensitive apps keep the fast N/A. */
 export async function runCompliance(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
   const cls = readClassification(projectPath);
-  if (!cls || cls.sensitiveClasses.length === 0) return notApplicable("compliance", ranAt);
+  if (!cls || cls.sensitiveClasses.length === 0) {
+    const signals = detectSensitiveSignals(projectPath);
+    if (signals.length === 0) return notApplicable("compliance", ranAt); // claim corroborated → fast N/A
+    // Claim falsified: assess against the inferred classes, fail closed on the unknowns
+    // (no spec → assume unauthenticated + storing data), and surface the mismatch itself.
+    const input: ComplianceInput = {
+      sensitiveClasses: inferredClasses(signals),
+      authenticated: cls?.authenticated ?? false,
+      storesData: cls?.storesData ?? true,
+      hasDeletePath: detectDeletePath(projectPath),
+      suspiciousLogging: detectSensitiveLogging(projectPath),
+    };
+    return verdictOf("compliance", [classificationMismatch("compliance", signals), ...assessCompliance(input)], ranAt);
+  }
   const input: ComplianceInput = {
     ...cls,
     hasDeletePath: detectDeletePath(projectPath),

@@ -14,6 +14,7 @@ import {
   resolveSandboxHost,
   safeToolEnv,
   summarizeBuild,
+  summarizeBuildArtifacts,
   summarizeSandbox,
   summarizeShutdown,
   summarizeVerify,
@@ -364,5 +365,34 @@ describe("summarizeSandbox — a Fly-sandboxed container result → findings (EP
     expect(findings[0]!.severity).toBe("high");
     expect(findings[0]!.ruleId).toBe("sandbox-boot-failed");
     expect(findings[0]!.message).toContain("ECONNREFUSED");
+  });
+});
+
+describe("summarizeBuildArtifacts — an exit-0 build must leave evidence (SECURITY_AUDIT_4)", () => {
+  test("no output dir, nothing written since the build started → blocking finding", async () => {
+    const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "true" } }) });
+    // everything in `d` predates `startedMs` → the no-op `"build": "true"` leaves no evidence
+    const f = summarizeBuildArtifacts(d, Date.now() + 5);
+    expect(f?.ruleId).toBe("build-no-artifacts");
+    expect(f?.severity).toBe("high");
+  });
+
+  test("a non-empty conventional output dir (dist/) → null, even with old mtimes (cached rebuilds)", async () => {
+    const d = await scratch({ "package.json": "{}", "dist/index.html": "<html>ok</html>" });
+    expect(summarizeBuildArtifacts(d, Date.now() + 5)).toBeNull();
+  });
+
+  test("a file written during the build → null (covers custom outDirs)", async () => {
+    const d = await scratch({ "package.json": "{}" });
+    const startedMs = Date.now() - 1;
+    await Bun.write(join(d, "custom-out", "bundle.js"), "console.log(1)");
+    expect(summarizeBuildArtifacts(d, startedMs)).toBeNull();
+  });
+
+  test("changes inside node_modules don't count as artifacts", async () => {
+    const d = await scratch({ "package.json": "{}" });
+    const startedMs = Date.now() + 5;
+    await Bun.write(join(d, "node_modules", "x", "index.js"), "x");
+    expect(summarizeBuildArtifacts(d, startedMs)?.ruleId).toBe("build-no-artifacts");
   });
 });

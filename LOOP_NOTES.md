@@ -235,3 +235,6 @@ feat: OpenRouter as first-class LLM provider (openrouter→opencode→anthropic 
 
 ## 2026-07-02T02:36:59Z — DONE
 feat: new marketing site at root — seven-gates craftsmanship tour, honest-copy homepage (positioning.md-bound); app moves to /app
+
+## 2026-07-02T03:59:56Z — DONE
+fix: SECURITY_AUDIT_4 D-1 — sensitive-data classification is now falsifiable (code scan can't be switched off by the spec); build gate requires artifacts; completeness docstring corrected
