@@ -223,3 +223,6 @@ fix: serve the app UI at the bare root path (was 404 — only /app and /reset we
 
 ## 2026-07-02T00:51:07Z — DONE
 fix: login loop — validate Clerk sessions + CSRF origin against ALL served hostnames, and fail loudly instead of remounting SignIn
+
+## 2026-07-02T02:04:47Z — DONE
+feat: turnkey onboarding — product-first dashboard, platform LLM key by default, BYO keys/services tucked into Advanced

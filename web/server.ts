@@ -659,6 +659,10 @@ const server = Bun.serve({
         name: auth.user.name,
         plan: t?.plan ?? "free",
         hasKey: loadKey(auth.user.tenantId) !== null,
+        // Turnkey: the platform carries its own LLM key, so builds work with ZERO setup — a tenant's
+        // own key (hasKey) is an optional override, not a prerequisite. The build child process
+        // already inherits the operator key from process.env; this flag just tells the UI not to gate.
+        turnkey: Boolean(process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY),
         builds: listTenantBuilds(auth.user.tenantId), // persistent project history (survives re-login)
         activeBuild: readActiveBuild(auth.user.tenantId), // a running/paused build the dashboard can stop or resume
       });

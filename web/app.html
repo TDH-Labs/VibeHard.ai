@@ -128,20 +128,7 @@ button:disabled{opacity:.5;cursor:default}
     <div style="margin:30px 0 24px">
       <div class="eyebrow">Your workspace</div>
       <h1 style="margin-top:12px">Build something real.</h1>
-      <p class="muted" style="font-size:17px;margin-top:10px">Describe the app your business needs. We write the spec, build it, run all seven gates, and deploy it — on your own database.</p>
-    </div>
-
-    <div class="card" id="keycard">
-      <h2>Your LLM key</h2>
-      <p class="muted" style="font-size:14px;margin-top:2px">Builds run on <em>your</em> key, so usage bills to you and is never shared. (Anthropic <code class="mono">sk-ant-…</code> or an OpenAI-compatible key.)</p>
-      <div id="keystate"></div>
-    </div>
-
-    <div class="card" id="conncard">
-      <h2>Connect your services</h2>
-      <p class="muted" style="font-size:14px;margin-top:2px">Attach your own Supabase database and Stripe account. Your apps use <em>your</em> services — keys are validated, encrypted, and never shared.</p>
-      <div id="connbanner" class="hide" style="margin-top:12px;border-radius:11px;padding:11px 14px;font-size:14px;line-height:1.5"></div>
-      <div id="connlist" style="margin-top:14px;display:flex;flex-direction:column;gap:12px"></div>
+      <p class="muted" style="font-size:17px;margin-top:10px">Describe the app your business needs. We write the spec, build it, run all seven security gates, and put it live — with its own private, secured database. Nothing to configure.</p>
     </div>
 
     <div class="card">
@@ -174,6 +161,21 @@ button:disabled{opacity:.5;cursor:default}
       <h2>Your builds</h2>
       <div class="builds" id="builds"><span class="muted" style="font-size:14px">No builds yet.</span></div>
     </div>
+
+    <details id="advanced" style="margin-bottom:18px">
+      <summary class="muted" style="cursor:pointer;font-size:13.5px;padding:6px 2px;user-select:none">Advanced — bring your own AI account &amp; services (optional)</summary>
+      <div class="card" id="keycard" style="margin-top:14px">
+        <h2>Your own AI account</h2>
+        <p class="muted" style="font-size:14px;margin-top:2px">VibeHard's engine is included with your plan — you don't need this. If you'd rather builds run on your own Anthropic or OpenAI-compatible account, add its key here and we'll use it instead.</p>
+        <div id="keystate"></div>
+      </div>
+      <div class="card" id="conncard">
+        <h2>Your own services</h2>
+        <p class="muted" style="font-size:14px;margin-top:2px">We create and manage a private database for every app automatically. If you'd rather attach your own Supabase or Stripe account, connect it here — keys are validated, encrypted, and never shared.</p>
+        <div id="connbanner" class="hide" style="margin-top:12px;border-radius:11px;padding:11px 14px;font-size:14px;line-height:1.5"></div>
+        <div id="connlist" style="margin-top:14px;display:flex;flex-direction:column;gap:12px"></div>
+      </div>
+    </details>
 
     <div class="card hide" id="orch">
       <h2>Build assistant</h2>
@@ -337,7 +339,7 @@ function renderDesignPicker(){
 function startBuild(prompt,resumeApp,mode){
   mode=mode||"build";
   if(!prompt&&mode==="build"){return}
-  if(!me.hasKey){$("#buildhint").textContent="add your LLM key first ↑";return}
+  if(!me.hasKey&&!me.turnkey){$("#buildhint").textContent="add your own AI key under Advanced below, or upgrade your plan";return}
   const con=$("#console"),res=$("#result");
   $("#resume-banner").classList.add("hide");
   $("#progress").classList.remove("hide");con.innerHTML="";con.style.display="block";res.style.display="none";res.className="result";
@@ -373,7 +375,7 @@ const MAX_Q=7;
 // prior answers, until the model is done or the cap is hit — then fold the answers and build.
 async function beginBuild(prompt){
   if(!prompt)return;
-  if(!me.hasKey){$("#buildhint").textContent="add your LLM key first ↑";return}
+  if(!me.hasKey&&!me.turnkey){$("#buildhint").textContent="add your own AI key under Advanced below, or upgrade your plan";return}
   $("#buildbtn").disabled=true;$("#buildhint").textContent="thinking of a first question…";
   await askNext(prompt,[]);
 }
