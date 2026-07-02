@@ -49,7 +49,7 @@ from it after auth. Sign-in also remains directly available in the nav at all ti
 Access model: **immediate account creation** (Clerk is live in production). No waitlist.
 
 **Pricing — shown, real numbers.**
-$0 / $29 / $99 per month with the true quotas from `src/platform/plans.ts`:
+$0 / $39 / $199 per month with the true quotas from `src/platform/plans.ts`:
 2 / 5 / 20 gated builds per day, 1 / 5 / 25 projects. No invented metrics.
 
 **Gate count — corrected from the brief.**
