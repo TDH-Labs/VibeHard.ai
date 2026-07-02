@@ -662,7 +662,7 @@ const server = Bun.serve({
         // Turnkey: the platform carries its own LLM key, so builds work with ZERO setup — a tenant's
         // own key (hasKey) is an optional override, not a prerequisite. The build child process
         // already inherits the operator key from process.env; this flag just tells the UI not to gate.
-        turnkey: Boolean(process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY),
+        turnkey: Boolean(process.env.OPENROUTER_API_KEY || process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY),
         builds: listTenantBuilds(auth.user.tenantId), // persistent project history (survives re-login)
         activeBuild: readActiveBuild(auth.user.tenantId), // a running/paused build the dashboard can stop or resume
       });
@@ -939,11 +939,18 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
   let heldTicket: string | undefined; // captured from the build's ::held marker
   let liveUrl: string | undefined; // captured from ship's "LIVE → <url>" line
   const byo = loadKey(tenantId);
-  // The tenant's key (if set) overrides the operator's for THIS build's child process.
+  // The tenant's key (if set) overrides the operator's for THIS build's child process. The
+  // override must be TOTAL: providerOf() in the child resolves openrouter → opencode → anthropic
+  // by env presence, so the operator's gateway keys must be REMOVED or they'd out-prioritize the
+  // tenant's key and their builds would silently bill the platform.
   const env: Record<string, string> = { ...process.env, VIBEHARD_MANAGED: "1" };
   if (byo) {
+    delete env.OPENROUTER_API_KEY;
+    delete env.OPENCODE_API_KEY;
+    delete env.ANTHROPIC_API_KEY;
     if (byo.startsWith("sk-ant-")) env.ANTHROPIC_API_KEY = byo;
-    else env.OPENCODE_API_KEY = byo; // OpenAI-compatible / gateway key
+    else if (byo.startsWith("sk-or-")) env.OPENROUTER_API_KEY = byo;
+    else env.OPENCODE_API_KEY = byo; // other OpenAI-compatible / gateway key
   }
   Object.assign(env, loadIntegrations(tenantId)); // the tenant's third-party keys → deploy injects the app's subset (#5)
   // C-6 (audit3): the build subprocess env merges operator + tenant values; tell deploy-time

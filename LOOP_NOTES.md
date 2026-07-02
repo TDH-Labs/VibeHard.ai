@@ -229,3 +229,6 @@ feat: turnkey onboarding — product-first dashboard, platform LLM key by defaul
 
 ## 2026-07-02T02:18:13Z — DONE
 feat: sustainable turnkey quotas — build caps sized so worst-case platform token spend stays under plan price
+
+## 2026-07-02T02:30:26Z — DONE
+feat: OpenRouter as first-class LLM provider (openrouter→opencode→anthropic resolution, total BYO override, same model families)
