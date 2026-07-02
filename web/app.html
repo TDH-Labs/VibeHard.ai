@@ -75,7 +75,7 @@ button:disabled{opacity:.5;cursor:default}
     <svg width="24" height="26" viewBox="0 0 26 28" aria-hidden="true" style="filter:drop-shadow(0 3px 5px rgba(0,0,0,.3))"><polygon points="13,3 23,8.5 13,14 3,8.5" fill="#34dba1"/><polygon points="3,8.5 13,14 13,25 3,19.5" fill="#15936f"/><polygon points="23,8.5 13,14 13,25 23,19.5" fill="#0c6e52"/></svg>
     <span>VibeHard</span>
   </a>
-  <div class="navlinks" id="who"><a href="/how-it-works.dc.html">How it works</a><a href="/trust.dc.html">Trust &amp; security</a></div>
+  <div class="navlinks" id="who"><a href="/#gates">What we check</a><a href="/#trust">Trust &amp; security</a></div>
 </nav>
 
 <div class="wrap">
@@ -471,7 +471,7 @@ async function renderConnections(){
 async function load(keep){
   const sp=new URLSearchParams(location.search);const cp=sp.get("connect");if(cp&&CONN_MSG[cp]){const[k,t]=CONN_MSG[cp];connBanner(k,t);history.replaceState({},"","/app")}
   const {body}=await api("/api/me");me=body;
-  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.dc.html">How it works</a><a href="/trust.dc.html">Trust &amp; security</a>';
+  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/#gates">What we check</a><a href="/#trust">Trust &amp; security</a>';
     // Clerk has a LIVE client session but the server rejected it (misconfig: azp/authorizedParties,
     // wrong instance keys, clock skew…). Remounting SignIn here redirect-loops forever — the already-
     // signed-in widget instantly bounces back and we land in this branch again. Fail LOUDLY instead.
@@ -535,7 +535,7 @@ async function loadClerk(cfg){const pk=cfg.publishableKey;let fapi=cfg.frontendA
 async function boot(){
   let cfg=null;try{cfg=(await api("/api/auth-config")).body}catch{}
   if(cfg&&cfg.clerk&&cfg.publishableKey){window.__CLERK=cfg;await loadClerk(cfg);return load()}
-  if(resetToken){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.dc.html">How it works</a><a href="/trust.dc.html">Trust &amp; security</a>';showAuthCard("reset")}
+  if(resetToken){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/#gates">What we check</a><a href="/#trust">Trust &amp; security</a>';showAuthCard("reset")}
   else load();
 }
 boot();

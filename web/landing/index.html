@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeHard — AI builds your app. We make sure it's safe to ship.</title>
+<meta name="description" content="Describe the app your business needs. VibeHard writes real software, then checks it the way a security team would — every line, every time — before it ever touches the internet.">
+<meta property="og:title" content="VibeHard — AI builds your app. We make sure it's safe to ship.">
+<meta property="og:description" content="The app builder that shows its work. Seven security gates between the AI and the internet — and a deploy that refuses to run until every one signs off.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://vibehard.ai/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b0d0c; --bg2:#0e1110; --bg3:#121614; --surface:#141816;
+  --text:#eef0ec; --text2:#cfd4ce; --muted:#98a09a; --dim:#6b736d;
+  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.13);
+  --teal:#2bd29b; --teal-dim:rgba(43,210,155,.55); --teal-ink:#06231a;
+  --red:#ff6b6b; --amber:#f0b04a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-.03em;line-height:1.06}
+h1{font-size:clamp(40px,6.4vw,76px)}
+h2{font-size:clamp(30px,4.2vw,48px)}
+h3{font-size:21px;letter-spacing:-.015em}
+.mono{font-family:'JetBrains Mono',monospace}
+a{color:var(--teal)}
+.eyebrow{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--teal)}
+.muted{color:var(--muted)}
+.wrap{max-width:1140px;margin:0 auto;padding:0 32px}
+.narrow{max-width:820px}
+section{padding:110px 0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;background:var(--teal);color:var(--teal-ink);font:inherit;font-weight:600;font-size:16px;border:none;border-radius:999px;padding:15px 30px;cursor:pointer;text-decoration:none;transition:transform .18s ease,box-shadow .18s ease}
+.btn:hover{transform:translateY(-2px);box-shadow:0 10px 34px rgba(43,210,155,.35)}
+.btn.ghost{background:transparent;border:1px solid var(--line2);color:var(--text);box-shadow:none}
+.btn.ghost:hover{border-color:var(--teal);box-shadow:none}
+.btn.big{font-size:17.5px;padding:17px 36px}
+
+/* nav */
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(11,13,12,.72);border-bottom:1px solid var(--line)}
+.navin{display:flex;align-items:center;justify-content:space-between;max-width:1140px;margin:0 auto;padding:16px 32px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
+.brand span{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:20px;letter-spacing:-.01em}
+.navlinks{display:flex;align-items:center;gap:28px}
+.navlinks a{color:var(--muted);text-decoration:none;font-size:15px;transition:color .15s}
+.navlinks a:hover{color:var(--text)}
+.navlinks .btn{padding:10px 20px;font-size:14.5px}
+@media(max-width:760px){.navlinks a.hideable{display:none}}
+
+/* glows */
+.glow{position:absolute;pointer-events:none;filter:blur(0px)}
+.glow.hero{top:-260px;left:50%;transform:translateX(-50%);width:1100px;height:640px;background:radial-gradient(ellipse at center,rgba(43,210,155,.14),transparent 65%)}
+
+/* reveal on scroll */
+.rv{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+.rv.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.rv{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+
+/* ── HERO ── */
+header{position:relative;padding:96px 0 70px;text-align:center}
+.hero-sub{font-size:clamp(17px,2vw,20.5px);color:var(--text2);max-width:760px;margin:26px auto 0;line-height:1.7}
+.hero-cta{display:flex;gap:14px;justify-content:center;align-items:center;margin-top:38px;flex-wrap:wrap}
+.hero-note{margin-top:16px;font-size:13.5px;color:var(--dim)}
+
+/* the gate-run terminal */
+.term{max-width:760px;margin:64px auto 0;background:#070908;border:1px solid var(--line2);border-radius:16px;text-align:left;box-shadow:0 30px 80px rgba(0,0,0,.5);overflow:hidden}
+.term-bar{display:flex;align-items:center;gap:7px;padding:13px 17px;border-bottom:1px solid var(--line)}
+.term-bar i{width:11px;height:11px;border-radius:50%;background:#2a2f2c;display:inline-block}
+.term-bar .t{margin-left:10px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim)}
+.term-body{padding:20px 22px 24px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:2.05;min-height:308px}
+.tl{display:flex;align-items:baseline;gap:10px;opacity:0;transform:translateY(4px);transition:opacity .4s,transform .4s}
+.tl.show{opacity:1;transform:none}
+.tl .st{width:16px;flex:none;color:var(--teal)}
+.tl .nm{color:var(--text2)}
+.tl .ds{color:var(--dim);font-size:12px;flex:1;text-align:right}
+.tl.hd{color:var(--dim)}
+.tl .sp{width:12px;height:12px;border:2px solid var(--teal);border-right-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;position:relative;top:1px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tl.live .nm{color:var(--teal);font-weight:600}
+
+/* ── VILLAIN ── */
+.villain{border-top:1px solid var(--line);background:linear-gradient(180deg,var(--bg) 0%,#0d0f0e 100%)}
+.villain blockquote{font-family:'Space Grotesk',sans-serif;font-size:clamp(24px,3.4vw,38px);font-weight:500;letter-spacing:-.02em;line-height:1.28;max-width:900px}
+.villain blockquote em{color:var(--red);font-style:normal}
+.villain .after{max-width:720px;margin-top:30px;color:var(--muted);font-size:17px;line-height:1.75}
+.villain .after b{color:var(--text2);font-weight:600}
+
+/* ── GATES ── */
+.gates-head{max-width:780px}
+.gates-head p{margin-top:22px;color:var(--muted);font-size:17.5px;line-height:1.75}
+.gate-list{margin-top:70px;display:flex;flex-direction:column;gap:14px}
+.gate{display:grid;grid-template-columns:76px 1fr;gap:26px;padding:34px 36px;background:var(--surface);border:1px solid var(--line);border-radius:20px;transition:border-color .3s}
+.gate:hover{border-color:rgba(43,210,155,.4)}
+.gate .num{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim);padding-top:6px}
+.gate .num b{display:block;font-size:30px;color:var(--teal);font-weight:600;line-height:1.1}
+.gate h3{margin-bottom:8px}
+.gate .what{color:var(--text2);font-size:16px;line-height:1.7;max-width:70ch}
+.gate .hunt{margin-top:14px;color:var(--muted);font-size:14.5px;line-height:1.7;max-width:70ch}
+.gate .hunt b{color:var(--amber);font-weight:600}
+.gate .id{margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);letter-spacing:.05em}
+.gate .id span{color:var(--teal-dim)}
+@media(max-width:640px){.gate{grid-template-columns:1fr;gap:10px;padding:26px 22px}}
+.seal{margin-top:40px;padding:36px 40px;border-radius:20px;background:linear-gradient(135deg,rgba(43,210,155,.09),rgba(43,210,155,.02));border:1px solid rgba(43,210,155,.35)}
+.seal h3{color:var(--teal)}
+.seal p{margin-top:10px;color:var(--text2);font-size:16.5px;line-height:1.75;max-width:75ch}
+
+/* ── HOLD (when a gate says no) ── */
+.hold .case{margin-top:54px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:820px){.hold .case{grid-template-columns:1fr}}
+.hold .panel{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:34px 36px}
+.hold .panel h3{margin-bottom:12px}
+.hold .panel p{color:var(--muted);font-size:15.5px;line-height:1.75}
+.hold .flag{font-family:'JetBrains Mono',monospace;font-size:12.5px;background:#070908;border:1px solid rgba(240,176,74,.4);border-radius:12px;padding:16px 18px;margin-top:18px;color:var(--amber);line-height:1.8}
+.hold .plain{background:rgba(43,210,155,.06);border:1px solid rgba(43,210,155,.3);border-radius:12px;padding:16px 18px;margin-top:18px;color:var(--text2);font-size:14.5px;line-height:1.7}
+
+/* ── WHO ── */
+.who-grid{margin-top:60px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+@media(max-width:900px){.who-grid{grid-template-columns:1fr}}
+.who-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:36px 34px;transition:transform .25s ease,border-color .25s}
+.who-card:hover{transform:translateY(-4px);border-color:rgba(43,210,155,.4)}
+.who-card .eyebrow{display:block;margin-bottom:14px}
+.who-card p{color:var(--muted);font-size:15.5px;line-height:1.75;margin-top:10px}
+.who-card p b{color:var(--text2)}
+
+/* ── GET ── */
+.get-grid{margin-top:56px;display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+@media(max-width:820px){.get-grid{grid-template-columns:1fr}}
+.get{display:flex;gap:18px;padding:26px 28px;background:var(--bg2);border:1px solid var(--line);border-radius:16px}
+.get .ic{flex:none;width:40px;height:40px;border-radius:12px;background:rgba(43,210,155,.1);border:1px solid rgba(43,210,155,.3);display:flex;align-items:center;justify-content:center;color:var(--teal);font-size:17px}
+.get h3{font-size:16.5px;margin-bottom:5px}
+.get p{color:var(--muted);font-size:14.5px;line-height:1.7}
+
+/* ── PRICING ── */
+.price-grid{margin-top:60px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch}
+@media(max-width:900px){.price-grid{grid-template-columns:1fr}}
+.price{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:38px 34px;display:flex;flex-direction:column}
+.price.star{border-color:rgba(43,210,155,.5);position:relative}
+.price.star::before{content:"Most popular";position:absolute;top:-13px;left:32px;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;background:var(--teal);color:var(--teal-ink);padding:5px 12px;border-radius:999px;font-weight:600}
+.price .nm{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.price .amt{font-family:'Space Grotesk',sans-serif;font-size:46px;font-weight:600;letter-spacing:-.03em;margin-top:14px}
+.price .amt small{font-size:16px;color:var(--muted);font-weight:400;letter-spacing:0}
+.price ul{list-style:none;margin:24px 0 30px;display:flex;flex-direction:column;gap:11px;flex:1}
+.price li{display:flex;gap:11px;font-size:15px;color:var(--text2)}
+.price li::before{content:"✓";color:var(--teal);font-weight:700}
+.price .btn{width:100%}
+.price-note{margin-top:26px;text-align:center;color:var(--dim);font-size:13.5px}
+
+/* ── HONESTY ── */
+.honest{background:linear-gradient(180deg,var(--bg) 0%,#0c100e 55%,var(--bg) 100%)}
+.honest .inner{max-width:860px;margin:0 auto;text-align:center}
+.honest h2{margin-top:22px}
+.honest .body{margin-top:26px;color:var(--text2);font-size:17.5px;line-height:1.8;text-align:left}
+.honest .body p+p{margin-top:18px}
+.honest .body .never{color:var(--muted)}
+.honest .body .never s{color:var(--dim)}
+
+/* ── FINAL CTA ── */
+.final{text-align:center;position:relative}
+.final .glow2{position:absolute;bottom:-140px;left:50%;transform:translateX(-50%);width:900px;height:480px;background:radial-gradient(ellipse at center,rgba(43,210,155,.12),transparent 65%);pointer-events:none}
+.final p{margin-top:20px;color:var(--muted);font-size:17px;max-width:560px;margin-left:auto;margin-right:auto}
+.final .btn{margin-top:36px}
+
+footer{border-top:1px solid var(--line);padding:44px 0 60px}
+.f-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
+.f-links{display:flex;gap:24px}
+.f-links a{color:var(--dim);text-decoration:none;font-size:13.5px}
+.f-links a:hover{color:var(--muted)}
+.f-note{color:var(--dim);font-size:12.5px;margin-top:18px;max-width:640px;line-height:1.7}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="navin">
+    <a class="brand" href="/">
+      <svg width="24" height="26" viewBox="0 0 26 28" aria-hidden="true"><polygon points="13,3 23,8.5 13,14 3,8.5" fill="#34dba1"/><polygon points="3,8.5 13,14 13,25 3,19.5" fill="#15936f"/><polygon points="23,8.5 13,14 13,25 23,19.5" fill="#0c6e52"/></svg>
+      <span>VibeHard</span>
+    </a>
+    <div class="navlinks">
+      <a class="hideable" href="#gates">What we check</a>
+      <a class="hideable" href="#who">Who it's for</a>
+      <a class="hideable" href="#pricing">Pricing</a>
+      <a class="hideable" href="/app">Sign in</a>
+      <a class="btn" href="/app">Describe your app →</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<header>
+  <div class="glow hero"></div>
+  <div class="wrap" style="position:relative">
+    <div class="eyebrow rv">The app builder that shows its work</div>
+    <h1 class="rv" style="margin-top:22px">AI builds your app.<br>We make sure it's <span style="color:var(--teal)">safe to ship.</span></h1>
+    <p class="hero-sub rv">Describe what your business needs, in your own words. VibeHard writes real software — then checks it the way a security team would, every line, every time, <em>before</em> it ever touches the internet. You get the app. Your clients' data stays theirs.</p>
+    <div class="hero-cta rv">
+      <a class="btn big" href="/app">Describe your app →</a>
+      <a class="btn ghost" href="#gates">See what we check</a>
+    </div>
+    <div class="hero-note rv">Free to start · no credit card · your first builds are on us</div>
+
+    <div class="term rv" id="term">
+      <div class="term-bar"><i></i><i></i><i></i><span class="t">vibehard — building “client portal for my bookkeeping practice”</span></div>
+      <div class="term-body" id="termbody"></div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ THE VILLAIN ═══ -->
+<section class="villain">
+  <div class="wrap">
+    <div class="eyebrow rv">The part nobody tells you</div>
+    <blockquote class="rv" style="margin-top:26px">Most AI app builders will happily ship you an app that <em>leaks</em>.</blockquote>
+    <div class="after rv">
+      <p>They optimize for <b>“wow, it works”</b> — not for <b>“my client list won't end up on the internet.”</b> The demo dazzles. The app goes live in one click. And nobody, at any point, checked whether one customer can read another customer's records — until someone does it for real.</p>
+      <p style="margin-top:16px">That's not a hypothetical. Data exposure in AI-generated apps is the category's quiet, recurring scandal — because the tools are built to say yes, and no one is paid to say <b>wait</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ THE GATES ═══ -->
+<section id="gates">
+  <div class="wrap">
+    <div class="gates-head">
+      <div class="eyebrow rv">How it's made</div>
+      <h2 class="rv" style="margin-top:20px">Seven gates stand between the AI and the internet.</h2>
+      <p class="rv">This is the machine under the paint. Every app VibeHard writes is stopped at the door and inspected — the same checks a security engineer would run, in the same order, without exception. Not a badge. Not a promise. A process you can watch run, gate by gate, on every single build.</p>
+    </div>
+    <div class="gate-list">
+
+      <div class="gate rv">
+        <div class="num"><b>01</b>gate</div>
+        <div>
+          <h3>Static analysis</h3>
+          <p class="what">Before anything runs, the code itself is read — mechanically, line by line — for the classic ways software betrays its users.</p>
+          <p class="hunt">Hunts: <b>injection flaws</b>, unsafe patterns, the mistakes that turn a contact form into an open door.</p>
+          <div class="id">internal gate id · <span>sast</span></div>
+        </div>
+      </div>
+
+      <div class="gate rv">
+        <div class="num"><b>02</b>gate</div>
+        <div>
+          <h3>Secret scan</h3>
+          <p class="what">No password, API key, or credential is allowed to be baked into the app's code — where anyone who looks could find it.</p>
+          <p class="hunt">Hunts: <b>hardcoded keys and tokens</b> — one of the most common, most damaging mistakes in AI-generated code.</p>
+          <div class="id">internal gate id · <span>secrets</span></div>
+        </div>
+      </div>
+
+      <div class="gate rv">
+        <div class="num"><b>03</b>gate</div>
+        <div>
+          <h3>Supply chain</h3>
+          <p class="what">Your app stands on other people's code — libraries, packages, dependencies. Every one of them is checked against the public record of known vulnerabilities.</p>
+          <p class="hunt">Hunts: <b>known-vulnerable dependencies</b>, before they're welded into your app.</p>
+          <div class="id">internal gate id · <span>depvuln</span></div>
+        </div>
+      </div>
+
+      <div class="gate rv">
+        <div class="num"><b>04</b>gate</div>
+        <div>
+          <h3>Data isolation</h3>
+          <p class="what">The one that matters most. Every table in your app's database must prove that each client can see <em>only their own rows</em> — enforced by the database itself, not politely requested by the app. And here's the part we're proud of: after your app goes live, we probe the <em>running database</em> from the outside, like an attacker would, to prove the isolation held in the real world — not just on paper.</p>
+          <p class="hunt">Hunts: <b>cross-customer data leaks</b> — the failure that ends client relationships and practices.</p>
+          <div class="id">internal gate ids · <span>rls · rls-enforce · live probe</span></div>
+        </div>
+      </div>
+
+      <div class="gate rv">
+        <div class="num"><b>05</b>gate</div>
+        <div>
+          <h3>Sensitive-data handling</h3>
+          <p class="what">Apps that touch personal information get held to a higher bar: how data is collected, where it flows, what gets logged, what never should be.</p>
+          <p class="hunt">Hunts: <b>personal data in logs</b>, careless collection, the patterns that turn a small app into a big liability.</p>
+          <div class="id">internal gate ids · <span>compliance · pii</span></div>
+        </div>
+      </div>
+
+      <div class="gate rv">
+        <div class="num"><b>06</b>gate</div>
+        <div>
+          <h3>Production readiness</h3>
+          <p class="what">The difference between a demo and a product: pinned dependencies, strict types, clean containers, the unglamorous discipline that keeps software standing at 3 a.m.</p>
+          <p class="hunt">Hunts: <b>demo-grade shortcuts</b> that work today and fall over the day you depend on them.</p>
+          <div class="id">internal gate id · <span>prod-readiness</span></div>
+        </div>
+      </div>
+
+      <div class="gate rv">
+        <div class="num"><b>07</b>gate</div>
+        <div>
+          <h3>It actually runs</h3>
+          <p class="what">A fresh machine installs your app from nothing, builds it, boots it, and probes it — repeatedly. One green run proves nothing; every run must come up healthy.</p>
+          <p class="hunt">Hunts: <b>“works on my machine”</b> — the oldest lie in software.</p>
+          <div class="id">internal gate id · <span>verify</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="seal rv">
+      <h3>And then the deploy itself refuses to trust us.</h3>
+      <p>Passing the gates produces a cryptographically signed certificate — and the deployment machinery <em>will not run without it</em>. Not for us, not for a clever workaround, not for anyone. Even if every human at VibeHard wanted to ship you an unchecked app, the system is built so we can't. That's what “safe to ship” means here: not a value we hold, a property of the machine.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WHEN A GATE SAYS NO ═══ -->
+<section class="hold" style="padding-top:40px">
+  <div class="wrap">
+    <div class="eyebrow rv">When a gate says no</div>
+    <h2 class="rv" style="margin-top:20px;max-width:800px">It stops. It explains. It never ships anyway.</h2>
+    <div class="case">
+      <div class="panel rv">
+        <h3>What a security tool says</h3>
+        <p>This is what the machinery actually caught — the raw finding, preserved exactly:</p>
+        <div class="flag">⏸ BLOCKED · gate 04 (rls)<br>table "invoices" — row level security<br>not enforced; anon role can SELECT<br>across tenant boundary</div>
+      </div>
+      <div class="panel rv">
+        <h3>What you read instead</h3>
+        <p>Every finding is translated into a plain-language explanation of what it means <em>for you</em>:</p>
+        <div class="plain">“Your app was stopped before going live: as written, one client could have seen another client's invoices. We're fixing the database rules and re-running every check. Nothing shipped.”</div>
+      </div>
+    </div>
+    <p class="rv" style="margin-top:34px;color:var(--muted);font-size:16px;max-width:760px">Most issues are fixed automatically and re-checked from gate one. The point is what <em>never</em> happens: an app with a known problem quietly going live because the tool wanted to feel magical. Held is a feature.</p>
+  </div>
+</section>
+
+<!-- ═══ WHO IT'S FOR ═══ -->
+<section id="who" style="border-top:1px solid var(--line)">
+  <div class="wrap">
+    <div class="eyebrow rv">Who it's for</div>
+    <h2 class="rv" style="margin-top:20px;max-width:860px">For the people who can't afford to get this wrong.</h2>
+    <div class="who-grid">
+      <div class="who-card rv">
+        <span class="eyebrow">Therapists · clinics · coaches</span>
+        <h3>Client portals that respect the couch.</h3>
+        <p>Intake forms, session notes, scheduling — where <b>who can see what</b> isn't a settings page, it's the foundation. Your clients trusted you with the most private things they have. Your software should be built like it knows that.</p>
+      </div>
+      <div class="who-card rv">
+        <span class="eyebrow">Bookkeepers · accountants · advisors</span>
+        <h3>Financial data, walled per client.</h3>
+        <p>Document collection, client dashboards, invoice tracking — with <b>database-enforced isolation</b> between every client, proven live after every deploy. Because “oops, wrong client's P&amp;L” is not an email you ever want to send.</p>
+      </div>
+      <div class="who-card rv">
+        <span class="eyebrow">Small practices · firms · founders</span>
+        <h3>Real operations, not another spreadsheet.</h3>
+        <p>The internal tool you've always wanted and never had budget for — built like software you'd <b>bet the practice on</b>, because you are. If people trust you with their data, this is your lane too.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ WHAT YOU GET ═══ -->
+<section style="padding-top:30px">
+  <div class="wrap">
+    <div class="eyebrow rv">What arrives</div>
+    <h2 class="rv" style="margin-top:20px">A real app. Actually yours. Actually live.</h2>
+    <div class="get-grid">
+      <div class="get rv"><div class="ic">◆</div><div><h3>Its own private database</h3><p>Every app gets its own isolated database, created and secured automatically — never shared with another customer's app.</p></div></div>
+      <div class="get rv"><div class="ic">↗</div><div><h3>Live on the web, on its own URL</h3><p>Not a preview in someone else's sandbox — a deployed application your clients can sign into from anywhere, on any device.</p></div></div>
+      <div class="get rv"><div class="ic">✎</div><div><h3>Change it in plain English</h3><p>“Add a place for clients to upload documents.” Describe the change; the entire gate chain re-runs on the result. Every time.</p></div></div>
+      <div class="get rv"><div class="ic">⚙</div><div><h3>Watch it being built</h3><p>The whole pipeline runs in the open — spec, code, every gate, the deploy. No black box. It's your app; you get to see the factory floor.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ PRICING ═══ -->
+<section id="pricing" style="border-top:1px solid var(--line)">
+  <div class="wrap">
+    <div class="eyebrow rv">Pricing</div>
+    <h2 class="rv" style="margin-top:20px">Start free. Every plan gets every gate.</h2>
+    <p class="rv" style="margin-top:18px;color:var(--muted);font-size:16.5px;max-width:640px">Security is never the upsell. The full seven-gate chain runs on every build, on every plan — what you pay for is how much you can build.</p>
+    <div class="price-grid">
+      <div class="price rv">
+        <div class="nm">Free</div>
+        <div class="amt">$0<small> /month</small></div>
+        <ul>
+          <li>1 live app</li>
+          <li>2 builds a day, on our engine</li>
+          <li>All seven gates, every build</li>
+          <li>Private database included</li>
+        </ul>
+        <a class="btn ghost" href="/app">Start free →</a>
+      </div>
+      <div class="price star rv">
+        <div class="nm">Starter</div>
+        <div class="amt">$29<small> /month</small></div>
+        <ul>
+          <li>5 live apps</li>
+          <li>5 builds a day</li>
+          <li>All seven gates, every build</li>
+          <li>Private database per app</li>
+          <li>Plain-English change requests</li>
+        </ul>
+        <a class="btn" href="/app">Get Starter →</a>
+      </div>
+      <div class="price rv">
+        <div class="nm">Pro</div>
+        <div class="amt">$99<small> /month</small></div>
+        <ul>
+          <li>25 live apps</li>
+          <li>20 builds a day</li>
+          <li>All seven gates, every build</li>
+          <li>Private database per app</li>
+          <li>For firms &amp; heavy builders</li>
+        </ul>
+        <a class="btn ghost" href="/app">Get Pro →</a>
+      </div>
+    </div>
+    <p class="price-note rv">Prefer your own AI account? Bring your own key on any plan — your builds, your billing.</p>
+  </div>
+</section>
+
+<!-- ═══ HONESTY ═══ -->
+<section class="honest" id="trust">
+  <div class="wrap">
+    <div class="inner">
+      <div class="eyebrow rv">Our one weird rule</div>
+      <h2 class="rv">No badges. Receipts.</h2>
+      <div class="body rv">
+        <p class="never">You will never see us claim we're <s>“HIPAA-compliant”</s>, <s>“bank-grade”</s>, or <s>“100% secure.”</s> Nobody honest can put those words in a hero banner — compliance belongs to <em>your</em> practices as much as any tool's, and “100% secure” has never once been true in the history of software.</p>
+        <p>What we do instead is stranger and better: <b>we show you exactly what we checked.</b> Every gate, by name. Every finding, in plain language. Every deploy, signed. If a check didn't run, the app didn't ship — and when you're the one holding other people's data, that's worth more than any badge ever printed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FINAL CTA ═══ -->
+<section class="final">
+  <div class="glow2"></div>
+  <div class="wrap" style="position:relative">
+    <div class="eyebrow rv">Ready when you are</div>
+    <h2 class="rv" style="margin-top:20px">Tell us what you need.<br>Watch it get built — and checked.</h2>
+    <p class="rv">Your first build takes a few minutes, runs every gate, and costs nothing. The describing part? That takes one sentence.</p>
+    <a class="btn big rv" href="/app">Describe your app →</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="f-in">
+      <a class="brand" href="/">
+        <svg width="20" height="22" viewBox="0 0 26 28" aria-hidden="true"><polygon points="13,3 23,8.5 13,14 3,8.5" fill="#34dba1"/><polygon points="3,8.5 13,14 13,25 3,19.5" fill="#15936f"/><polygon points="23,8.5 13,14 13,25 23,19.5" fill="#0c6e52"/></svg>
+        <span style="font-size:16px">VibeHard</span>
+      </a>
+      <div class="f-links">
+        <a href="#gates">What we check</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/app">Sign in</a>
+      </div>
+    </div>
+    <p class="f-note">VibeHard runs security checks on every app it builds and shows you the results. It does not by itself make you or your business compliant with HIPAA, GDPR, or any other regulation — no software alone can. © 2026 VibeHard.</p>
+  </div>
+</footer>
+
+<script>
+// scroll reveals
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}}),{threshold:.12});
+document.querySelectorAll(".rv").forEach(el=>io.observe(el));
+
+// hero gate-run terminal: a build passing the gates, looping
+const GATES=[["spec","understanding what you need","2.1s"],["codegen","writing the application","48.7s"],["sast","static analysis — injection & unsafe patterns","3.2s"],["secrets","no keys or passwords in code","1.1s"],["depvuln","dependencies vs known vulnerabilities","4.6s"],["rls","data isolation — enforced per client","2.8s"],["compliance","sensitive-data handling","1.9s"],["prod-readiness","pinned deps · strict types · clean container","2.4s"],["verify","clean install · boot · probe ×3","31.5s"]];
+const FIN=["","✓ all gates green — deploy certificate signed","● live at client-portal.yourfirm.app"];
+const tb=document.getElementById("termbody");
+const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
+function line(html,cls){const d=document.createElement("div");d.className="tl "+(cls||"");d.innerHTML=html;tb.appendChild(d);requestAnimationFrame(()=>requestAnimationFrame(()=>d.classList.add("show")));return d}
+async function runTerm(){
+  tb.innerHTML="";
+  line('<span class="st">$</span><span class="nm">vibehard build</span><span class="ds">the same chain, every build</span>',"hd");
+  for(const [id,desc,t] of GATES){
+    const d=line('<span class="st"><span class="sp"></span></span><span class="nm">'+id+'</span><span class="ds">'+desc+'</span>');
+    await new Promise(r=>setTimeout(r,reduced?60:520));
+    d.querySelector(".st").innerHTML="✓";d.querySelectorAll(".ds")[0].textContent=t;
+  }
+  await new Promise(r=>setTimeout(r,300));
+  line('<span class="st">✓</span><span class="nm">'+FIN[1]+'</span>');
+  await new Promise(r=>setTimeout(r,350));
+  line('<span class="st" style="color:var(--teal)">●</span><span class="nm">live at client-portal.yourfirm.app</span>',"live");
+  await new Promise(r=>setTimeout(r,reduced?3000:7000));
+  runTerm();
+}
+const tio=new IntersectionObserver(es=>{if(es[0].isIntersecting){tio.disconnect();runTerm()}},{threshold:.3});
+tio.observe(document.getElementById("term"));
+</script>
+</body>
+</html>
