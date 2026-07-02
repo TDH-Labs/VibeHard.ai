@@ -241,3 +241,6 @@ fix: SECURITY_AUDIT_4 D-1 — sensitive-data classification is now falsifiable (
 
 ## 2026-07-02T04:17:03Z — DONE
 fix: add sensitive-signals module missing from 65b8c38 (new files need explicit git add — the D-1 commit was incomplete without them)
+
+## 2026-07-02T04:18:53Z — DONE
+build: harness refuses untracked src/web/scripts files (the 65b8c38 incomplete-commit class, now structurally impossible); track e1-setup.ts it flushed out

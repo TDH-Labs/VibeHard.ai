@@ -73,6 +73,16 @@ case "${1:-}" in
   finish)
     msg="${2:-}"
     if [ -z "$msg" ]; then echo "usage: loop-run.sh finish \"<commit message>\""; exit 2; fi
+    # Untracked CODE files under the source roots = an incomplete commit waiting to happen
+    # (bit twice: 65b8c38 shipped importing a file that was never staged; CI caught it, local
+    # tests didn't — the file existed on disk). Refuse until they're explicitly added or removed.
+    untracked_src="$(git ls-files --others --exclude-standard -- src web scripts 2>/dev/null)"
+    if [ -n "$untracked_src" ]; then
+      echo "REFUSED: untracked files under src/web/scripts — \`git add\` them (or delete them) first:"
+      echo "$untracked_src" | sed 's/^/  /'
+      log "REFUSED-UNTRACKED — $msg"
+      exit 4
+    fi
     git add -u   # stage modified TRACKED files only — never untracked junk. New files: agent `git add`s them first.
     if git diff --cached --quiet; then
       echo "NOOP: nothing staged to commit."; log "NOOP — $msg"; revert_all; release_lock; exit 0
