@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust &amp; security — VibeHard</title>
+<meta name="description" content="Eleven deterministic gates, what each one checks, and why the row-level-security gate runs a live attack against a real database instead of reading policy text. No badges — receipts.">
+<meta property="og:title" content="Trust &amp; security — VibeHard">
+<meta property="og:description" content="Every gate we run, what it checks, and why it blocks.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://vibehard.ai/trust.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --k:#000000; --carbon:#0D0D0E; --raised:#141416;
+  --line:#2D2D2D; --line-dim:#1C1C1E;
+  --amber:#FFB000; --amber-t:#FFD98A; --amber-dim:#7A5200;
+  --red:#FF4D42;
+  --text:#E8E6E1; --text2:#A8A49C; --dim:#6E6B64;
+}
+*{box-sizing:border-box;margin:0;padding:0;border-radius:0}
+[hidden]{display:none!important}
+html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{background:var(--k);color:var(--text);font-family:'Archivo',sans-serif;font-stretch:100%;font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--amber);color:#000}
+body::after{content:"";position:fixed;inset:-100px;pointer-events:none;z-index:2000;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  animation:grain .9s steps(3) infinite}
+@keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-40px,25px)}66%{transform:translate(30px,-35px)}100%{transform:translate(0,0)}}
+@media(prefers-reduced-motion:reduce){body::after{animation:none}}
+.disp{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.94}
+.mono{font-family:'JetBrains Mono',monospace}
+.lbl{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.lbl b{color:var(--amber);font-weight:500}
+h1{font-size:clamp(38px,5.6vw,72px)}
+h2{font-size:clamp(28px,3.8vw,46px)}
+a{color:var(--amber-t);text-decoration:none}
+p{color:var(--text2)}
+:focus-visible{outline:1px solid var(--amber);outline-offset:3px}
+.rail{max-width:1280px;margin:0 auto;border-left:1px solid var(--line-dim);border-right:1px solid var(--line-dim);position:relative}
+@media(max-width:1320px){.rail{border-left:none;border-right:none}}
+.pad{padding:0 clamp(20px,4vw,56px)}
+section{border-bottom:1px solid var(--line-dim);position:relative}
+.led{display:inline-block;width:8px;height:8px;background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8);animation:led 2.2s steps(2) infinite;vertical-align:middle}
+.led.idle{background:var(--amber-dim);box-shadow:none;animation:none}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.led{animation:none}}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--amber);padding:15px 26px;cursor:pointer;transition:background 80ms linear;text-decoration:none}
+.btn:hover{background:var(--amber-t)}
+[data-rv]{opacity:0;transform:translateY(14px);transition:opacity .5s linear,transform .5s linear}
+[data-rv].on{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){[data-rv]{opacity:1;transform:none;transition:none}}
+nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.navin{max-width:1280px;margin:0 auto;display:flex;align-items:center;gap:26px;padding:0 clamp(20px,4vw,56px);height:64px}
+.mark{display:flex;align-items:center;gap:11px;color:var(--text)}
+.mark .cube{width:14px;height:14px;background:var(--amber);flex:none}
+.mark span:last-child{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:18px;letter-spacing:.01em;text-transform:uppercase}
+.navlinks{display:flex;gap:24px;margin-left:auto;align-items:center}
+.navlinks a{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--text2)}
+.navlinks a:hover{color:var(--amber-t)}
+.navlinks a.navcta{margin-left:6px;padding:10px 18px;color:#000}
+.navlinks a.navcta:hover{color:#000}
+@media(max-width:820px){.navlinks a.hidmob{display:none}}
+.sechead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:30px}
+.gridbg{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);background-size:72px 72px;opacity:.7}
+/* incident callout */
+.incident{border:1px solid var(--red);background:#1a0908;margin-top:30px;padding:22px 26px;max-width:760px}
+.incident .k{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:var(--red);text-transform:uppercase;margin-bottom:8px}
+.incident p{font-size:15px;color:var(--text2)}
+.incident b{color:var(--text)}
+/* gate list — full depth, static (this page's job is depth, not compression) */
+.gatelist{margin-top:46px;border:1px solid var(--line)}
+.gaterow{border-top:1px solid var(--line);padding:26px clamp(20px,3vw,32px);display:grid;grid-template-columns:64px 1fr;gap:22px}
+.gaterow:first-child{border-top:none}
+@media(max-width:640px){.gaterow{grid-template-columns:1fr;gap:10px}}
+.gaterow .gnum{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber);letter-spacing:.1em}
+.gaterow.sentinel{background:#120e04}
+.gaterow.sentinel .gnum{color:var(--amber)}
+.gaterow h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:19px;letter-spacing:-.005em;margin-bottom:8px}
+.gaterow p{font-size:15px;line-height:1.68;max-width:74ch}
+.gaterow .meta{margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);letter-spacing:.04em}
+.gaterow .meta .blk{color:var(--red);font-weight:700}
+/* spotlight */
+.spotlight{border:1px solid var(--amber-dim);background:#120e04;margin-top:64px;padding:34px clamp(24px,3.5vw,44px)}
+.spotlight h2{margin-bottom:16px}
+.spotlight p{font-size:16px;max-width:78ch}
+.spotlight p+p{margin-top:14px}
+.spotlight b{color:var(--text)}
+/* trust strip */
+.tgrid{display:grid;grid-template-columns:1.3fr 1fr;gap:clamp(22px,3vw,54px);margin-top:64px;border:1px solid var(--amber-dim);background:#120e04;padding:30px clamp(20px,3vw,40px)}
+@media(max-width:860px){.tgrid{grid-template-columns:1fr}}
+.tgrid h2{font-size:clamp(22px,2.6vw,32px);margin-bottom:12px}
+.tgrid ul{list-style:none;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:2.15;color:var(--text2)}
+.tgrid ul .ok{color:var(--amber)}
+.finale{background:var(--carbon);position:relative;overflow:hidden}
+footer{border-top:1px solid var(--line);background:var(--carbon)}
+.footgrid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0;border-bottom:1px solid var(--line-dim)}
+.footgrid>div{padding:40px clamp(20px,3vw,44px);border-left:1px solid var(--line-dim)}
+.footgrid>div:first-child{border-left:none}
+@media(max-width:860px){.footgrid{grid-template-columns:1fr 1fr}.footgrid>div{border-top:1px solid var(--line-dim)}}
+@media(max-width:520px){.footgrid{grid-template-columns:1fr}.footgrid>div{border-left:none}}
+footer .col a{display:block;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);padding:5px 0}
+footer .col a:hover{color:var(--amber-t)}
+.footbar{display:flex;justify-content:space-between;gap:14px;padding:18px clamp(20px,3vw,44px);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<nav aria-label="Main">
+  <div class="navin">
+    <a class="mark" href="/" aria-label="VibeHard home"><span class="cube" aria-hidden="true"></span><span>VibeHard</span></a>
+    <div class="navlinks">
+      <a class="hidmob" href="/how-it-works.html">How it works</a>
+      <a class="hidmob" href="/trust.html">Trust</a>
+      <a class="hidmob" href="/#pricing">Pricing</a>
+      <a href="/app">Sign in</a>
+      <a class="btn navcta" href="/app">Start a build</a>
+    </div>
+  </div>
+</nav>
+
+<section style="position:relative;overflow:hidden">
+  <div class="gridbg" aria-hidden="true"></div>
+  <div class="rail pad" style="padding-top:clamp(56px,8vh,90px);padding-bottom:clamp(56px,8vh,90px);position:relative">
+    <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; TRUST &amp; SECURITY</p>
+    <h1 class="disp" style="margin:22px 0 18px;max-width:820px">Eleven gates. <span style="color:var(--amber)">Every one shown.</span></h1>
+    <p style="max-width:660px;font-size:17px">In 2025, security researchers found more than 170 apps built on vibe-coding platforms leaking customer data — not from a sophisticated attack, but because the table holding it had no access rule at all. Below is exactly what stands between an AI-written app and that outcome here.</p>
+    <div class="incident" data-rv>
+      <div class="k">The failure mode this product exists to close</div>
+      <p><b>CVE-2025-48757.</b> A missing or overly permissive row-level-security policy let an anonymous request read another customer's records. It's the single most common way an AI-generated app leaks — and it's exactly what Gate 4 and Gate 6, below, are built to catch before anything ships.</p>
+    </div>
+  </div>
+</section>
+
+<section id="gates-detail">
+  <div class="rail pad" style="padding-bottom:clamp(64px,9vh,110px)">
+    <div class="sechead"><p class="lbl">THE ELEVEN GATES, IN ORDER</p></div>
+    <h2 class="disp" style="margin:22px 0 10px;max-width:800px" data-rv>The rule behind all of it: <span style="color:var(--amber)">the AI proposes, the gate disposes.</span></h2>
+    <p style="max-width:680px;font-size:17px" data-rv>The model writes the code. It does not decide whether the code is safe — eleven independent, deterministic checks do, and they fail closed: a gate that can't run counts as a block, never a silent pass.</p>
+
+    <div class="gatelist" data-rv>
+      <div class="gaterow"><div class="gnum">GATE<br>01/11</div><div>
+        <h3>sast — static code analysis</h3>
+        <p>Reads every line of authored source for the patterns that become breaches: injection sinks, dangerous constructs, and a purpose-built SQL-injection rule layered on top of the standard scanner ruleset. It reads the code the way an attacker would, before anyone else gets the chance.</p>
+        <div class="meta">MECHANISM · semgrep, pinned container &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>02/11</div><div>
+        <h3>secrets — committed credentials</h3>
+        <p>Hunts the full build for committed credentials — API keys, tokens, connection strings, passwords. Any leak blocks, regardless of severity; there's no judgment call here, a secret in code is a breach running on a timer.</p>
+        <div class="meta">MECHANISM · gitleaks, pinned container &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>03/11</div><div>
+        <h3>depvuln — dependency vulnerabilities</h3>
+        <p>Every dependency in the lockfile is checked against the public CVE record. The fail-closed rule is literal: if the scanner itself can't run, that's a critical block on its own — a scan that didn't happen is never treated as a clean one.</p>
+        <div class="meta">MECHANISM · trivy, pinned container &nbsp; ON FAIL · <span class="blk">BLOCK</span> · scanner down = <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>04/11</div><div>
+        <h3>rls — access-policy presence</h3>
+        <p>Modeled directly on CVE-2025-48757. Every table a migration creates must carry row-level security and a policy that isn't a rubber stamp; every table the app actually queries must be covered. No policy found means block — there's no benefit of the doubt.</p>
+        <div class="meta">MECHANISM · static policy + coverage analysis &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>05/11</div><div>
+        <h3>migrate — migrations, executed</h3>
+        <p>Every other check reads database migrations as text. This one runs them, against a real embedded Postgres, in about a second, with no LLM in the loop. Syntax that would only explode on deploy day explodes here instead, localized to the exact file and the exact database error.</p>
+        <div class="meta">MECHANISM · embedded Postgres, real DDL apply &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>06/11</div><div>
+        <h3>rls-enforce — the live attack</h3>
+        <p>The keystone, and the reason this list exists. It stands up a live database, applies the real migrations, and seeds two tenants. Then, as tenant A and as an anonymous session, it attempts to read, update, delete, and insert tenant B's rows across every isolated table. One leaked row blocks the build. Full breakdown below.</p>
+        <div class="meta">MECHANISM · live two-tenant probe, embedded Postgres &nbsp; ON FAIL · <span class="blk">BLOCK</span> · harness error = <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>07/11</div><div>
+        <h3>compliance — controls for sensitive data</h3>
+        <p>Reads the binding sensitivity classification the intake interview produced and demands the controls that class of data requires — authentication in front of it, a real hard-delete path — routing the org-level judgment items to a person instead of hand-waving them. The classification can't be talked out of: declare "no sensitive data" while the schema stores diagnoses, and an independent code scan falsifies the claim and blocks the build.</p>
+        <div class="meta">MECHANISM · seven-control assessment, classification-driven &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>08/11</div><div>
+        <h3>pii — personal data in logs and URLs</h3>
+        <p>Two deterministic leak paths: personal data written into logs (logs routinely ship to third parties), and personal data read from a URL or query string (recorded by every server in between). Precision matters — <span class="mono">console.log("email sent")</span> passes; <span class="mono">console.log(user.email)</span> blocks.</p>
+        <div class="meta">MECHANISM · property-access scan &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>09/11</div><div>
+        <h3>prod-readiness — operational hygiene</h3>
+        <p>The boring failures that kill real handoffs: dependency ranges left unpinned so a silent upgrade breaks a shipped app, a missing README, containers running as root, base images not pinned by digest, type-checking turned off. Blocks at production rigor, warns at prototype — the standard scales with what the spec actually declared.</p>
+        <div class="meta">MECHANISM · install-free file checks, adaptive rigor &nbsp; ON FAIL · <span class="blk">BLOCK</span> at production</div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>10/11</div><div>
+        <h3>verify — boot proof</h3>
+        <p>The app is copied to a clean room, built for real, and booted — multiple times, and every single run has to come up healthy. One green run proves nothing; an empty build that "succeeded" without producing artifacts is also a block.</p>
+        <div class="meta">MECHANISM · clean-room build, repeated boot probes &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow"><div class="gnum">GATE<br>11/11</div><div>
+        <h3>completeness — the promised features exist</h3>
+        <p>An app can pass every security gate and still be missing half of what was asked for. Feature by feature, the code is held against the product spec's contract list. A promised feature that's entirely missing blocks the release, and the next fix round generates it. If the reviewer itself goes down, that's a block too: unverifiable is unshippable.</p>
+        <div class="meta">MECHANISM · per-feature review vs. spec contract &nbsp; ON FAIL · <span class="blk">BLOCK</span></div>
+      </div></div>
+
+      <div class="gaterow sentinel"><div class="gnum">EXIT</div><div>
+        <h3>the sentinel — the deploy's one key</h3>
+        <p>Once every gate passes, with at least one doing substantive work (eleven "not applicable" verdicts don't count as a pass), a cryptographically signed sentinel gets written, bound to that exact build in that exact directory. The deploy won't run without it, a copy of it elsewhere won't validate, and it's deleted the moment a later run fails.</p>
+        <div class="meta">MECHANISM · HMAC-signed, path-bound &nbsp; WITHOUT IT · <span class="blk">NO DEPLOY</span></div>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--carbon)">
+  <div class="rail pad" style="padding-bottom:clamp(64px,9vh,110px)">
+    <div class="spotlight" data-rv>
+      <p class="lbl" style="margin-bottom:14px">WHY GATE 6 IS THE ONE THAT MATTERS</p>
+      <h2>Reading a policy is an opinion. <span style="color:var(--amber)">Attacking a database is a fact.</span></h2>
+      <p>An AI can write access-control code that <em>looks</em> correct and still leaks — a typo'd condition, a policy that checks the wrong column, a table someone forgot to cover. Reading that code and concluding it's fine is exactly the failure mode behind CVE-2025-48757; the code looked fine to whoever shipped it, too.</p>
+      <p>So Gate 6 doesn't read and hope. It stands up a real Postgres database, applies the actual migrations the build produced, and seeds two separate tenants with real rows. Then, authenticated as tenant A and again as a completely anonymous session, it tries to read, write, update, and delete tenant B's data across every table the spec marked as isolated. <b>The only proof that survives is the attack that fails.</b> A single row coming back blocks the build immediately.</p>
+    </div>
+  </div>
+</section>
+
+<section id="trust" style="position:relative;overflow:hidden">
+  <div class="gridbg" aria-hidden="true"></div>
+  <div class="rail pad" style="padding-bottom:clamp(64px,9vh,110px);position:relative">
+    <div class="tgrid" data-rv>
+      <div>
+        <h2 class="disp">No badges. <span style="color:var(--amber)">Receipts.</span></h2>
+        <p style="font-size:15.5px">We will never hang a compliance badge we didn't earn — the compliance gate above is forbidden, by written policy, from ever claiming certification. What you get instead is the full verdict board: every gate's result, every finding, and a cryptographically signed release sentinel tied to the exact build. If a claim on this site ever drifts from what the gates actually do, the gates win.</p>
+      </div>
+      <ul>
+        <li><span class="ok">▸</span> fail-closed everywhere — a crashed gate is a BLOCK</li>
+        <li><span class="ok">▸</span> zero LLM authority over any deploy verdict</li>
+        <li><span class="ok">▸</span> anti-tamper: a fix can't weaken the check it's answering</li>
+        <li><span class="ok">▸</span> your data stays yours — per-tenant isolation, proven live</li>
+        <li><span class="ok">▸</span> a held build goes to a person, never out the door</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="finale">
+  <div class="gridbg" aria-hidden="true"></div>
+  <div class="rail pad" style="position:relative;padding-top:clamp(56px,8vh,90px);padding-bottom:clamp(56px,8vh,90px)">
+    <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; THE LINE IS ACTIVE</p>
+    <h2 class="disp" style="margin:20px 0 14px;max-width:760px">Watch it check <span style="color:var(--amber)">your idea.</span></h2>
+    <p style="max-width:540px;font-size:17px;margin-bottom:28px">Describe one thing your business needs. The spec drafts free, before you sign in.</p>
+    <a class="btn" href="/app" style="padding:18px 34px">Start describing ▸</a>
+  </div>
+</section>
+
+<footer>
+  <div class="rail">
+    <div class="footgrid">
+      <div>
+        <a class="mark" href="/"><span class="cube" aria-hidden="true"></span><span>VibeHard</span></a>
+        <p style="margin-top:16px;font-size:14px;max-width:300px">A software factory with an inspection line. The AI builds; eleven gates decide what leaves the floor.</p>
+      </div>
+      <div class="col">
+        <p class="lbl" style="margin-bottom:12px">Product</p>
+        <a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust &amp; security</a><a href="/#pricing">Pricing</a>
+      </div>
+      <div class="col">
+        <p class="lbl" style="margin-bottom:12px">For your practice</p>
+        <a href="/therapists.html">Therapists &amp; clinics</a><a href="/bookkeepers.html">Bookkeepers &amp; firms</a>
+      </div>
+      <div class="col">
+        <p class="lbl" style="margin-bottom:12px">Legal</p>
+        <a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="/dpa.html">DPA</a>
+      </div>
+    </div>
+    <div class="footbar">
+      <span>© 2026 VibeHard</span>
+      <span><span class="led idle" aria-hidden="true"></span>&nbsp;Verdicts are deterministic. No LLM decides a deploy.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var els=document.querySelectorAll('[data-rv]');
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){els.forEach(function(e){e.classList.add('on')});return}
+  var io=new IntersectionObserver(function(es){es.forEach(function(x){if(x.isIntersecting){x.target.classList.add('on');io.unobserve(x.target)}})},{threshold:.15});
+  els.forEach(function(e){io.observe(e)});
+})();
+</script>
+</body>
+</html>
