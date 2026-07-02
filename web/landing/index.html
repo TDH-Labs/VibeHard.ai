@@ -3,491 +3,697 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VibeHard — AI builds your app. We make sure it's safe to ship.</title>
-<meta name="description" content="Describe the app your business needs. VibeHard writes real software, then checks it the way a security team would — every line, every time — before it ever touches the internet.">
-<meta property="og:title" content="VibeHard — AI builds your app. We make sure it's safe to ship.">
-<meta property="og:description" content="The app builder that shows its work. Seven security gates between the AI and the internet — and a deploy that refuses to run until every one signs off.">
+<title>VibeHard — Describe it once. It ships right, or it doesn't ship.</title>
+<meta name="description" content="You describe the software. A factory builds it and an eleven-gate inspection line refuses to release it until it's proven safe, runnable, and complete. Deterministic verdicts. Signed deploys. Fail-closed by design.">
+<meta property="og:title" content="VibeHard — It ships right, or it doesn't ship.">
+<meta property="og:description" content="AI writes the software. Eleven deterministic gates decide if it leaves the building. The deploy refuses to run without their signed verdict.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://vibehard.ai/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
+/* ── tokens (DESIGN.md §1) ─────────────────────────────────────────────── */
 :root{
-  --bg:#0b0d0c; --bg2:#0e1110; --bg3:#121614; --surface:#141816;
-  --text:#eef0ec; --text2:#cfd4ce; --muted:#98a09a; --dim:#6b736d;
-  --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.13);
-  --teal:#2bd29b; --teal-dim:rgba(43,210,155,.55); --teal-ink:#06231a;
-  --red:#ff6b6b; --amber:#f0b04a;
+  --k:#000000; --carbon:#0D0D0E; --raised:#141416;
+  --line:#2D2D2D; --line-dim:#1C1C1E;
+  --amber:#FFB000; --amber-t:#FFD98A; --amber-dim:#7A5200;
+  --red:#FF4D42;
+  --text:#E8E6E1; --text2:#A8A49C; --dim:#6E6B64;
+  --glass:rgba(13,13,14,.62);
 }
-*{box-sizing:border-box;margin:0;padding:0}
+*{box-sizing:border-box;margin:0;padding:0;border-radius:0}
 html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--text);font-family:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-h1,h2,h3{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-.03em;line-height:1.06}
-h1{font-size:clamp(40px,6.4vw,76px)}
-h2{font-size:clamp(30px,4.2vw,48px)}
-h3{font-size:21px;letter-spacing:-.015em}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{background:var(--k);color:var(--text);font-family:'Archivo',sans-serif;font-stretch:100%;font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--amber);color:#000}
+
+/* grain — animated SVG noise, stepped like film weave */
+body::after{content:"";position:fixed;inset:-100px;pointer-events:none;z-index:2000;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  animation:grain .9s steps(3) infinite}
+@keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-40px,25px)}66%{transform:translate(30px,-35px)}100%{transform:translate(0,0)}}
+@media(prefers-reduced-motion:reduce){body::after{animation:none}}
+
+/* type voices */
+.disp{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.94}
 .mono{font-family:'JetBrains Mono',monospace}
-a{color:var(--teal)}
-.eyebrow{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--teal)}
-.muted{color:var(--muted)}
-.wrap{max-width:1140px;margin:0 auto;padding:0 32px}
-.narrow{max-width:820px}
-section{padding:110px 0}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;background:var(--teal);color:var(--teal-ink);font:inherit;font-weight:600;font-size:16px;border:none;border-radius:999px;padding:15px 30px;cursor:pointer;text-decoration:none;transition:transform .18s ease,box-shadow .18s ease}
-.btn:hover{transform:translateY(-2px);box-shadow:0 10px 34px rgba(43,210,155,.35)}
-.btn.ghost{background:transparent;border:1px solid var(--line2);color:var(--text);box-shadow:none}
-.btn.ghost:hover{border-color:var(--teal);box-shadow:none}
-.btn.big{font-size:17.5px;padding:17px 36px}
+.lbl{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.lbl b{color:var(--amber);font-weight:500}
+h1{font-size:clamp(40px,6vw,88px)}
+h2{font-size:clamp(34px,4.6vw,64px)}
+a{color:var(--amber-t);text-decoration:none}
+p{color:var(--text2)}
+:focus-visible{outline:1px solid var(--amber);outline-offset:3px}
 
-/* nav */
-nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(11,13,12,.72);border-bottom:1px solid var(--line)}
-.navin{display:flex;align-items:center;justify-content:space-between;max-width:1140px;margin:0 auto;padding:16px 32px}
-.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
-.brand span{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:20px;letter-spacing:-.01em}
-.navlinks{display:flex;align-items:center;gap:28px}
-.navlinks a{color:var(--muted);text-decoration:none;font-size:15px;transition:color .15s}
-.navlinks a:hover{color:var(--text)}
-.navlinks .btn{padding:10px 20px;font-size:14.5px}
-@media(max-width:760px){.navlinks a.hideable{display:none}}
+/* milled frame: content rails + section seams */
+.rail{max-width:1280px;margin:0 auto;border-left:1px solid var(--line-dim);border-right:1px solid var(--line-dim);position:relative}
+@media(max-width:1320px){.rail{border-left:none;border-right:none}}
+.pad{padding:0 clamp(20px,4vw,56px)}
+section{border-bottom:1px solid var(--line-dim);position:relative}
 
-/* glows */
-.glow{position:absolute;pointer-events:none;filter:blur(0px)}
-.glow.hero{top:-260px;left:50%;transform:translateX(-50%);width:1100px;height:640px;background:radial-gradient(ellipse at center,rgba(43,210,155,.14),transparent 65%)}
+/* LED */
+.led{display:inline-block;width:8px;height:8px;background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8);animation:led 2.2s steps(2) infinite;vertical-align:middle}
+.led.idle{background:var(--amber-dim);box-shadow:none;animation:none}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.led{animation:none}}
 
-/* reveal on scroll */
-.rv{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
-.rv.in{opacity:1;transform:none}
-@media(prefers-reduced-motion:reduce){.rv{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+/* buttons — mechanical, instant */
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--amber);padding:15px 26px;cursor:pointer;transition:background 80ms linear;text-decoration:none}
+.btn:hover{background:var(--amber-t)}
+.btn:active{transform:translateY(1px)}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+.btn.ghost:hover{background:transparent;border-color:var(--amber);color:var(--amber-t)}
 
-/* ── HERO ── */
-header{position:relative;padding:96px 0 70px;text-align:center}
-.hero-sub{font-size:clamp(17px,2vw,20.5px);color:var(--text2);max-width:760px;margin:26px auto 0;line-height:1.7}
-.hero-cta{display:flex;gap:14px;justify-content:center;align-items:center;margin-top:38px;flex-wrap:wrap}
-.hero-note{margin-top:16px;font-size:13.5px;color:var(--dim)}
+/* reveal */
+[data-rv]{opacity:0;transform:translateY(14px);transition:opacity .5s linear,transform .5s linear}
+[data-rv].on{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){[data-rv]{opacity:1;transform:none;transition:none}}
 
-/* the gate-run terminal */
-.term{max-width:760px;margin:64px auto 0;background:#070908;border:1px solid var(--line2);border-radius:16px;text-align:left;box-shadow:0 30px 80px rgba(0,0,0,.5);overflow:hidden}
-.term-bar{display:flex;align-items:center;gap:7px;padding:13px 17px;border-bottom:1px solid var(--line)}
-.term-bar i{width:11px;height:11px;border-radius:50%;background:#2a2f2c;display:inline-block}
-.term-bar .t{margin-left:10px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim)}
-.term-body{padding:20px 22px 24px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:2.05;min-height:308px}
-.tl{display:flex;align-items:baseline;gap:10px;opacity:0;transform:translateY(4px);transition:opacity .4s,transform .4s}
-.tl.show{opacity:1;transform:none}
-.tl .st{width:16px;flex:none;color:var(--teal)}
-.tl .nm{color:var(--text2)}
-.tl .ds{color:var(--dim);font-size:12px;flex:1;text-align:right}
-.tl.hd{color:var(--dim)}
-.tl .sp{width:12px;height:12px;border:2px solid var(--teal);border-right-color:transparent;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;position:relative;top:1px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.tl.live .nm{color:var(--teal);font-weight:600}
+/* ── nav ───────────────────────────────────────────────────────────────── */
+nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.navin{max-width:1280px;margin:0 auto;display:flex;align-items:center;gap:26px;padding:0 clamp(20px,4vw,56px);height:64px}
+.mark{display:flex;align-items:center;gap:11px;color:var(--text)}
+.mark .cube{width:14px;height:14px;background:var(--amber);flex:none}
+.mark span:last-child{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:18px;letter-spacing:.01em;text-transform:uppercase}
+.navlinks{display:flex;gap:24px;margin-left:auto;align-items:center}
+.navlinks a{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--text2)}
+.navlinks a:hover{color:var(--amber-t)}
+.navlinks a.navcta{margin-left:6px;padding:10px 18px;color:#000}
+.navlinks a.navcta:hover{color:#000}
+@media(max-width:820px){.navlinks a.hidmob{display:none}}
 
-/* ── VILLAIN ── */
-.villain{border-top:1px solid var(--line);background:linear-gradient(180deg,var(--bg) 0%,#0d0f0e 100%)}
-.villain blockquote{font-family:'Space Grotesk',sans-serif;font-size:clamp(24px,3.4vw,38px);font-weight:500;letter-spacing:-.02em;line-height:1.28;max-width:900px}
-.villain blockquote em{color:var(--red);font-style:normal}
-.villain .after{max-width:720px;margin-top:30px;color:var(--muted);font-size:17px;line-height:1.75}
-.villain .after b{color:var(--text2);font-weight:600}
+/* ── S1 · IGNITION ─────────────────────────────────────────────────────── */
+.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+.hero .gridbg{position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);
+  background-size:72px 72px;
+  -webkit-mask-image:radial-gradient(ellipse 90% 80% at 50% 30%,#000 30%,transparent 100%);
+  mask-image:radial-gradient(ellipse 90% 80% at 50% 30%,#000 30%,transparent 100%)}
+.hero .plate{position:absolute;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+.heroin{position:relative;padding-top:clamp(72px,10vh,130px);padding-bottom:clamp(64px,8vh,110px)}
+.hero .sub{max-width:680px;margin:30px 0 0;font-size:17.5px}
+.hero .sub b{color:var(--text);font-weight:600}
+.hero h1 em{font-style:normal;color:var(--amber)}
 
-/* ── GATES ── */
-.gates-head{max-width:780px}
-.gates-head p{margin-top:22px;color:var(--muted);font-size:17.5px;line-height:1.75}
-.gate-list{margin-top:70px;display:flex;flex-direction:column;gap:14px}
-.gate{display:grid;grid-template-columns:76px 1fr;gap:26px;padding:34px 36px;background:var(--surface);border:1px solid var(--line);border-radius:20px;transition:border-color .3s}
-.gate:hover{border-color:rgba(43,210,155,.4)}
-.gate .num{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim);padding-top:6px}
-.gate .num b{display:block;font-size:30px;color:var(--teal);font-weight:600;line-height:1.1}
-.gate h3{margin-bottom:8px}
-.gate .what{color:var(--text2);font-size:16px;line-height:1.7;max-width:70ch}
-.gate .hunt{margin-top:14px;color:var(--muted);font-size:14.5px;line-height:1.7;max-width:70ch}
-.gate .hunt b{color:var(--amber);font-weight:600}
-.gate .id{margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim);letter-spacing:.05em}
-.gate .id span{color:var(--teal-dim)}
-@media(max-width:640px){.gate{grid-template-columns:1fr;gap:10px;padding:26px 22px}}
-.seal{margin-top:40px;padding:36px 40px;border-radius:20px;background:linear-gradient(135deg,rgba(43,210,155,.09),rgba(43,210,155,.02));border:1px solid rgba(43,210,155,.35)}
-.seal h3{color:var(--teal)}
-.seal p{margin-top:10px;color:var(--text2);font-size:16.5px;line-height:1.75;max-width:75ch}
+/* smoked-glass intake console over live machine stream */
+.console{position:relative;margin-top:52px;max-width:860px}
+.stream{position:absolute;inset:0;overflow:hidden;background:var(--carbon);border:1px solid var(--line-dim)}
+.stream pre{position:absolute;left:14px;top:8px;right:14px;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.9;color:var(--amber-dim);white-space:pre-wrap}
+.stream pre .ok{color:#5c5c52}
+.glass{position:relative;margin:26px 0 0 26px;background:var(--glass);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);border:1px solid var(--line)}
+@media(max-width:640px){.glass{margin:14px 0 0 10px}}
+.glass .bar{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line)}
+.glass .bar .lbl{color:var(--text2)}
+.glass textarea{display:block;width:100%;background:transparent;border:none;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14.5px;line-height:1.75;padding:20px 18px;min-height:118px;resize:vertical}
+.glass textarea::placeholder{color:var(--dim)}
+.glass textarea:focus{outline:none}
+.glass .foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
+.glass .hint{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim)}
+.ticks{display:flex;gap:0;margin-top:56px;border:1px solid var(--line);border-left:none;flex-wrap:wrap}
+.ticks .t{flex:1;min-width:220px;border-left:1px solid var(--line);padding:16px 20px;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);display:flex;gap:10px;align-items:center;background:var(--carbon)}
 
-/* ── HOLD (when a gate says no) ── */
-.hold .case{margin-top:54px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
-@media(max-width:820px){.hold .case{grid-template-columns:1fr}}
-.hold .panel{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:34px 36px}
-.hold .panel h3{margin-bottom:12px}
-.hold .panel p{color:var(--muted);font-size:15.5px;line-height:1.75}
-.hold .flag{font-family:'JetBrains Mono',monospace;font-size:12.5px;background:#070908;border:1px solid rgba(240,176,74,.4);border-radius:12px;padding:16px 18px;margin-top:18px;color:var(--amber);line-height:1.8}
-.hold .plain{background:rgba(43,210,155,.06);border:1px solid rgba(43,210,155,.3);border-radius:12px;padding:16px 18px;margin-top:18px;color:var(--text2);font-size:14.5px;line-height:1.7}
+/* ── S2 · THE UNCOMPROMISING SPEC ──────────────────────────────────────── */
+.sechead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:30px}
+.spec2{display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,4vw,72px);padding-bottom:clamp(70px,9vh,120px)}
+@media(max-width:920px){.spec2{grid-template-columns:1fr}}
+.sblock{padding:clamp(44px,7vh,86px) 0;border-top:1px solid var(--line-dim)}
+.sblock:first-of-type{border-top:none}
+.sblock .idx{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--amber);display:block;margin-bottom:14px}
+.sblock h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:clamp(20px,2.2vw,27px);letter-spacing:-.005em;line-height:1.12;margin-bottom:14px}
+.sblock p{font-size:16px;max-width:52ch}
+.sblock p b{color:var(--text);font-weight:600}
+.sblock p+p{margin-top:12px}
+.bpwrap{position:relative}
+.bp{position:sticky;top:96px;background:var(--carbon);border:1px solid var(--line)}
+@media(max-width:920px){.bp{position:static;margin-top:8px}}
+.bp .bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.bp .bar .lbl{color:var(--text2)}
+.bp pre{padding:18px 18px 22px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.75;color:var(--text2);white-space:pre-wrap;min-height:380px}
+.bp .c{color:var(--dim)} .bp .a{color:var(--amber)} .bp .at{color:var(--amber-t)} .bp .g{color:#8f8b83}
+.bs{display:none}
+.bs.on{display:block;animation:bsin .18s linear}
+@keyframes bsin{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.bs.on{animation:none}}
+@media(max-width:920px){.bs{display:block}}
+.bp .caret{display:inline-block;width:8px;height:15px;background:var(--amber);vertical-align:-2px;animation:led 1s steps(2) infinite}
 
-/* ── WHO ── */
-.who-grid{margin-top:60px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-@media(max-width:900px){.who-grid{grid-template-columns:1fr}}
-.who-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:36px 34px;transition:transform .25s ease,border-color .25s}
-.who-card:hover{transform:translateY(-4px);border-color:rgba(43,210,155,.4)}
-.who-card .eyebrow{display:block;margin-bottom:14px}
-.who-card p{color:var(--muted);font-size:15.5px;line-height:1.75;margin-top:10px}
-.who-card p b{color:var(--text2)}
+/* ── S3 · THE GATE MATRIX ──────────────────────────────────────────────── */
+#gates{background:var(--carbon)}
+.matrix{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-left:none;border-top:none;margin-top:46px}
+@media(max-width:1020px){.matrix{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.matrix{grid-template-columns:1fr}}
+.gcell{appearance:none;background:var(--k);border:none;border-left:1px solid var(--line);border-top:1px solid var(--line);padding:20px 20px 18px;text-align:left;cursor:pointer;color:var(--text);font:inherit;position:relative;min-height:128px;display:flex;flex-direction:column;gap:8px;transition:background 80ms linear}
+.gcell:hover,.gcell[aria-selected="true"]{background:#151310}
+.gcell:hover .gled,.gcell[aria-selected="true"] .gled{background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8)}
+.gcell:focus-visible{outline:1px solid var(--amber);outline-offset:-1px}
+.gcell .top{display:flex;align-items:center;gap:9px}
+.gled{width:7px;height:7px;background:var(--amber-dim);flex:none}
+.gcell .num{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.16em;color:var(--dim)}
+.gcell .name{font-family:'JetBrains Mono',monospace;font-size:14.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.gcell .one{font-size:13.5px;color:var(--text2);line-height:1.45}
+.gcell.sentinel{background:#141005;border-left:1px solid var(--amber-dim)}
+.gcell.sentinel .name{color:var(--amber)}
+.gcell.sentinel:hover,.gcell.sentinel[aria-selected="true"]{background:#1d1607}
+/* readout — the instrument panel under the grid */
+.readout{border:1px solid var(--line);border-top:none;background:var(--k)}
+.readout .bar{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.readout .body{display:grid;grid-template-columns:2fr 1fr;gap:0}
+@media(max-width:860px){.readout .body{grid-template-columns:1fr}}
+.readout .desc{padding:22px 24px;font-size:15.5px;color:var(--text2);line-height:1.7;border-right:1px solid var(--line-dim)}
+@media(max-width:860px){.readout .desc{border-right:none;border-bottom:1px solid var(--line-dim)}}
+.readout .desc b{color:var(--text)}
+.readout .meta{padding:22px 24px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:2.1;color:var(--dim)}
+.readout .meta b{color:var(--text2);font-weight:500;letter-spacing:.08em}
+.readout .meta .blk{color:var(--red);font-weight:700;letter-spacing:.1em}
+/* the loop band */
+.loop{margin-top:64px;border:1px solid var(--line);background:var(--k)}
+.loop .diagram{display:flex;align-items:stretch;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.loop .st{flex:1;min-width:150px;padding:18px 20px;border-right:1px solid var(--line-dim);font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);display:flex;align-items:center;gap:10px}
+.loop .st:last-child{border-right:none}
+.loop .st .arr{color:var(--amber);font-weight:700}
+.loop .st.red b{color:var(--red)}
+.loop .cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0}
+@media(max-width:920px){.loop .cols{grid-template-columns:1fr}}
+.loop .cols>div{padding:24px;border-left:1px solid var(--line-dim);font-size:14.5px;color:var(--text2);line-height:1.65}
+.loop .cols>div:first-child{border-left:none}
+@media(max-width:920px){.loop .cols>div{border-left:none;border-top:1px solid var(--line-dim)}.loop .cols>div:first-child{border-top:none}}
+.loop .cols h4{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);margin-bottom:10px;font-weight:700}
+.loop .cols b{color:var(--text)}
 
-/* ── GET ── */
-.get-grid{margin-top:56px;display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
-@media(max-width:820px){.get-grid{grid-template-columns:1fr}}
-.get{display:flex;gap:18px;padding:26px 28px;background:var(--bg2);border:1px solid var(--line);border-radius:16px}
-.get .ic{flex:none;width:40px;height:40px;border-radius:12px;background:rgba(43,210,155,.1);border:1px solid rgba(43,210,155,.3);display:flex;align-items:center;justify-content:center;color:var(--teal);font-size:17px}
-.get h3{font-size:16.5px;margin-bottom:5px}
-.get p{color:var(--muted);font-size:14.5px;line-height:1.7}
+/* ── S4 · THE PROOF ENGINE ─────────────────────────────────────────────── */
+.manifest{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-left:none;margin-top:46px}
+@media(max-width:1020px){.manifest{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.manifest{grid-template-columns:1fr}}
+.ptile{border-left:1px solid var(--line);padding:22px 22px 20px;background:var(--carbon);min-height:118px;display:flex;flex-direction:column;gap:6px}
+.ptile .v{font-family:'JetBrains Mono',monospace;font-size:clamp(20px,1.8vw,26px);font-weight:700;color:var(--amber);letter-spacing:.02em}
+.ptile .n{font-size:12.5px;color:var(--dim);font-family:'JetBrains Mono',monospace;line-height:1.5}
+.manifest .ptile:nth-child(n+5){border-top:1px solid var(--line)}
+@media(max-width:1020px){.manifest .ptile:nth-child(n+3){border-top:1px solid var(--line)}}
+/* contrast rows */
+.vs{border:1px solid var(--line);margin-top:64px}
+.vs .vshead{display:grid;grid-template-columns:1fr 1fr}
+.vs .vshead>div{padding:14px 22px;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+.vs .vshead>div:first-child{color:var(--dim);border-right:1px solid var(--line)}
+.vs .vshead>div:last-child{color:var(--amber)}
+.vs .row{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line-dim)}
+.vs .row:first-of-type{border-top:none}
+.vs .row>div{padding:17px 22px;font-size:14.5px;line-height:1.55}
+.vs .row>div:first-child{color:var(--dim);border-right:1px solid var(--line)}
+.vs .row>div:last-child{color:var(--text2)}
+.vs .row>div:last-child b{color:var(--text)}
+@media(max-width:700px){.vs .vshead,.vs .row{grid-template-columns:1fr}.vs .vshead>div:first-child,.vs .row>div:first-child{border-right:none;border-bottom:1px dashed var(--line-dim)}}
+/* who it's for */
+.who{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-left:none;margin-top:64px}
+@media(max-width:1020px){.who{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.who{grid-template-columns:1fr}}
+.who>div{border-left:1px solid var(--line);padding:24px 22px;background:var(--k)}
+.who h4{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
+.who p{font-size:14px;line-height:1.6}
+/* trust strip */
+#trust{border:1px solid var(--amber-dim);background:#120e04;margin-top:64px;padding:30px clamp(20px,3vw,40px)}
+#trust .tgrid{display:grid;grid-template-columns:1.3fr 1fr;gap:clamp(22px,3vw,54px)}
+@media(max-width:860px){#trust .tgrid{grid-template-columns:1fr}}
+#trust h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:clamp(20px,2.2vw,27px);margin-bottom:12px}
+#trust p{font-size:15px}
+#trust ul{list-style:none;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:2.15;color:var(--text2)}
+#trust ul .ok{color:var(--amber)}
+/* pricing */
+#pricing .cards{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-left:none;margin-top:46px}
+@media(max-width:920px){#pricing .cards{grid-template-columns:1fr}}
+.card{border-left:1px solid var(--line);background:var(--carbon);padding:30px 26px;display:flex;flex-direction:column;gap:0;position:relative}
+@media(max-width:920px){.card{border-left:none;border-top:1px solid var(--line)}.card:first-child{border-top:none}}
+.card.star{background:#141005}
+.card .tag{position:absolute;top:0;right:0;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.14em;padding:5px 10px}
+.card .pname{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--text2)}
+.card .amt{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:52px;margin:10px 0 2px}
+.card .amt small{font-size:15px;font-weight:500;color:var(--dim);font-stretch:100%}
+.card ul{list-style:none;margin:18px 0 26px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:2.2;color:var(--text2)}
+.card ul .a{color:var(--amber)}
+.card .btn{margin-top:auto;justify-content:center}
+/* final CTA band */
+.finale{background:var(--carbon);text-align:left;position:relative;overflow:hidden}
+.finale .gridbg{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);background-size:72px 72px;opacity:.7}
 
-/* ── PRICING ── */
-.price-grid{margin-top:60px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch}
-@media(max-width:900px){.price-grid{grid-template-columns:1fr}}
-.price{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:38px 34px;display:flex;flex-direction:column}
-.price.star{border-color:rgba(43,210,155,.5);position:relative}
-.price.star::before{content:"Most popular";position:absolute;top:-13px;left:32px;font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;background:var(--teal);color:var(--teal-ink);padding:5px 12px;border-radius:999px;font-weight:600}
-.price .nm{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-.price .amt{font-family:'Space Grotesk',sans-serif;font-size:46px;font-weight:600;letter-spacing:-.03em;margin-top:14px}
-.price .amt small{font-size:16px;color:var(--muted);font-weight:400;letter-spacing:0}
-.price ul{list-style:none;margin:24px 0 30px;display:flex;flex-direction:column;gap:11px;flex:1}
-.price li{display:flex;gap:11px;font-size:15px;color:var(--text2)}
-.price li::before{content:"✓";color:var(--teal);font-weight:700}
-.price .btn{width:100%}
-.price-note{margin-top:26px;text-align:center;color:var(--dim);font-size:13.5px}
-
-/* ── HONESTY ── */
-.honest{background:linear-gradient(180deg,var(--bg) 0%,#0c100e 55%,var(--bg) 100%)}
-.honest .inner{max-width:860px;margin:0 auto;text-align:center}
-.honest h2{margin-top:22px}
-.honest .body{margin-top:26px;color:var(--text2);font-size:17.5px;line-height:1.8;text-align:left}
-.honest .body p+p{margin-top:18px}
-.honest .body .never{color:var(--muted)}
-.honest .body .never s{color:var(--dim)}
-
-/* ── FINAL CTA ── */
-.final{text-align:center;position:relative}
-.final .glow2{position:absolute;bottom:-140px;left:50%;transform:translateX(-50%);width:900px;height:480px;background:radial-gradient(ellipse at center,rgba(43,210,155,.12),transparent 65%);pointer-events:none}
-.final p{margin-top:20px;color:var(--muted);font-size:17px;max-width:560px;margin-left:auto;margin-right:auto}
-.final .btn{margin-top:36px}
-
-footer{border-top:1px solid var(--line);padding:44px 0 60px}
-.f-in{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
-.f-links{display:flex;gap:24px}
-.f-links a{color:var(--dim);text-decoration:none;font-size:13.5px}
-.f-links a:hover{color:var(--muted)}
-.f-note{color:var(--dim);font-size:12.5px;margin-top:18px;max-width:640px;line-height:1.7}
+/* ── footer ────────────────────────────────────────────────────────────── */
+footer{border-top:1px solid var(--line);background:var(--carbon)}
+.footgrid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0;border-bottom:1px solid var(--line-dim)}
+.footgrid>div{padding:40px clamp(20px,3vw,44px);border-left:1px solid var(--line-dim)}
+.footgrid>div:first-child{border-left:none}
+@media(max-width:860px){.footgrid{grid-template-columns:1fr 1fr}.footgrid>div{border-top:1px solid var(--line-dim)}}
+@media(max-width:520px){.footgrid{grid-template-columns:1fr}.footgrid>div{border-left:none}}
+footer .col a{display:block;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);padding:5px 0}
+footer .col a:hover{color:var(--amber-t)}
+.footbar{display:flex;justify-content:space-between;gap:14px;padding:18px clamp(20px,3vw,44px);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);flex-wrap:wrap}
 </style>
 </head>
 <body>
 
-<nav>
+<nav aria-label="Main">
   <div class="navin">
-    <a class="brand" href="/">
-      <svg width="24" height="26" viewBox="0 0 26 28" aria-hidden="true"><polygon points="13,3 23,8.5 13,14 3,8.5" fill="#34dba1"/><polygon points="3,8.5 13,14 13,25 3,19.5" fill="#15936f"/><polygon points="23,8.5 13,14 13,25 23,19.5" fill="#0c6e52"/></svg>
-      <span>VibeHard</span>
-    </a>
+    <a class="mark" href="/" aria-label="VibeHard home"><span class="cube" aria-hidden="true"></span><span>VibeHard</span></a>
     <div class="navlinks">
-      <a class="hideable" href="#gates">What we check</a>
-      <a class="hideable" href="#who">Who it's for</a>
-      <a class="hideable" href="#pricing">Pricing</a>
-      <a class="hideable" href="/app">Sign in</a>
-      <a class="btn" href="/app">Describe your app →</a>
+      <a class="hidmob" href="#spec">Spec</a>
+      <a class="hidmob" href="#gates">Gates</a>
+      <a class="hidmob" href="#proof">Proof</a>
+      <a class="hidmob" href="#pricing">Pricing</a>
+      <a href="/app">Sign in</a>
+      <a class="btn navcta" href="/app">Start a build</a>
     </div>
   </div>
 </nav>
 
-<!-- ═══ HERO ═══ -->
-<header>
-  <div class="glow hero"></div>
-  <div class="wrap" style="position:relative">
-    <div class="eyebrow rv">The app builder that shows its work</div>
-    <h1 class="rv" style="margin-top:22px">AI builds your app.<br>We make sure it's <span style="color:var(--teal)">safe to ship.</span></h1>
-    <p class="hero-sub rv">Describe what your business needs, in your own words. VibeHard writes real software — then checks it the way a security team would, every line, every time, <em>before</em> it ever touches the internet. You get the app. Your clients' data stays theirs.</p>
-    <div class="hero-cta rv">
-      <a class="btn big" href="/app">Describe your app →</a>
-      <a class="btn ghost" href="#gates">See what we check</a>
-    </div>
-    <div class="hero-note rv">Free to start · no credit card · your first builds are on us</div>
+<!-- ══ S1 · THE IGNITION ═══════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="gridbg" aria-hidden="true"></div>
+  <span class="plate" style="top:18px;right:22px" aria-hidden="true">VH-01 · INTAKE DECK</span>
+  <span class="plate" style="bottom:14px;left:22px" aria-hidden="true">LINE ACTIVE · ALL GATES ARMED</span>
+  <div class="rail pad heroin">
+    <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; 01 / IGNITION — <b>GATED SOFTWARE FACTORY</b></p>
+    <h1 class="disp" style="margin-top:26px">Describe it once.<br>It ships right,<br><em>or it doesn't ship.</em></h1>
+    <p class="sub">You are the <b>architect</b>, not the operator. You bring intent — what the business needs, who it serves, what must never leak. The factory brings execution: heavy machinery that writes real software, and an inspection line with the authority to stop it. <b>You never touch the machinery.</b></p>
 
-    <div class="term rv" id="term">
-      <div class="term-bar"><i></i><i></i><i></i><span class="t">vibehard — building “client portal for my bookkeeping practice”</span></div>
-      <div class="term-body" id="termbody"></div>
+    <div class="console">
+      <div class="stream" aria-hidden="true"><pre id="stream"></pre></div>
+      <div class="glass">
+        <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Intake // Build order</span><span class="lbl" style="margin-left:auto">VH-INTAKE-01</span></div>
+        <label for="idea" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Describe the software you need</label>
+        <textarea id="idea" placeholder="A client portal where each client signs in and sees only their own files and invoices…" spellcheck="false"></textarea>
+        <div class="foot">
+          <span class="hint">One plain sentence is enough. The intake interview extracts the rest.</span>
+          <button class="btn" id="ignite" type="button">Engage ignition ▸</button>
+        </div>
+      </div>
     </div>
-  </div>
-</header>
 
-<!-- ═══ THE VILLAIN ═══ -->
-<section class="villain">
-  <div class="wrap">
-    <div class="eyebrow rv">The part nobody tells you</div>
-    <blockquote class="rv" style="margin-top:26px">Most AI app builders will happily ship you an app that <em>leaks</em>.</blockquote>
-    <div class="after rv">
-      <p>They optimize for <b>“wow, it works”</b> — not for <b>“my client list won't end up on the internet.”</b> The demo dazzles. The app goes live in one click. And nobody, at any point, checked whether one customer can read another customer's records — until someone does it for real.</p>
-      <p style="margin-top:16px">That's not a hypothetical. Data exposure in AI-generated apps is the category's quiet, recurring scandal — because the tools are built to say yes, and no one is paid to say <b>wait</b>.</p>
+    <div class="ticks" role="list">
+      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>11 gates · deterministic verdicts</div>
+      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>Signed deploy sentinel — no pass, no ship</div>
+      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>Fail-closed: a gate that can't run, blocks</div>
     </div>
   </div>
 </section>
 
-<!-- ═══ THE GATES ═══ -->
+<!-- ══ S2 · THE UNCOMPROMISING SPEC ═════════════════════════════════════ -->
+<section id="spec">
+  <div class="rail pad">
+    <div class="sechead">
+      <p class="lbl">02 / THE UNCOMPROMISING SPEC</p>
+      <p class="lbl" aria-hidden="true">BLUEPRINT DECK · .vibehard/</p>
+    </div>
+    <h2 class="disp" style="margin:26px 0 10px;max-width:840px" data-rv>The chassis is drawn <span style="color:var(--amber)">before the metal.</span></h2>
+    <p style="max-width:640px;font-size:17px" data-rv>Nobody blueprints a racing chassis after the car is welded. Your sentence becomes structure first — and everything built afterward has to bolt to it.</p>
+
+    <div class="spec2" style="margin-top:26px">
+      <div class="specleft">
+        <div class="sblock" data-stage="1" data-rv>
+          <span class="idx">B-01 / INTAKE → SPECIFICATION</span>
+          <h3>Your sentence gets interrogated, not obeyed.</h3>
+          <p>Most generators sprint from your words straight to code. VibeHard refuses. First, a short intake interview extracts what your sentence implied but never said: <b>who uses this, what data it holds, which of it is sensitive, and what must never cross between clients.</b></p>
+          <p>The answers are written into <span class="mono" style="color:var(--amber-t)">.vibehard/spec.json</span> — including a formal sensitivity classification (PII, financial, health, credentials) and a rigor level. That file is load-bearing: every verdict later in the line is measured against it.</p>
+        </div>
+        <div class="sblock" data-stage="2" data-rv>
+          <span class="idx">B-02 / PRODUCT REQUIREMENTS</span>
+          <h3>Every feature becomes a contract.</h3>
+          <p>The PRD isn't a wish list — it's a numbered set of obligations. <b>Each feature written here is one the machinery will later be held to</b>, item by item, by a gate whose only job is to answer: does the code actually do this?</p>
+          <p>A build that quietly ships four of your six features doesn't get to call itself finished. The paper remembers.</p>
+        </div>
+        <div class="sblock" data-stage="3" data-rv>
+          <span class="idx">B-03 / ARCHITECTURE</span>
+          <h3>Isolation is drawn into the frame — not bolted on.</h3>
+          <p>The architecture document decides the stack, the data model, and — critically — <b>which tables belong to a single tenant and which are shared.</b> Row-level security posture is settled here, at the drawing stage, where it's structural.</p>
+          <p>Access control added as an afterthought is how app builders end up in breach headlines. Here it's a property of the frame itself.</p>
+        </div>
+        <div class="sblock" data-stage="4" data-rv>
+          <span class="idx">B-04 / WHY THIS ISN'T PAPERWORK</span>
+          <h3>The spec is the standard of proof.</h3>
+          <p>A gate can only refuse a build if there's a written standard to refuse it against. The spec is that standard — <b>which is why it can't be gamed.</b> Declare "no sensitive data" while your schema stores diagnoses and card numbers, and an independent code scan falsifies the claim and blocks the build for lying.</p>
+          <p>From here, the drawings hand off to the machinery. <a href="#gates">The matrix takes over ↓</a></p>
+        </div>
+      </div>
+
+      <div class="bpwrap" aria-label="Blueprint panel — the specification artifacts, populated as you read">
+        <div class="bp">
+          <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Blueprint // live</span><span class="lbl" id="bpstage" style="margin-left:auto">STAGE 1/4</span></div>
+          <pre id="bppre"><div class="bs" data-bs="1"><span class="c">$ cat .vibehard/spec.json</span>
+{
+  <span class="at">"name"</span>: <span class="g">"client-portal"</span>,
+  <span class="at">"users"</span>: [<span class="g">"owner"</span>, <span class="g">"client"</span>],
+  <span class="at">"sensitiveData"</span>: [<span class="a">"pii"</span>, <span class="a">"financial"</span>],
+  <span class="at">"rigor"</span>: <span class="a">"production"</span>,
+  <span class="at">"tenancy"</span>: <span class="g">"isolated-per-client"</span>
+}
+</div><div class="bs" data-bs="2"><span class="c">$ cat .vibehard/prd.md · features → contracts</span>
+ F1  client sign-in             <span class="g">[auth]</span>
+ F2  per-client file vault      <span class="a">[isolated]</span>
+ F3  invoice ledger             <span class="a">[isolated]</span>
+ F4  owner dashboard            <span class="g">[role:owner]</span>
+ <span class="c">each line above is later enforced,</span>
+ <span class="c">feature by feature, by gate 11/11</span>
+</div><div class="bs" data-bs="3"><span class="c">$ cat .vibehard/architecture.json</span>
+{
+  <span class="at">"stack"</span>: <span class="g">"next + supabase"</span>,
+  <span class="at">"entities"</span>: {
+    <span class="at">"clients"</span>:  { <span class="at">"isolation"</span>: <span class="a">"tenant"</span> },
+    <span class="at">"files"</span>:    { <span class="at">"isolation"</span>: <span class="a">"tenant"</span> },
+    <span class="at">"invoices"</span>: { <span class="at">"isolation"</span>: <span class="a">"tenant"</span> }
+  },
+  <span class="at">"rls"</span>: <span class="a">"required at table creation"</span>
+}
+</div><div class="bs" data-bs="4"><span class="c">$ vibehard classify --verify</span>
+ declared : pii, financial
+ detected : pii, financial   <span class="a">← code scan agrees</span>
+ classification: <span class="a">BINDING</span>
+ <span class="c">→ handing off to the gate matrix…</span>
+</div><span class="caret" aria-hidden="true"></span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ S3 · THE GATE MATRIX ═════════════════════════════════════════════ -->
 <section id="gates">
-  <div class="wrap">
-    <div class="gates-head">
-      <div class="eyebrow rv">How it's made</div>
-      <h2 class="rv" style="margin-top:20px">Seven gates stand between the AI and the internet.</h2>
-      <p class="rv">This is the machine under the paint. Every app VibeHard writes is stopped at the door and inspected — the same checks a security engineer would run, in the same order, without exception. Not a badge. Not a promise. A process you can watch run, gate by gate, on every single build.</p>
+  <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
+    <div class="sechead">
+      <p class="lbl">03 / THE GATE MATRIX</p>
+      <p class="lbl" aria-hidden="true">INSPECTION FLOOR · FIXED ORDER · FAIL-CLOSED</p>
     </div>
-    <div class="gate-list">
+    <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>Eleven gates. <span style="color:var(--amber)">Zero appeals.</span></h2>
+    <p style="max-width:660px;font-size:17px" data-rv>Every build the factory produces is treated as contraband until proven otherwise. Eleven independent inspections run in fixed order, each with unilateral authority to stop the line. They don't negotiate. They don't get tired. They don't care that your demo is tomorrow. And if one of them crashes, that counts as a <b style="color:var(--text)">block</b> — a gate that can't run never waves anything through.</p>
 
-      <div class="gate rv">
-        <div class="num"><b>01</b>gate</div>
-        <div>
-          <h3>Static analysis</h3>
-          <p class="what">Before anything runs, the code itself is read — mechanically, line by line — for the classic ways software betrays its users.</p>
-          <p class="hunt">Hunts: <b>injection flaws</b>, unsafe patterns, the mistakes that turn a contact form into an open door.</p>
-          <div class="id">internal gate id · <span>sast</span></div>
-        </div>
+    <div class="matrix" role="listbox" aria-label="The eleven gates and the sentinel — select one to read its readout" id="matrix"></div>
+
+    <div class="readout" aria-label="Gate readout">
+      <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Readout</span><span class="lbl" id="ro-name" style="margin-left:auto;color:var(--amber)"></span></div>
+      <div class="body">
+        <div class="desc" id="ro-desc" aria-live="polite"></div>
+        <div class="meta" id="ro-meta"></div>
       </div>
-
-      <div class="gate rv">
-        <div class="num"><b>02</b>gate</div>
-        <div>
-          <h3>Secret scan</h3>
-          <p class="what">No password, API key, or credential is allowed to be baked into the app's code — where anyone who looks could find it.</p>
-          <p class="hunt">Hunts: <b>hardcoded keys and tokens</b> — one of the most common, most damaging mistakes in AI-generated code.</p>
-          <div class="id">internal gate id · <span>secrets</span></div>
-        </div>
-      </div>
-
-      <div class="gate rv">
-        <div class="num"><b>03</b>gate</div>
-        <div>
-          <h3>Supply chain</h3>
-          <p class="what">Your app stands on other people's code — libraries, packages, dependencies. Every one of them is checked against the public record of known vulnerabilities.</p>
-          <p class="hunt">Hunts: <b>known-vulnerable dependencies</b>, before they're welded into your app.</p>
-          <div class="id">internal gate id · <span>depvuln</span></div>
-        </div>
-      </div>
-
-      <div class="gate rv">
-        <div class="num"><b>04</b>gate</div>
-        <div>
-          <h3>Data isolation</h3>
-          <p class="what">The one that matters most. Every table in your app's database must prove that each client can see <em>only their own rows</em> — enforced by the database itself, not politely requested by the app. And here's the part we're proud of: after your app goes live, we probe the <em>running database</em> from the outside, like an attacker would, to prove the isolation held in the real world — not just on paper.</p>
-          <p class="hunt">Hunts: <b>cross-customer data leaks</b> — the failure that ends client relationships and practices.</p>
-          <div class="id">internal gate ids · <span>rls · rls-enforce · live probe</span></div>
-        </div>
-      </div>
-
-      <div class="gate rv">
-        <div class="num"><b>05</b>gate</div>
-        <div>
-          <h3>Sensitive-data handling</h3>
-          <p class="what">Apps that touch personal information get held to a higher bar: how data is collected, where it flows, what gets logged, what never should be.</p>
-          <p class="hunt">Hunts: <b>personal data in logs</b>, careless collection, the patterns that turn a small app into a big liability.</p>
-          <div class="id">internal gate ids · <span>compliance · pii</span></div>
-        </div>
-      </div>
-
-      <div class="gate rv">
-        <div class="num"><b>06</b>gate</div>
-        <div>
-          <h3>Production readiness</h3>
-          <p class="what">The difference between a demo and a product: pinned dependencies, strict types, clean containers, the unglamorous discipline that keeps software standing at 3 a.m.</p>
-          <p class="hunt">Hunts: <b>demo-grade shortcuts</b> that work today and fall over the day you depend on them.</p>
-          <div class="id">internal gate id · <span>prod-readiness</span></div>
-        </div>
-      </div>
-
-      <div class="gate rv">
-        <div class="num"><b>07</b>gate</div>
-        <div>
-          <h3>It actually runs</h3>
-          <p class="what">A fresh machine installs your app from nothing, builds it, boots it, and probes it — repeatedly. One green run proves nothing; every run must come up healthy.</p>
-          <p class="hunt">Hunts: <b>“works on my machine”</b> — the oldest lie in software.</p>
-          <div class="id">internal gate id · <span>verify</span></div>
-        </div>
-      </div>
-
     </div>
 
-    <div class="seal rv">
-      <h3>And then the deploy itself refuses to trust us.</h3>
-      <p>Passing the gates produces a cryptographically signed certificate — and the deployment machinery <em>will not run without it</em>. Not for us, not for a clever workaround, not for anyone. Even if every human at VibeHard wanted to ship you an unchecked app, the system is built so we can't. That's what “safe to ship” means here: not a value we hold, a property of the machine.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ WHEN A GATE SAYS NO ═══ -->
-<section class="hold" style="padding-top:40px">
-  <div class="wrap">
-    <div class="eyebrow rv">When a gate says no</div>
-    <h2 class="rv" style="margin-top:20px;max-width:800px">It stops. It explains. It never ships anyway.</h2>
-    <div class="case">
-      <div class="panel rv">
-        <h3>What a security tool says</h3>
-        <p>This is what the machinery actually caught — the raw finding, preserved exactly:</p>
-        <div class="flag">⏸ BLOCKED · gate 04 (rls)<br>table "invoices" — row level security<br>not enforced; anon role can SELECT<br>across tenant boundary</div>
+    <div class="loop" data-rv>
+      <div class="diagram" aria-label="The repair loop: gate, block, fix, re-gate, converge or hold">
+        <div class="st">GATE <span class="arr">▸</span></div>
+        <div class="st red"><b>BLOCK</b> <span class="arr">▸</span></div>
+        <div class="st">FIX <span class="arr">▸</span></div>
+        <div class="st">RE-GATE <span class="arr">▸</span></div>
+        <div class="st">CONVERGE <span class="arr">▮</span> OR HOLD</div>
       </div>
-      <div class="panel rv">
-        <h3>What you read instead</h3>
-        <p>Every finding is translated into a plain-language explanation of what it means <em>for you</em>:</p>
-        <div class="plain">“Your app was stopped before going live: as written, one client could have seen another client's invoices. We're fixing the database rules and re-running every check. Nothing shipped.”</div>
-      </div>
-    </div>
-    <p class="rv" style="margin-top:34px;color:var(--muted);font-size:16px;max-width:760px">Most issues are fixed automatically and re-checked from gate one. The point is what <em>never</em> happens: an app with a known problem quietly going live because the tool wanted to feel magical. Held is a feature.</p>
-  </div>
-</section>
-
-<!-- ═══ WHO IT'S FOR ═══ -->
-<section id="who" style="border-top:1px solid var(--line)">
-  <div class="wrap">
-    <div class="eyebrow rv">Who it's for</div>
-    <h2 class="rv" style="margin-top:20px;max-width:860px">For the people who can't afford to get this wrong.</h2>
-    <div class="who-grid">
-      <div class="who-card rv">
-        <span class="eyebrow">Therapists · clinics · coaches</span>
-        <h3>Client portals that respect the couch.</h3>
-        <p>Intake forms, session notes, scheduling — where <b>who can see what</b> isn't a settings page, it's the foundation. Your clients trusted you with the most private things they have. Your software should be built like it knows that.</p>
-      </div>
-      <div class="who-card rv">
-        <span class="eyebrow">Bookkeepers · accountants · advisors</span>
-        <h3>Financial data, walled per client.</h3>
-        <p>Document collection, client dashboards, invoice tracking — with <b>database-enforced isolation</b> between every client, proven live after every deploy. Because “oops, wrong client's P&amp;L” is not an email you ever want to send.</p>
-      </div>
-      <div class="who-card rv">
-        <span class="eyebrow">Small practices · firms · founders</span>
-        <h3>Real operations, not another spreadsheet.</h3>
-        <p>The internal tool you've always wanted and never had budget for — built like software you'd <b>bet the practice on</b>, because you are. If people trust you with their data, this is your lane too.</p>
+      <div class="cols">
+        <div>
+          <h4>A block is a work order</h4>
+          Findings come back with file, line, and rule. The fixer rewrites and the line runs again — the fast chain every round, the full chain once at convergence against the real, clean-room artifact. <b>The fixer holds no authority. Only the gate disposes.</b>
+        </div>
+        <div>
+          <h4>The fixer can't cheat</h4>
+          Before the fixer touches anything, the surface it must satisfy is captured. Weaken a policy, delete a check, switch off row-level security to make a finding "go away" — <b>the tamper is detected and the round is voided.</b> Passing by lowering the bar is not passing.
+        </div>
+        <div>
+          <h4>Rounds are bounded</h4>
+          No infinite thrash. If the loop exhausts its rounds, the build is <b>held</b> — packaged with every verdict and finding and routed to a human. <b>It does not ship broken. There is no flag to make it ship broken.</b>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ WHAT YOU GET ═══ -->
-<section style="padding-top:30px">
-  <div class="wrap">
-    <div class="eyebrow rv">What arrives</div>
-    <h2 class="rv" style="margin-top:20px">A real app. Actually yours. Actually live.</h2>
-    <div class="get-grid">
-      <div class="get rv"><div class="ic">◆</div><div><h3>Its own private database</h3><p>Every app gets its own isolated database, created and secured automatically — never shared with another customer's app.</p></div></div>
-      <div class="get rv"><div class="ic">↗</div><div><h3>Live on the web, on its own URL</h3><p>Not a preview in someone else's sandbox — a deployed application your clients can sign into from anywhere, on any device.</p></div></div>
-      <div class="get rv"><div class="ic">✎</div><div><h3>Change it in plain English</h3><p>“Add a place for clients to upload documents.” Describe the change; the entire gate chain re-runs on the result. Every time.</p></div></div>
-      <div class="get rv"><div class="ic">⚙</div><div><h3>Watch it being built</h3><p>The whole pipeline runs in the open — spec, code, every gate, the deploy. No black box. It's your app; you get to see the factory floor.</p></div></div>
+<!-- ══ S4 · THE PROOF ENGINE ════════════════════════════════════════════ -->
+<section id="proof">
+  <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
+    <div class="sechead">
+      <p class="lbl">04 / THE PROOF ENGINE</p>
+      <p class="lbl" aria-hidden="true">DELIVERY BAY · KEYS, NOT DEMOS</p>
+    </div>
+    <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>What survives the line <span style="color:var(--amber)">is craftsmanship.</span></h2>
+    <p style="max-width:680px;font-size:17px" data-rv>This is the part of the building where we're allowed to be romantic — because the floor above wasn't. What rolls out of the delivery bay is not another AI demo held together by optimism. It's a <b style="color:var(--text)">bespoke digital asset</b>: engineered to your spec, attacked before any attacker gets the chance, boot-tested until boring, finished to the standard of a firm you couldn't afford. The gates don't make it precious. <b style="color:var(--text)">They make it provable — and proof is what lets you call it craftsmanship with a straight face.</b></p>
+
+    <div class="manifest" data-rv role="list" aria-label="The delivery manifest — receipts every release ships with">
+      <div class="ptile" role="listitem"><span class="lbl">Verdict board</span><span class="v">11/11 PASS</span><span class="n">every gate, signed off — or it isn't here</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Boot probes</span><span class="v">N/N HEALTHY</span><span class="n">clean-room build · every run must boot</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Tenant isolation</span><span class="v">0 ROWS LEAKED</span><span class="n">proven live against a real database</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Blocking findings</span><span class="v">0 AT RELEASE</span><span class="n">sast · secrets · CVEs · PII — all clear</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Migrations</span><span class="v">EXECUTED CLEAN</span><span class="n">run on real Postgres, not skimmed as text</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Dependencies</span><span class="v">PINNED</span><span class="n">no silent upgrades breaking your business</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Features</span><span class="v">N/N PRESENT</span><span class="n">held to the PRD, item by item</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Deploy sentinel</span><span class="v">SIGNED ✓</span><span class="n">HMAC-bound to this exact build</span></div>
+    </div>
+    <p class="lbl" style="margin-top:14px">THE DELIVERY MANIFEST — not marketing aggregates. These are the receipts <b>every single release</b> must produce to exist.</p>
+
+    <div class="vs" data-rv aria-label="Consumer generators compared with VibeHard">
+      <div class="vshead"><div>Consumer code generators</div><div>VibeHard</div></div>
+      <div class="row"><div>Ships when the model stops typing.</div><div>Ships when <b>eleven gates sign</b> — and not one second before.</div></div>
+      <div class="row"><div>Security is a suggestion in a prompt.</div><div>Security is <b>a live attack the database has to refuse</b>, two tenants seeded, every table probed.</div></div>
+      <div class="row"><div>"Done" means the page rendered.</div><div>"Done" means <b>every promised feature exists in code</b> — checked against the contract you approved.</div></div>
+      <div class="row"><div>Breaks quietly three weeks after launch.</div><div><b>Pinned dependencies, executed migrations, repeated boot proof</b> — built to be handed off, not babysat.</div></div>
+      <div class="row"><div>The burden of proof lands on you. And you can't read code.</div><div><b>The burden of proof is the product.</b> You get the verdicts, the findings, the signed sentinel.</div></div>
+    </div>
+
+    <div class="who" data-rv>
+      <div><h4>Solo founders</h4><p>Your SaaS idea, built like it already has customers to lose. Multi-tenant isolation proven before user #2 ever signs up.</p></div>
+      <div><h4>Therapists &amp; clinics</h4><p>Client data is classified as sensitive on day one — auth demanded in front of it, hard-delete paths required, leaks into logs blocked.</p></div>
+      <div><h4>Bookkeepers &amp; firms</h4><p>Financial records get the financial-data controls, deterministically. Your client portal shouldn't be the riskiest thing in your practice.</p></div>
+      <div><h4>Agencies</h4><p>Hand a client a build with receipts: verdict board, pinned deps, a README that exists. The handoff survives you leaving the room.</p></div>
+    </div>
+
+    <div id="trust" data-rv>
+      <div class="tgrid">
+        <div>
+          <h3>No badges. <span style="color:var(--amber)">Receipts.</span></h3>
+          <p>We will never hang a compliance badge we didn't earn — our own compliance gate is <b style="color:var(--text)">forbidden, by written policy, from claiming certification</b>. What you get instead is stronger: the full verdict board, every finding, and a cryptographically signed release sentinel. If a claim on this page ever drifts from what the machinery does, the machinery wins.</p>
+        </div>
+        <ul>
+          <li><span class="ok">▸</span> fail-closed everywhere — a crashed gate is a BLOCK</li>
+          <li><span class="ok">▸</span> zero LLM authority over any deploy verdict</li>
+          <li><span class="ok">▸</span> anti-tamper: fixes can't weaken the checks</li>
+          <li><span class="ok">▸</span> your data stays yours — per-tenant isolation, proven</li>
+          <li><span class="ok">▸</span> held builds go to a human, never out the door</li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ PRICING ═══ -->
-<section id="pricing" style="border-top:1px solid var(--line)">
-  <div class="wrap">
-    <div class="eyebrow rv">Pricing</div>
-    <h2 class="rv" style="margin-top:20px">Start free. Every plan gets every gate.</h2>
-    <p class="rv" style="margin-top:18px;color:var(--muted);font-size:16.5px;max-width:640px">Security is never the upsell. The full seven-gate chain runs on every build, on every plan — what you pay for is how much you can build.</p>
-    <div class="price-grid">
-      <div class="price rv">
-        <div class="nm">Free</div>
+<!-- ══ PRICING ══════════════════════════════════════════════════════════ -->
+<section id="pricing">
+  <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
+    <div class="sechead">
+      <p class="lbl">05 / ACCESS</p>
+      <p class="lbl" aria-hidden="true">EVERY TIER · ALL ELEVEN GATES</p>
+    </div>
+    <h2 class="disp" style="margin:26px 0 10px" data-rv>The gates don't <span style="color:var(--amber)">have tiers.</span></h2>
+    <p style="max-width:640px;font-size:17px" data-rv>Every plan runs the full inspection line — we don't sell a version that skips the brakes. Plans differ in throughput, nothing else.</p>
+    <div class="cards" data-rv>
+      <div class="card">
+        <span class="pname">Free</span>
         <div class="amt">$0<small> /month</small></div>
         <ul>
-          <li>1 live app</li>
-          <li>2 builds a day, on our engine</li>
-          <li>All seven gates, every build</li>
-          <li>Private database included</li>
+          <li><span class="a">2</span> gated builds / day</li>
+          <li><span class="a">1</span> project</li>
+          <li>full 11-gate line · no exceptions</li>
+          <li>signed sentinel on every release</li>
         </ul>
-        <a class="btn ghost" href="/app">Start free →</a>
+        <a class="btn ghost" href="/app">Start free</a>
       </div>
-      <div class="price star rv">
-        <div class="nm">Starter</div>
+      <div class="card star">
+        <span class="tag">MOST BUILDS</span>
+        <span class="pname">Starter</span>
         <div class="amt">$29<small> /month</small></div>
         <ul>
-          <li>5 live apps</li>
-          <li>5 builds a day</li>
-          <li>All seven gates, every build</li>
-          <li>Private database per app</li>
-          <li>Plain-English change requests</li>
+          <li><span class="a">5</span> gated builds / day</li>
+          <li><span class="a">5</span> projects</li>
+          <li>full 11-gate line · no exceptions</li>
+          <li>live deploys with custom domains</li>
         </ul>
-        <a class="btn" href="/app">Get Starter →</a>
+        <a class="btn" href="/app">Start on Starter</a>
       </div>
-      <div class="price rv">
-        <div class="nm">Pro</div>
+      <div class="card">
+        <span class="pname">Pro</span>
         <div class="amt">$99<small> /month</small></div>
         <ul>
-          <li>25 live apps</li>
-          <li>20 builds a day</li>
-          <li>All seven gates, every build</li>
-          <li>Private database per app</li>
-          <li>For firms &amp; heavy builders</li>
+          <li><span class="a">20</span> gated builds / day</li>
+          <li><span class="a">25</span> projects</li>
+          <li>full 11-gate line · no exceptions</li>
+          <li>bring your own model key (advanced)</li>
         </ul>
-        <a class="btn ghost" href="/app">Get Pro →</a>
-      </div>
-    </div>
-    <p class="price-note rv">Prefer your own AI account? Bring your own key on any plan — your builds, your billing.</p>
-  </div>
-</section>
-
-<!-- ═══ HONESTY ═══ -->
-<section class="honest" id="trust">
-  <div class="wrap">
-    <div class="inner">
-      <div class="eyebrow rv">Our one weird rule</div>
-      <h2 class="rv">No badges. Receipts.</h2>
-      <div class="body rv">
-        <p class="never">You will never see us claim we're <s>“HIPAA-compliant”</s>, <s>“bank-grade”</s>, or <s>“100% secure.”</s> Nobody honest can put those words in a hero banner — compliance belongs to <em>your</em> practices as much as any tool's, and “100% secure” has never once been true in the history of software.</p>
-        <p>What we do instead is stranger and better: <b>we show you exactly what we checked.</b> Every gate, by name. Every finding, in plain language. Every deploy, signed. If a check didn't run, the app didn't ship — and when you're the one holding other people's data, that's worth more than any badge ever printed.</p>
+        <a class="btn ghost" href="/app">Go Pro</a>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ FINAL CTA ═══ -->
-<section class="final">
-  <div class="glow2"></div>
-  <div class="wrap" style="position:relative">
-    <div class="eyebrow rv">Ready when you are</div>
-    <h2 class="rv" style="margin-top:20px">Tell us what you need.<br>Watch it get built — and checked.</h2>
-    <p class="rv">Your first build takes a few minutes, runs every gate, and costs nothing. The describing part? That takes one sentence.</p>
-    <a class="btn big rv" href="/app">Describe your app →</a>
+<!-- ══ FINALE ═══════════════════════════════════════════════════════════ -->
+<section class="finale">
+  <div class="gridbg" aria-hidden="true"></div>
+  <div class="rail pad" style="position:relative;padding-top:clamp(64px,9vh,110px);padding-bottom:clamp(64px,9vh,110px)">
+    <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; THE LINE IS ACTIVE</p>
+    <h2 class="disp" style="margin:22px 0 14px;max-width:900px">Your move, <span style="color:var(--amber)">architect.</span></h2>
+    <p style="max-width:560px;font-size:17px;margin-bottom:30px">One sentence. The factory does the rest — and shows you the receipts.</p>
+    <a class="btn" href="/app" style="padding:18px 34px">Engage ignition ▸</a>
   </div>
 </section>
 
 <footer>
-  <div class="wrap">
-    <div class="f-in">
-      <a class="brand" href="/">
-        <svg width="20" height="22" viewBox="0 0 26 28" aria-hidden="true"><polygon points="13,3 23,8.5 13,14 3,8.5" fill="#34dba1"/><polygon points="3,8.5 13,14 13,25 3,19.5" fill="#15936f"/><polygon points="23,8.5 13,14 13,25 23,19.5" fill="#0c6e52"/></svg>
-        <span style="font-size:16px">VibeHard</span>
-      </a>
-      <div class="f-links">
-        <a href="#gates">What we check</a>
-        <a href="#pricing">Pricing</a>
-        <a href="/app">Sign in</a>
+  <div class="rail">
+    <div class="footgrid">
+      <div>
+        <a class="mark" href="/"><span class="cube" aria-hidden="true"></span><span>VibeHard</span></a>
+        <p style="margin-top:16px;font-size:14px;max-width:300px">A software factory with an inspection line. The AI builds; eleven gates decide what leaves the floor.</p>
+      </div>
+      <div class="col">
+        <p class="lbl" style="margin-bottom:12px">Sections</p>
+        <a href="#spec">The spec</a><a href="#gates">The gates</a><a href="#proof">The proof</a><a href="#pricing">Pricing</a>
+      </div>
+      <div class="col">
+        <p class="lbl" style="margin-bottom:12px">Product</p>
+        <a href="/app">Sign in</a><a href="/app">Start a build</a>
+      </div>
+      <div class="col">
+        <p class="lbl" style="margin-bottom:12px">System</p>
+        <a href="#trust">Trust &amp; security</a><a href="#gates">What we check</a>
       </div>
     </div>
-    <p class="f-note">VibeHard runs security checks on every app it builds and shows you the results. It does not by itself make you or your business compliant with HIPAA, GDPR, or any other regulation — no software alone can. © 2026 VibeHard.</p>
+    <div class="footbar">
+      <span>© 2026 VibeHard</span>
+      <span><span class="led idle" aria-hidden="true"></span>&nbsp;Verdicts are deterministic. No LLM decides a deploy.</span>
+    </div>
   </div>
 </footer>
 
 <script>
-// scroll reveals
-const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}}),{threshold:.12});
-document.querySelectorAll(".rv").forEach(el=>io.observe(el));
-
-// hero gate-run terminal: a build passing the gates, looping
-const GATES=[["spec","understanding what you need","2.1s"],["codegen","writing the application","48.7s"],["sast","static analysis — injection & unsafe patterns","3.2s"],["secrets","no keys or passwords in code","1.1s"],["depvuln","dependencies vs known vulnerabilities","4.6s"],["rls","data isolation — enforced per client","2.8s"],["compliance","sensitive-data handling","1.9s"],["prod-readiness","pinned deps · strict types · clean container","2.4s"],["verify","clean install · boot · probe ×3","31.5s"]];
-const FIN=["","✓ all gates green — deploy certificate signed","● live at client-portal.yourfirm.app"];
-const tb=document.getElementById("termbody");
-const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
-function line(html,cls){const d=document.createElement("div");d.className="tl "+(cls||"");d.innerHTML=html;tb.appendChild(d);requestAnimationFrame(()=>requestAnimationFrame(()=>d.classList.add("show")));return d}
-async function runTerm(){
-  tb.innerHTML="";
-  line('<span class="st">$</span><span class="nm">vibehard build</span><span class="ds">the same chain, every build</span>',"hd");
-  for(const [id,desc,t] of GATES){
-    const d=line('<span class="st"><span class="sp"></span></span><span class="nm">'+id+'</span><span class="ds">'+desc+'</span>');
-    await new Promise(r=>setTimeout(r,reduced?60:520));
-    d.querySelector(".st").innerHTML="✓";d.querySelectorAll(".ds")[0].textContent=t;
-  }
-  await new Promise(r=>setTimeout(r,300));
-  line('<span class="st">✓</span><span class="nm">'+FIN[1]+'</span>');
-  await new Promise(r=>setTimeout(r,350));
-  line('<span class="st" style="color:var(--teal)">●</span><span class="nm">live at client-portal.yourfirm.app</span>',"live");
-  await new Promise(r=>setTimeout(r,reduced?3000:7000));
-  runTerm();
+/* ── CTA: real handoff into the pipeline (DESIGN.md §1) ─────────────── */
+function ignite(){
+  var v=document.getElementById('idea').value.trim();
+  try{if(v)localStorage.setItem('vh.idea',v)}catch(e){}
+  location.href='/app';
 }
-const tio=new IntersectionObserver(es=>{if(es[0].isIntersecting){tio.disconnect();runTerm()}},{threshold:.3});
-tio.observe(document.getElementById("term"));
+document.getElementById('ignite').addEventListener('click',ignite);
+document.getElementById('idea').addEventListener('keydown',function(e){
+  if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();ignite()}
+});
+
+/* ── machine stream behind the smoked glass ─────────────────────────── */
+(function(){
+  var LINES=[
+    '[intake ] build order accepted — parsing intent',
+    '[spec   ] .vibehard/spec.json written · rigor: production',
+    '[gate 01/11] sast ............ PASS',
+    '[gate 02/11] secrets ......... PASS',
+    '[gate 04/11] rls ............. BLOCK · table "invoices" reachable without policy',
+    '[fix    ] round 1/4 — regenerating access policy',
+    '[gate 04/11] rls ............. PASS',
+    '[gate 06/11] rls-enforce ..... tenant B denied read/write on tenant A — PASS',
+    '[gate 10/11] verify .......... boot 3/3 healthy — PASS',
+    '[sentinel] HMAC signed · deploy authorized'
+  ];
+  var el=document.getElementById('stream'),i=0,buf=[];
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function tick(){
+    buf.push(LINES[i%LINES.length]);i++;
+    if(buf.length>9)buf.shift();
+    el.textContent=buf.join('\n');
+  }
+  if(reduced){el.textContent=LINES.slice(0,9).join('\n');return}
+  for(var k=0;k<5;k++)tick();
+  setInterval(tick,1600);
+})();
+
+/* ── S2: blueprint stages track the narrative blocks ────────────────── */
+(function(){
+  var blocks=document.querySelectorAll('.sblock[data-stage]');
+  if(!blocks.length)return;
+  var stages=document.querySelectorAll('.bs'),tag=document.getElementById('bpstage');
+  function activate(n){
+    stages.forEach(function(s){s.classList.toggle('on',+s.dataset.bs<=n)});
+    if(tag)tag.textContent='STAGE '+n+'/4';
+  }
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches||window.matchMedia('(max-width: 920px)').matches){activate(4);return}
+  activate(1);
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(x){if(x.isIntersecting)activate(+x.target.dataset.stage)});
+  },{threshold:.45});
+  blocks.forEach(function(b){io.observe(b)});
+})();
+
+/* ── S3: the gate matrix — data from src/gate/index.ts GATES order ──── */
+(function(){
+  var G=[
+    {n:'01',id:'sast',one:'Exploitable patterns, read line by line.',
+     d:'Static analysis of every line of authored source — injection sinks, dangerous constructs, and a purpose-built SQL-injection rule on top of the standard ruleset. It reads the code the machine wrote the way an attacker would, before anyone else gets the chance.',
+     m:['MECHANISM|semgrep · pinned container','SCOPE|authored source only','ON FAIL|BLOCK']},
+    {n:'02',id:'secrets',one:'Any committed credential. Zero tolerance.',
+     d:'Hunts the build for committed credentials — API keys, tokens, connection strings, passwords. <b>Any leak blocks, regardless of severity.</b> There is no judgment call in this cell; a secret in code is a breach on a timer.',
+     m:['MECHANISM|gitleaks · pinned container','TOLERANCE|zero','ON FAIL|BLOCK']},
+    {n:'03',id:'depvuln',one:'Known CVEs in every dependency.',
+     d:'Every dependency in the lockfile is checked against the public CVE record. And the fail-closed rule is literal: <b>if the scanner itself cannot run, that is a critical block</b> — a scan that didn’t happen is not a clean scan. Unresolved dependency trees are surfaced, never silently skipped.',
+     m:['MECHANISM|trivy · pinned container','SCOPE|full lockfile','ON FAIL|BLOCK · scanner down = BLOCK']},
+    {n:'04',id:'rls',one:'No table ships without a real policy.',
+     d:'Modeled on the breach that made app generators infamous: 170+ builder-made apps leaking client data through tables with no row-level security (CVE-2025-48757). Every table a migration creates must carry RLS and a policy that isn’t a rubber stamp; every table the app actually queries must be covered. <b>No policy found means block — not benefit of the doubt.</b>',
+     m:['MECHANISM|static policy + coverage analysis','MODELED ON|CVE-2025-48757','ON FAIL|BLOCK']},
+    {n:'05',id:'migrate',one:'Migrations executed, not reviewed.',
+     d:'Every other check reads your database migrations as text. This one <b>runs them</b> — against a real embedded Postgres, in about a second, no LLM anywhere. Syntax that would only explode on deploy day explodes here instead, localized to the exact file and the exact database error.',
+     m:['MECHANISM|embedded Postgres (pglite) · real DDL apply','RUNTIME|~1s · deterministic','ON FAIL|BLOCK']},
+    {n:'06',id:'rls-enforce',one:'Two tenants seeded. The attack is attempted.',
+     d:'The keystone. It stands up a live database, applies your migrations, seeds <b>two tenants</b> — then attacks: as tenant A, and as an anonymous session, it attempts to read, update, delete, and insert tenant B’s rows across every isolated table. One leaked row blocks. “The policy text looks right” is an opinion. <b>The database refusing the attack is a fact.</b>',
+     m:['MECHANISM|live two-tenant probe · embedded Postgres','ASSERTS|read/write/delete/insert all denied','ON FAIL|BLOCK · harness error = BLOCK']},
+    {n:'07',id:'compliance',one:'Sensitive data demands its controls.',
+     d:'Reads the binding sensitivity classification from the spec and demands the controls that class of data requires — authentication in front of it, a real hard-delete path — with the org-level judgment items routed to a human instead of hand-waved. <b>The classification can’t be talked out of:</b> declare “no sensitive data” while the schema stores diagnoses, and an independent code scan falsifies the claim and blocks.',
+     m:['MECHANISM|seven-control assessment · classification-driven','FALSIFIER|independent code scan','ON FAIL|BLOCK']},
+    {n:'08',id:'pii',one:'Personal data stays out of logs and URLs.',
+     d:'Two deterministic leak paths, both career-enders for a small firm: personal data written into logs (logs get shipped to third parties), and personal data in URLs (URLs get recorded by every server in between). Precision matters: <b><span class="mono">console.log("email sent")</span> passes. <span class="mono">console.log(user.email)</span> blocks.</b>',
+     m:['MECHANISM|property-access scan · deterministic','PATHS|logs · URLs / query strings','ON FAIL|BLOCK']},
+    {n:'09',id:'prod-readiness',one:'Unpinned, undocumented, root: blocked.',
+     d:'The boring failures that kill real handoffs: dependency ranges left unpinned so a silent upgrade breaks a shipped app, a missing README, containers running as root, base images not pinned by digest, TypeScript strict mode off. <b>Blocks at production rigor; warns at prototype</b> — the standard scales with what you told the spec.',
+     m:['MECHANISM|install-free file checks','RIGOR|adaptive · from the spec','ON FAIL|BLOCK at production']},
+    {n:'10',id:'verify',one:'Built and booted. Every run healthy.',
+     d:'Proof of life. The app is copied to a clean room, built for real, and booted — <b>multiple times, and every single run must come up healthy.</b> One green run proves nothing; flaky is a failure mode, not a footnote. An empty build that “succeeded” without producing artifacts is also a block.',
+     m:['MECHANISM|clean-room build + repeated boot probes','STANDARD|N/N healthy — not 1/N','ON FAIL|BLOCK']},
+    {n:'11',id:'completeness',one:'Promised features, checked off in code.',
+     d:'Passing every security gate is not the same as being done. Feature by feature, the code is held against the PRD’s contract list — and <b>a promised feature that is entirely missing blocks the release.</b> The next fix round doesn’t shrug; it generates the missing feature. If the reviewer itself goes down, that’s a block too: unverifiable is unshippable.',
+     m:['MECHANISM|per-feature review vs PRD contract','REVIEWER DOWN|fails closed = BLOCK','ON FAIL|BLOCK']},
+    {n:'12',id:'the sentinel',s:1,one:'Signed proof. The deploy’s only key.',
+     d:'The matrix’s only exit. When every gate passes — and at least one did substantive work, because a board of “not applicable” is not a pass — a cryptographically signed sentinel is written, bound to this exact build in this exact directory. <b>The deploy refuses to run without it.</b> Copy it elsewhere: invalid. Fail a later run: destroyed. A past pass can never ship a present failure.',
+     m:['MECHANISM|HMAC-signed · path-bound · single writer','VACUOUS PASS|refused (all-n/a ≠ pass)','WITHOUT IT|NO DEPLOY']}
+  ];
+  var mx=document.getElementById('matrix');if(!mx)return;
+  var roN=document.getElementById('ro-name'),roD=document.getElementById('ro-desc'),roM=document.getElementById('ro-meta');
+  G.forEach(function(g,i){
+    var b=document.createElement('button');
+    b.className='gcell'+(g.s?' sentinel':'');b.type='button';b.setAttribute('role','option');b.setAttribute('aria-selected','false');b.dataset.i=i;
+    b.innerHTML='<span class="top"><span class="gled" aria-hidden="true"></span><span class="num">'+(g.s?'EXIT':'GATE '+g.n+'/11')+'</span></span><span class="name">'+g.id+'</span><span class="one">'+g.one+'</span>';
+    mx.appendChild(b);
+  });
+  var cells=mx.querySelectorAll('.gcell'),cur=-1;
+  function show(i){
+    if(i===cur)return;cur=i;var g=G[i];
+    cells.forEach(function(c,k){c.setAttribute('aria-selected',k===i?'true':'false')});
+    roN.textContent=(g.s?'EXIT — ':'GATE '+g.n+'/11 — ')+g.id.toUpperCase();
+    roD.innerHTML=g.d;
+    roM.innerHTML=g.m.map(function(r){var p=r.split('|');var v=p[1];var cls=/BLOCK|NO DEPLOY/.test(v)?' class="blk"':'';return '<b>'+p[0]+'</b> · <span'+cls+'>'+v+'</span>'}).join('<br>');
+  }
+  cells.forEach(function(c){
+    c.addEventListener('mouseenter',function(){show(+c.dataset.i)});
+    c.addEventListener('focus',function(){show(+c.dataset.i)});
+    c.addEventListener('click',function(){show(+c.dataset.i)});
+  });
+  mx.addEventListener('keydown',function(e){
+    var cols=window.innerWidth>1020?4:(window.innerWidth>560?2:1);
+    var k=e.key,d=0;
+    if(k==='ArrowRight')d=1;else if(k==='ArrowLeft')d=-1;else if(k==='ArrowDown')d=cols;else if(k==='ArrowUp')d=-cols;else return;
+    e.preventDefault();
+    var next=Math.max(0,Math.min(cells.length-1,cur+d));
+    cells[next].focus();
+  });
+  show(5); // default readout: rls-enforce, the keystone
+})();
+
+/* ── scroll reveal (used by S2–S4) ──────────────────────────────────── */
+(function(){
+  var els=document.querySelectorAll('[data-rv]');
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){els.forEach(function(e){e.classList.add('on')});return}
+  var io=new IntersectionObserver(function(es){es.forEach(function(x){if(x.isIntersecting){x.target.classList.add('on');io.unobserve(x.target)}})},{threshold:.18});
+  els.forEach(function(e){io.observe(e)});
+})();
 </script>
 </body>
 </html>

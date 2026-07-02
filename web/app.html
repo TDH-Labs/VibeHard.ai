@@ -481,6 +481,8 @@ async function load(keep){
   if(window.__CLERK&&window.Clerk){$("#who").innerHTML=`<span class="muted" style="font-size:14px">${me.email} · ${me.plan}</span> <span id="clerk-userbtn"></span>`;try{window.Clerk.mountUserButton(document.getElementById("clerk-userbtn"))}catch{}}
   else{$("#who").innerHTML=`<span class="muted" style="font-size:14px">${me.email} · ${me.plan}</span> <a id="logout" style="cursor:pointer;font-size:15px">log out</a>`;$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST"});await load()};}
   renderKey();renderConnections();renderBuilds();renderResume();renderDesignPicker();renderOrch();
+  // The landing hero ("Engage ignition") stashes the visitor's idea so it survives the signup wall.
+  try{const idea=localStorage.getItem("vh.idea");if(idea&&!$("#prompt").value){$("#prompt").value=idea;localStorage.removeItem("vh.idea")}}catch{}
 }
 
 // ── build assistant (orchestrator) chat panel ──────────────────────────────────
