@@ -38,11 +38,14 @@ noise/grain overlay (feTurbulence data-URI, stepped background-position keyframe
 opacity ≈ 0.05, disabled under `prefers-reduced-motion`). Containers butt-join like
 milled hardware — shared borders, no gaps, no rounding.
 
-**CTA — "ENGAGE IGNITION" is real, not theater.**
-Behavior: the hero prompt is written to `localStorage["vh.idea"]`, then the browser
-navigates to `/app` (live Clerk signup/sign-in). `app.html` gets a 3-line addition:
-after auth, if `vh.idea` exists, prefill the build prompt (`#prompt`) and clear the key.
-The user's idea survives the signup wall and lands in the actual pipeline input.
+**CTA — "ENGAGE IGNITION" is real, not theater. The free sample IS the threshold.**
+Anonymous visitors prompt immediately: the hero console POSTs to `/api/spec-preview`
+(unauthenticated; same-origin + 600-char cap + 3/hour/IP + global daily ceiling), which
+runs ONE pass of the real `llmIntake` and grades it with deterministic `reviewSpec`.
+The drafted spec sheet renders in the glass — a real deliverable, before any account.
+Continuing to an actual build is the gate: the idea is stashed in
+`localStorage["vh.idea"]` and `/app` (live Clerk signup) prefills the build prompt
+from it after auth. Sign-in also remains directly available in the nav at all times.
 Access model: **immediate account creation** (Clerk is live in production). No waitlist.
 
 **Pricing — shown, real numbers.**

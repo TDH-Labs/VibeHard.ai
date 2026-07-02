@@ -23,6 +23,7 @@
   --glass:rgba(13,13,14,.62);
 }
 *{box-sizing:border-box;margin:0;padding:0;border-radius:0}
+[hidden]{display:none!important}
 html{scroll-behavior:smooth}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 body{background:var(--k);color:var(--text);font-family:'Archivo',sans-serif;font-stretch:100%;font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased;overflow-x:hidden}
@@ -110,6 +111,20 @@ nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter
 .glass textarea:focus{outline:none}
 .glass .foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
 .glass .hint{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim)}
+/* the drafted spec sheet — the free sample, rendered in the glass */
+.sheet{padding:20px 18px 8px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.85;color:var(--text2);max-height:430px;overflow:auto}
+.sheet .sh-tag{font-size:10.5px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase}
+.sheet .sh-name{font-family:'Archivo';font-stretch:114%;font-weight:850;font-size:21px;text-transform:uppercase;color:var(--text);letter-spacing:.01em;margin:6px 0 4px}
+.sheet .sh-sum{font-family:'Archivo';font-size:14.5px;line-height:1.55;color:var(--text2);margin-bottom:14px}
+.sheet .sh-meta{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;border-top:1px solid var(--line-dim);padding-top:12px}
+@media(max-width:560px){.sheet .sh-meta{grid-template-columns:1fr}}
+.sheet .k{color:var(--dim);letter-spacing:.1em}
+.sheet .a{color:var(--amber)}
+.sheet .at{color:var(--amber-t)}
+.sheet .sh-list{border-top:1px solid var(--line-dim);margin-top:12px;padding-top:12px}
+.sheet .ready{margin:14px 0 10px;padding:10px 12px;border:1px solid var(--amber-dim);color:var(--amber-t);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase}
+.linkish{background:none;border:none;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:0}
+.linkish:hover{color:var(--amber-t)}
 .ticks{display:flex;gap:0;margin-top:56px;border:1px solid var(--line);border-left:none;flex-wrap:wrap}
 .ticks .t{flex:1;min-width:220px;border-left:1px solid var(--line);padding:16px 20px;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);display:flex;gap:10px;align-items:center;background:var(--carbon)}
 
@@ -271,7 +286,7 @@ footer .col a:hover{color:var(--amber-t)}
   <div class="rail pad heroin">
     <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; 01 / IGNITION — <b>GATED SOFTWARE FACTORY</b></p>
     <h1 class="disp" style="margin-top:26px">Describe it once.<br>It ships right,<br><em>or it doesn't ship.</em></h1>
-    <p class="sub">You are the <b>architect</b>, not the operator. You bring intent — what the business needs, who it serves, what must never leak. The factory brings execution: heavy machinery that writes real software, and an inspection line with the authority to stop it. <b>You never touch the machinery.</b></p>
+    <p class="sub">You have a vision. Now you have an engineering team to build it, prove it safe, and put it live. <b>Type the idea the way you'd say it out loud</b> — your first deliverable, a drafted spec sheet, lands right here in under a minute. Before you've even created an account.</p>
 
     <div class="console">
       <div class="stream" aria-hidden="true"><pre id="stream"></pre></div>
@@ -279,9 +294,15 @@ footer .col a:hover{color:var(--amber-t)}
         <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Intake // Build order</span><span class="lbl" style="margin-left:auto">VH-INTAKE-01</span></div>
         <label for="idea" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Describe the software you need</label>
         <textarea id="idea" placeholder="A client portal where each client signs in and sees only their own files and invoices…" spellcheck="false"></textarea>
-        <div class="foot">
-          <span class="hint">One plain sentence is enough. The intake interview extracts the rest.</span>
+        <div class="sheet" id="sheet" hidden></div>
+        <div class="foot" id="foot-idle">
+          <span class="hint" id="hint">One plain sentence is enough. Your spec sheet drafts right here — free, no account.</span>
           <button class="btn" id="ignite" type="button">Engage ignition ▸</button>
+        </div>
+        <div class="foot" id="foot-sheet" hidden>
+          <button class="linkish" id="editidea" type="button">◂ edit the idea</button>
+          <span class="hint" style="flex:1;text-align:right;margin-right:6px">Saved to this browser — waiting for you after signup.</span>
+          <a class="btn" id="continue" href="/app">Continue the build ▸</a>
         </div>
       </div>
     </div>
@@ -561,16 +582,74 @@ footer .col a:hover{color:var(--amber-t)}
 </footer>
 
 <script>
-/* ── CTA: real handoff into the pipeline (DESIGN.md §1) ─────────────── */
-function ignite(){
-  var v=document.getElementById('idea').value.trim();
-  try{if(v)localStorage.setItem('vh.idea',v)}catch(e){}
-  location.href='/app';
-}
-document.getElementById('ignite').addEventListener('click',ignite);
-document.getElementById('idea').addEventListener('keydown',function(e){
-  if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();ignite()}
-});
+/* ── CTA: the free sample (DESIGN.md §1) ────────────────────────────────
+   Anonymous visitors draft a REAL spec sheet right here via /api/spec-preview
+   (rate-limited server-side). Continuing to an actual build requires signup —
+   the idea is stashed in localStorage and waits in the app's build box. */
+(function(){
+  var idea=document.getElementById('idea'),btn=document.getElementById('ignite'),
+      hint=document.getElementById('hint'),sheet=document.getElementById('sheet'),
+      footIdle=document.getElementById('foot-idle'),footSheet=document.getElementById('foot-sheet'),
+      busy=false;
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function setHint(t,err){hint.textContent=t;hint.style.color=err?'var(--red)':''}
+  function stash(v){try{localStorage.setItem('vh.idea',v)}catch(e){}}
+  function renderSheet(b){
+    var s=b.spec||{};
+    var classes=(s.sensitiveData||[]).filter(function(c){return c!=='none'});
+    var feats=(s.features||[]).slice(0,8).map(function(f,i){return ' F'+(i+1)+'  '+esc(f)}).join('<br>');
+    var ents=(s.dataEntities||[]).slice(0,6).map(function(e){
+      return ' '+esc(e.name)+' <span class="k">('+(e.fields||[]).length+' fields)</span>'+(e.sensitive?' <span class="a">[sensitive]</span>':'');
+    }).join('<br>');
+    sheet.innerHTML=
+      '<div class="sh-tag">Spec 01 // drafted · yours to keep</div>'+
+      '<div class="sh-name">'+esc(s.name||'untitled')+'</div>'+
+      '<div class="sh-sum">'+esc(s.summary||'')+'</div>'+
+      '<div class="sh-meta">'+
+        '<div><span class="k">USERS</span><br>'+esc(s.users||'—')+'</div>'+
+        '<div><span class="k">SIGN-IN</span><br>'+esc(s.auth||'—')+'</div>'+
+        '<div><span class="k">TENANCY</span><br>'+esc(s.tenancy||'—')+'</div>'+
+        '<div><span class="k">DATA CLASSIFICATION</span><br>'+(classes.length?'<span class="a">'+classes.map(esc).join(' · ')+'</span>':'none declared')+'</div>'+
+        '<div><span class="k">RIGOR</span><br><span class="at">'+esc(b.rigor||'production')+'</span></div>'+
+        '<div><span class="k">GATE PLAN</span><br>all 11 · fixed order</div>'+
+      '</div>'+
+      (feats?'<div class="sh-list"><span class="k">FEATURES → COMPLETENESS CONTRACTS</span><br>'+feats+'</div>':'')+
+      (ents?'<div class="sh-list"><span class="k">DATA MODEL</span><br>'+ents+'</div>':'')+
+      '<div class="ready">'+(b.ready?'▸ Ready for the line — the gates take it from here':'▸ '+(b.gaps||0)+' readiness gap(s) — the intake interview closes them after signup')+'</div>';
+    idea.hidden=true;footIdle.hidden=true;sheet.hidden=false;footSheet.hidden=false;
+    sheet.scrollTop=0;
+  }
+  async function draft(){
+    var v=idea.value.trim();
+    if(!v){idea.focus();return}
+    if(busy)return;
+    busy=true;btn.disabled=true;btn.textContent='DRAFTING…';
+    setHint('The drafting desk is reading your idea — about 30 seconds.');
+    try{
+      var r=await fetch('/api/spec-preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:v})});
+      var b=null;try{b=await r.json()}catch(e){}
+      if(!r.ok||!b||!b.spec){
+        setHint((b&&b.error)||'The drafting desk hiccuped — try again in a minute.',true);
+        if(r.status===429){stash(v);btn.textContent='Sign up to keep building ▸';btn.disabled=false;btn.onclick=function(){location.href='/app'};return}
+        return;
+      }
+      stash(v);
+      renderSheet(b);
+    }catch(e){
+      stash(v);location.href='/app';return; // no API here (static preview) → straight to the app
+    }finally{
+      if(btn.textContent==='DRAFTING…'){btn.disabled=false;btn.innerHTML='Engage ignition ▸'}
+      busy=false;
+    }
+  }
+  btn.addEventListener('click',draft);
+  idea.addEventListener('keydown',function(e){if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();draft()}});
+  document.getElementById('editidea').addEventListener('click',function(){
+    sheet.hidden=true;footSheet.hidden=true;idea.hidden=false;footIdle.hidden=false;
+    setHint('One plain sentence is enough. Your spec sheet drafts right here — free, no account.');
+    idea.focus();
+  });
+})();
 
 /* ── machine stream behind the smoked glass ─────────────────────────── */
 (function(){
