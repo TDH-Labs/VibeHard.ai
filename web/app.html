@@ -469,7 +469,12 @@ async function renderConnections(){
 async function load(keep){
   const sp=new URLSearchParams(location.search);const cp=sp.get("connect");if(cp&&CONN_MSG[cp]){const[k,t]=CONN_MSG[cp];connBanner(k,t);history.replaceState({},"","/app")}
   const {body}=await api("/api/me");me=body;
-  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.dc.html">How it works</a><a href="/trust.dc.html">Trust &amp; security</a>';if(window.__CLERK&&window.Clerk){mountClerkSignIn()}else{showAuthCard("auth")}return}
+  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.dc.html">How it works</a><a href="/trust.dc.html">Trust &amp; security</a>';
+    // Clerk has a LIVE client session but the server rejected it (misconfig: azp/authorizedParties,
+    // wrong instance keys, clock skew…). Remounting SignIn here redirect-loops forever — the already-
+    // signed-in widget instantly bounces back and we land in this branch again. Fail LOUDLY instead.
+    if(window.__CLERK&&window.Clerk&&window.Clerk.user){const c=$("#card-auth");if(c)c.innerHTML='<div style="max-width:420px"><b>Sign-in hit a server configuration problem.</b><p class="muted">Your identity was verified, but the server refused the session. This is a configuration issue on our side, not something you did.</p><button id="clerk-signout">Sign out and try again</button></div>';const so=$("#clerk-signout");if(so)so.onclick=async()=>{try{await window.Clerk.signOut()}catch{}location.reload()};return}
+    if(window.__CLERK&&window.Clerk){mountClerkSignIn()}else{showAuthCard("auth")}return}
   $("#auth").classList.add("hide");$("#dash").classList.remove("hide");
   if(window.__CLERK&&window.Clerk){$("#who").innerHTML=`<span class="muted" style="font-size:14px">${me.email} · ${me.plan}</span> <span id="clerk-userbtn"></span>`;try{window.Clerk.mountUserButton(document.getElementById("clerk-userbtn"))}catch{}}
   else{$("#who").innerHTML=`<span class="muted" style="font-size:14px">${me.email} · ${me.plan}</span> <a id="logout" style="cursor:pointer;font-size:15px">log out</a>`;$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST"});await load()};}

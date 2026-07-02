@@ -220,3 +220,6 @@ fix: embedded pglite fallback ENOENT on a fresh container filesystem (recursive 
 
 ## 2026-07-01T23:48:02Z — DONE
 fix: serve the app UI at the bare root path (was 404 — only /app and /reset were handled)
+
+## 2026-07-02T00:51:07Z — DONE
+fix: login loop — validate Clerk sessions + CSRF origin against ALL served hostnames, and fail loudly instead of remounting SignIn
