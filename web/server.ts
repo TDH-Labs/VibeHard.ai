@@ -252,12 +252,13 @@ function sameOrigin(req: Request): boolean {
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
 
-// ── the polished marketing site (the .dc design the operator chose) ─────────────
-const DC_DIR = join(import.meta.dir, "..", "landing", "AI Software Builder Competitive Strategy");
+// ── the marketing site (web/landing — TRACKED, ships in the image; the old untracked
+//    landing/ draft was .dockerignore'd, which is why the root 404'd on launch day) ──
+const LANDING_DIR = join(import.meta.dir, "landing");
 async function serveStatic(path: string): Promise<Response> {
-  const rel = path === "/" ? "index.dc.html" : decodeURIComponent(path.replace(/^\//, ""));
+  const rel = path === "/" ? "index.html" : decodeURIComponent(path.replace(/^\//, ""));
   if (rel.includes("..")) return new Response("forbidden", { status: 403 });
-  const f = Bun.file(join(DC_DIR, rel));
+  const f = Bun.file(join(LANDING_DIR, rel));
   return (await f.exists()) ? new Response(f) : new Response("not found", { status: 404 });
 }
 
@@ -565,7 +566,9 @@ const server = Bun.serve({
     const url = new URL(req.url);
     const path = url.pathname;
 
-    if (path === "/" || path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML));
+    // "/" deliberately NOT here: the root is the marketing site (serveStatic fallthrough below);
+    // the product lives at /app.
+    if (path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML));
     if (path === "/auth/stripe/connect" || path === "/auth/stripe/callback") return handleStripeConnect(req, url, path);
     if (path.startsWith("/auth/")) return handleOAuth(url, path);
 

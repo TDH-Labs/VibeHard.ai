@@ -232,3 +232,6 @@ feat: sustainable turnkey quotas — build caps sized so worst-case platform tok
 
 ## 2026-07-02T02:30:26Z — DONE
 feat: OpenRouter as first-class LLM provider (openrouter→opencode→anthropic resolution, total BYO override, same model families)
+
+## 2026-07-02T02:36:59Z — DONE
+feat: new marketing site at root — seven-gates craftsmanship tour, honest-copy homepage (positioning.md-bound); app moves to /app
