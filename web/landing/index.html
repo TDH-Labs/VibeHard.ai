@@ -286,7 +286,7 @@ footer .col a:hover{color:var(--amber-t)}
   <div class="rail pad heroin">
     <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; 01 / IGNITION — <b>GATED SOFTWARE FACTORY</b></p>
     <h1 class="disp" style="margin-top:26px">Describe it once.<br>It ships right,<br><em>or it doesn't ship.</em></h1>
-    <p class="sub">You have a vision. Now you have an engineering team to build it, prove it safe, and put it live. <b>Type the idea the way you'd say it out loud</b> — your first deliverable, a drafted spec sheet, lands right here in under a minute. Before you've even created an account.</p>
+    <p class="sub">You have a vision. Now you have an engineering team to build it, prove it safe, and put it live. <b>Type the idea the way you'd say it out loud.</b> A drafted spec sheet lands right here in under a minute, before you've created an account.</p>
 
     <div class="console">
       <div class="stream" aria-hidden="true"><pre id="stream"></pre></div>
@@ -323,25 +323,25 @@ footer .col a:hover{color:var(--amber-t)}
       <p class="lbl" aria-hidden="true">BLUEPRINT DECK · .vibehard/</p>
     </div>
     <h2 class="disp" style="margin:26px 0 10px;max-width:840px" data-rv>The chassis is drawn <span style="color:var(--amber)">before the metal.</span></h2>
-    <p style="max-width:640px;font-size:17px" data-rv>Nobody blueprints a racing chassis after the car is welded. Your sentence becomes structure first — and everything built afterward has to bolt to it.</p>
+    <p style="max-width:640px;font-size:17px" data-rv>Your sentence becomes structure first. Everything built afterward has to bolt to it.</p>
 
     <div class="spec2" style="margin-top:26px">
       <div class="specleft">
         <div class="sblock" data-stage="1" data-rv>
           <span class="idx">B-01 / INTAKE → SPECIFICATION</span>
-          <h3>Your sentence gets interrogated, not obeyed.</h3>
+          <h3>The questions come before the code.</h3>
           <p>Most generators sprint from your words straight to code. VibeHard refuses. First, a short intake interview extracts what your sentence implied but never said: <b>who uses this, what data it holds, which of it is sensitive, and what must never cross between clients.</b></p>
           <p>The answers are written into <span class="mono" style="color:var(--amber-t)">.vibehard/spec.json</span> — including a formal sensitivity classification (PII, financial, health, credentials) and a rigor level. That file is load-bearing: every verdict later in the line is measured against it.</p>
         </div>
         <div class="sblock" data-stage="2" data-rv>
           <span class="idx">B-02 / PRODUCT REQUIREMENTS</span>
           <h3>Every feature becomes a contract.</h3>
-          <p>The PRD isn't a wish list — it's a numbered set of obligations. <b>Each feature written here is one the machinery will later be held to</b>, item by item, by a gate whose only job is to answer: does the code actually do this?</p>
+          <p>The PRD is a numbered set of obligations. <b>Each feature written here is one the machinery will later be held to</b>, item by item, by a gate whose only job is to answer: does the code actually do this?</p>
           <p>A build that quietly ships four of your six features doesn't get to call itself finished. The paper remembers.</p>
         </div>
         <div class="sblock" data-stage="3" data-rv>
           <span class="idx">B-03 / ARCHITECTURE</span>
-          <h3>Isolation is drawn into the frame — not bolted on.</h3>
+          <h3>Isolation is drawn into the frame.</h3>
           <p>The architecture document decides the stack, the data model, and — critically — <b>which tables belong to a single tenant and which are shared.</b> Row-level security posture is settled here, at the drawing stage, where it's structural.</p>
           <p>Access control added as an afterthought is how app builders end up in breach headlines. Here it's a property of the frame itself.</p>
         </div>
@@ -401,7 +401,7 @@ footer .col a:hover{color:var(--amber-t)}
       <p class="lbl" aria-hidden="true">INSPECTION FLOOR · FIXED ORDER · FAIL-CLOSED</p>
     </div>
     <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>Eleven gates. <span style="color:var(--amber)">Zero appeals.</span></h2>
-    <p style="max-width:660px;font-size:17px" data-rv>Every build the factory produces is treated as contraband until proven otherwise. Eleven independent inspections run in fixed order, each with unilateral authority to stop the line. They don't negotiate. They don't get tired. They don't care that your demo is tomorrow. And if one of them crashes, that counts as a <b style="color:var(--text)">block</b> — a gate that can't run never waves anything through.</p>
+    <p style="max-width:660px;font-size:17px" data-rv>Every build the factory produces is treated as contraband until proven otherwise. Eleven independent inspections run in fixed order, each with unilateral authority to stop the line. None of them negotiates, and none of them cares that your demo is tomorrow. If one crashes, that counts as a <b style="color:var(--text)">block</b> — a gate that can't run never waves anything through.</p>
 
     <div class="matrix" role="listbox" aria-label="The eleven gates and the sentinel — select one to read its readout" id="matrix"></div>
 
@@ -428,7 +428,7 @@ footer .col a:hover{color:var(--amber-t)}
         </div>
         <div>
           <h4>The fixer can't cheat</h4>
-          Before the fixer touches anything, the surface it must satisfy is captured. Weaken a policy, delete a check, switch off row-level security to make a finding "go away" — <b>the tamper is detected and the round is voided.</b> Passing by lowering the bar is not passing.
+          Before the fixer touches anything, the surface it must satisfy is captured. Weaken a policy, delete a check, switch off row-level security to make a finding "go away" — <b>the tamper is detected and the round is voided.</b> The bar stays where the spec set it.
         </div>
         <div>
           <h4>Rounds are bounded</h4>
@@ -444,29 +444,29 @@ footer .col a:hover{color:var(--amber-t)}
   <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
     <div class="sechead">
       <p class="lbl">04 / THE PROOF ENGINE</p>
-      <p class="lbl" aria-hidden="true">DELIVERY BAY · KEYS, NOT DEMOS</p>
+      <p class="lbl" aria-hidden="true">DELIVERY BAY · FINAL INSPECTION</p>
     </div>
-    <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>What survives the line <span style="color:var(--amber)">is craftsmanship.</span></h2>
-    <p style="max-width:680px;font-size:17px" data-rv>This is the part of the building where we're allowed to be romantic — because the floor above wasn't. What rolls out of the delivery bay is not another AI demo held together by optimism. It's a <b style="color:var(--text)">bespoke digital asset</b>: engineered to your spec, attacked before any attacker gets the chance, boot-tested until boring, finished to the standard of a firm you couldn't afford. The gates don't make it precious. <b style="color:var(--text)">They make it provable — and proof is what lets you call it craftsmanship with a straight face.</b></p>
+    <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>The finish <span style="color:var(--amber)">comes standard.</span></h2>
+    <p style="max-width:680px;font-size:17px" data-rv>Your application, running. A verdict board carrying eleven signatures. Every finding the gates raised, and the fix that closed each one. Migrations that have already executed on a real database. A boot record with no asterisks. A sentinel signed against this exact build — <b style="color:var(--text)">the deploy accepts no other.</b> Hand the folder to any developer you trust; they can read precisely what was checked and what it survived. Every build leaves the floor this way.</p>
 
     <div class="manifest" data-rv role="list" aria-label="The delivery manifest — receipts every release ships with">
       <div class="ptile" role="listitem"><span class="lbl">Verdict board</span><span class="v">11/11 PASS</span><span class="n">every gate, signed off — or it isn't here</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Boot probes</span><span class="v">N/N HEALTHY</span><span class="n">clean-room build · every run must boot</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Tenant isolation</span><span class="v">0 ROWS LEAKED</span><span class="n">proven live against a real database</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Blocking findings</span><span class="v">0 AT RELEASE</span><span class="n">sast · secrets · CVEs · PII — all clear</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Migrations</span><span class="v">EXECUTED CLEAN</span><span class="n">run on real Postgres, not skimmed as text</span></div>
+      <div class="ptile" role="listitem"><span class="lbl">Migrations</span><span class="v">EXECUTED CLEAN</span><span class="n">already executed on real Postgres</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Dependencies</span><span class="v">PINNED</span><span class="n">no silent upgrades breaking your business</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Features</span><span class="v">N/N PRESENT</span><span class="n">held to the PRD, item by item</span></div>
       <div class="ptile" role="listitem"><span class="lbl">Deploy sentinel</span><span class="v">SIGNED ✓</span><span class="n">HMAC-bound to this exact build</span></div>
     </div>
-    <p class="lbl" style="margin-top:14px">THE DELIVERY MANIFEST — not marketing aggregates. These are the receipts <b>every single release</b> must produce to exist.</p>
+    <p class="lbl" style="margin-top:14px">THE DELIVERY MANIFEST — the receipts <b>every release</b> must produce to exist.</p>
 
     <div class="vs" data-rv aria-label="Consumer generators compared with VibeHard">
       <div class="vshead"><div>Consumer code generators</div><div>VibeHard</div></div>
       <div class="row"><div>Ships when the model stops typing.</div><div>Ships when <b>eleven gates sign</b> — and not one second before.</div></div>
       <div class="row"><div>Security is a suggestion in a prompt.</div><div>Security is <b>a live attack the database has to refuse</b>, two tenants seeded, every table probed.</div></div>
       <div class="row"><div>"Done" means the page rendered.</div><div>"Done" means <b>every promised feature exists in code</b> — checked against the contract you approved.</div></div>
-      <div class="row"><div>Breaks quietly three weeks after launch.</div><div><b>Pinned dependencies, executed migrations, repeated boot proof</b> — built to be handed off, not babysat.</div></div>
+      <div class="row"><div>Breaks quietly three weeks after launch.</div><div><b>Pinned dependencies, executed migrations, repeated boot proof</b> — built to survive the handoff.</div></div>
       <div class="row"><div>The burden of proof lands on you. And you can't read code.</div><div><b>The burden of proof is the product.</b> You get the verdicts, the findings, the signed sentinel.</div></div>
     </div>
 
@@ -548,8 +548,8 @@ footer .col a:hover{color:var(--amber-t)}
   <div class="gridbg" aria-hidden="true"></div>
   <div class="rail pad" style="position:relative;padding-top:clamp(64px,9vh,110px);padding-bottom:clamp(64px,9vh,110px)">
     <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; THE LINE IS ACTIVE</p>
-    <h2 class="disp" style="margin:22px 0 14px;max-width:900px">Your move, <span style="color:var(--amber)">architect.</span></h2>
-    <p style="max-width:560px;font-size:17px;margin-bottom:30px">One sentence. The factory does the rest — and shows you the receipts.</p>
+    <h2 class="disp" style="margin:22px 0 14px;max-width:900px">Your <span style="color:var(--amber)">move.</span></h2>
+    <p style="max-width:560px;font-size:17px;margin-bottom:30px">One sentence. The factory does the rest, receipts included.</p>
     <a class="btn" href="/app" style="padding:18px 34px">Engage ignition ▸</a>
   </div>
 </section>
@@ -698,18 +698,18 @@ footer .col a:hover{color:var(--amber-t)}
 (function(){
   var G=[
     {n:'01',id:'sast',one:'Exploitable patterns, read line by line.',
-     d:'Static analysis of every line of authored source — injection sinks, dangerous constructs, and a purpose-built SQL-injection rule on top of the standard ruleset. It reads the code the machine wrote the way an attacker would, before anyone else gets the chance.',
+     d:'Static analysis of every line of authored source — injection sinks, dangerous constructs, and a purpose-built SQL-injection rule on top of the standard ruleset. It reads the code the machine wrote the way an attacker would.',
      m:['MECHANISM|semgrep · pinned container','SCOPE|authored source only','ON FAIL|BLOCK']},
     {n:'02',id:'secrets',one:'Any committed credential. Zero tolerance.',
      d:'Hunts the build for committed credentials — API keys, tokens, connection strings, passwords. <b>Any leak blocks, regardless of severity.</b> There is no judgment call in this cell; a secret in code is a breach on a timer.',
      m:['MECHANISM|gitleaks · pinned container','TOLERANCE|zero','ON FAIL|BLOCK']},
     {n:'03',id:'depvuln',one:'Known CVEs in every dependency.',
-     d:'Every dependency in the lockfile is checked against the public CVE record. And the fail-closed rule is literal: <b>if the scanner itself cannot run, that is a critical block</b> — a scan that didn’t happen is not a clean scan. Unresolved dependency trees are surfaced, never silently skipped.',
+     d:'Every dependency in the lockfile is checked against the public CVE record. The fail-closed rule is literal: <b>if the scanner itself cannot run, that is a critical block.</b> Unresolved dependency trees are surfaced, never silently skipped.',
      m:['MECHANISM|trivy · pinned container','SCOPE|full lockfile','ON FAIL|BLOCK · scanner down = BLOCK']},
     {n:'04',id:'rls',one:'No table ships without a real policy.',
-     d:'Modeled on the breach that made app generators infamous: 170+ builder-made apps leaking client data through tables with no row-level security (CVE-2025-48757). Every table a migration creates must carry RLS and a policy that isn’t a rubber stamp; every table the app actually queries must be covered. <b>No policy found means block — not benefit of the doubt.</b>',
+     d:'Modeled on the breach that made app generators infamous: 170+ builder-made apps leaking client data through tables with no row-level security (CVE-2025-48757). Every table a migration creates must carry RLS and a policy that isn’t a rubber stamp; every table the app actually queries must be covered. <b>No policy found means block.</b>',
      m:['MECHANISM|static policy + coverage analysis','MODELED ON|CVE-2025-48757','ON FAIL|BLOCK']},
-    {n:'05',id:'migrate',one:'Migrations executed, not reviewed.',
+    {n:'05',id:'migrate',one:'Every migration runs here first.',
      d:'Every other check reads your database migrations as text. This one <b>runs them</b> — against a real embedded Postgres, in about a second, no LLM anywhere. Syntax that would only explode on deploy day explodes here instead, localized to the exact file and the exact database error.',
      m:['MECHANISM|embedded Postgres (pglite) · real DDL apply','RUNTIME|~1s · deterministic','ON FAIL|BLOCK']},
     {n:'06',id:'rls-enforce',one:'Two tenants seeded. The attack is attempted.',
@@ -725,10 +725,10 @@ footer .col a:hover{color:var(--amber-t)}
      d:'The boring failures that kill real handoffs: dependency ranges left unpinned so a silent upgrade breaks a shipped app, a missing README, containers running as root, base images not pinned by digest, TypeScript strict mode off. <b>Blocks at production rigor; warns at prototype</b> — the standard scales with what you told the spec.',
      m:['MECHANISM|install-free file checks','RIGOR|adaptive · from the spec','ON FAIL|BLOCK at production']},
     {n:'10',id:'verify',one:'Built and booted. Every run healthy.',
-     d:'Proof of life. The app is copied to a clean room, built for real, and booted — <b>multiple times, and every single run must come up healthy.</b> One green run proves nothing; flaky is a failure mode, not a footnote. An empty build that “succeeded” without producing artifacts is also a block.',
-     m:['MECHANISM|clean-room build + repeated boot probes','STANDARD|N/N healthy — not 1/N','ON FAIL|BLOCK']},
+     d:'Proof of life. The app is copied to a clean room, built for real, and booted — <b>multiple times, and every single run must come up healthy.</b> One green run proves nothing. An empty build that “succeeded” without producing artifacts is also a block.',
+     m:['MECHANISM|clean-room build + repeated boot probes','STANDARD|N/N healthy · every run','ON FAIL|BLOCK']},
     {n:'11',id:'completeness',one:'Promised features, checked off in code.',
-     d:'Passing every security gate is not the same as being done. Feature by feature, the code is held against the PRD’s contract list — and <b>a promised feature that is entirely missing blocks the release.</b> The next fix round doesn’t shrug; it generates the missing feature. If the reviewer itself goes down, that’s a block too: unverifiable is unshippable.',
+     d:'An app can pass every security gate and still be missing half of what you asked for. Feature by feature, the code is held against the PRD’s contract list — and <b>a promised feature that is entirely missing blocks the release.</b> The next fix round generates it. If the reviewer itself goes down, that’s a block too: unverifiable is unshippable.',
      m:['MECHANISM|per-feature review vs PRD contract','REVIEWER DOWN|fails closed = BLOCK','ON FAIL|BLOCK']},
     {n:'12',id:'the sentinel',s:1,one:'Signed proof. The deploy’s only key.',
      d:'The matrix’s only exit. When every gate passes — and at least one did substantive work, because a board of “not applicable” is not a pass — a cryptographically signed sentinel is written, bound to this exact build in this exact directory. <b>The deploy refuses to run without it.</b> Copy it elsewhere: invalid. Fail a later run: destroyed. A past pass can never ship a present failure.',
