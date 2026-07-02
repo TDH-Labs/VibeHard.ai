@@ -30,14 +30,20 @@ const TIER: Record<Stage, Tier> = {
   procurement: "light",
 };
 
-// Right-fit model per tier, per provider (OpenCode Zen subscription / Anthropic).
+// Right-fit model per tier, per provider (OpenRouter / OpenCode Zen / Anthropic). The openrouter
+// tierset is the SAME model families as opencode's, just under OpenRouter's vendor-prefixed slugs
+// (verified against the live /api/v1/models catalog 2026-07-01) — switching gateways ≠ switching models.
 const MODELS: Record<string, Record<Tier, string>> = {
+  openrouter: { code: "moonshotai/kimi-k2.7-code", reason: "deepseek/deepseek-v4-pro", light: "deepseek/deepseek-v4-flash" },
   opencode: { code: "kimi-k2.7-code", reason: "deepseek-v4-pro", light: "deepseek-v4-flash" },
   anthropic: { code: "claude-opus-4-8", reason: "claude-opus-4-8", light: "claude-haiku-4-5" },
 };
 
 export function providerOf(): string {
-  return process.env.VIBEHARD_PROVIDER || (process.env.OPENCODE_API_KEY ? "opencode" : "anthropic");
+  return (
+    process.env.VIBEHARD_PROVIDER ||
+    (process.env.OPENROUTER_API_KEY ? "openrouter" : process.env.OPENCODE_API_KEY ? "opencode" : "anthropic")
+  );
 }
 
 /** The model for a pipeline stage (override-aware, right-fit default). */

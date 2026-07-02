@@ -73,6 +73,18 @@ export const defaultModelFactory: ModelFactory = (config) => {
         apiKey,
       })(config.model);
     }
+    case "openrouter": {
+      // OpenRouter: same OpenAI-compatible shape, vendor-prefixed model slugs (config/models.ts).
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) {
+        throw new Error("OPENROUTER_API_KEY is not set — required for live generation via openrouter");
+      }
+      return createOpenAICompatible({
+        name: "openrouter",
+        baseURL: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+        apiKey,
+      })(config.model);
+    }
     default:
       // Adding a provider is a one-case change here — the seam above never moves (§13).
       throw new Error(`unsupported engine provider '${config.provider}' (add an adapter in driver.ts)`);
@@ -92,9 +104,13 @@ export function byoModelFactory(creds: { anthropicKey?: string; openaiKey?: stri
         if (!creds.anthropicKey) throw new Error("byoModelFactory: this tenant has no Anthropic key on file");
         return createAnthropic({ apiKey: creds.anthropicKey })(config.model);
       }
-      case "opencode": {
+      case "opencode":
+      case "openrouter": {
         if (!creds.openaiKey) throw new Error("byoModelFactory: this tenant has no OpenAI-compatible key on file");
-        return createOpenAICompatible({ name: "byo", baseURL: creds.openaiBaseURL ?? "https://opencode.ai/zen/go/v1", apiKey: creds.openaiKey })(config.model);
+        // An OpenRouter key (sk-or-…) must hit OpenRouter's endpoint regardless of which gateway
+        // the PLATFORM runs on — a tenant's key knows its own home.
+        const inferred = creds.openaiKey.startsWith("sk-or-") ? "https://openrouter.ai/api/v1" : "https://opencode.ai/zen/go/v1";
+        return createOpenAICompatible({ name: "byo", baseURL: creds.openaiBaseURL ?? inferred, apiKey: creds.openaiKey })(config.model);
       }
       default:
         throw new Error(`byoModelFactory: unsupported provider '${config.provider}'`);
