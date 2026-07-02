@@ -18,6 +18,7 @@ import type { Finding, GateVerdict } from "../types.ts";
 import { notApplicable, verdictOf } from "../types.ts";
 import type { SensitiveClass } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
+import { classificationMismatch, detectSensitiveSignals } from "./sensitive-signals.ts";
 
 const DERIVED = new Set<string>(DERIVED_DIRS);
 const SENSITIVE: readonly SensitiveClass[] = ["pii", "phi", "financial", "credentials"];
@@ -96,9 +97,16 @@ function walkCode(root: string, exts: string[]): Array<{ rel: string; code: stri
   return out;
 }
 
-/** Run the PII-leak assessment. Non-sensitive app (or no spec) → PASS (no-op). */
+/** Run the PII-leak assessment. Classification-driven, but the classification is FALSIFIABLE
+ *  (D-1, SECURITY_AUDIT_4): a "none" declaration is cross-checked against the code's own data
+ *  model; a contradiction runs the leak scan anyway and blocks on the mismatch itself. A
+ *  genuinely non-sensitive app (claim corroborated by the scan) keeps the fast N/A. */
 export async function runPii(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
-  if (!isSensitiveApp(projectPath)) return notApplicable("pii", ranAt);
+  if (!isSensitiveApp(projectPath)) {
+    const signals = detectSensitiveSignals(projectPath);
+    if (signals.length === 0) return notApplicable("pii", ranAt);
+    return verdictOf("pii", [classificationMismatch("pii", signals), ...scanPii(walkCode(projectPath, [".ts", ".tsx", ".js", ".jsx", ".py"]))], ranAt);
+  }
   return verdictOf("pii", scanPii(walkCode(projectPath, [".ts", ".tsx", ".js", ".jsx", ".py"])), ranAt);
 }
 

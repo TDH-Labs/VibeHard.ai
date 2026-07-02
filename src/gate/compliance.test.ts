@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assessCompliance, detectDeletePath, type ComplianceInput } from "./compliance.ts";
+import { assessCompliance, detectDeletePath, runCompliance, type ComplianceInput } from "./compliance.ts";
 import { isBlocking, verdictOf } from "../types.ts";
 
 function input(over: Partial<ComplianceInput> = {}): ComplianceInput {
@@ -81,6 +81,65 @@ describe("assessCompliance — §21 seven controls (verifiable BLOCK, judgment a
     expect(phi.message).toMatch(/Privacy/);
     const fin = assessCompliance(input({ sensitiveClasses: ["financial"] })).find((f) => f.ruleId === "compliance-applicability")!;
     expect(fin.message).toMatch(/Processing Integrity/);
+  });
+});
+
+describe("runCompliance — D-1 (SECURITY_AUDIT_4): the classification is falsifiable", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const app = (files: Record<string, string>, spec?: object): string => {
+    const d = mkdtempSync(join(tmpdir(), "dd-d1-"));
+    dirs.push(d);
+    if (spec !== undefined) {
+      mkdirSync(join(d, ".vibehard"), { recursive: true });
+      writeFileSync(join(d, ".vibehard", "spec.json"), JSON.stringify(spec));
+    }
+    for (const [name, content] of Object.entries(files)) {
+      mkdirSync(join(d, name, ".."), { recursive: true });
+      writeFileSync(join(d, name), content);
+    }
+    return d;
+  };
+
+  test("spec says 'none' but the schema stores SSNs → gate RUNS and BLOCKS with classification-mismatch", async () => {
+    const d = app(
+      { "supabase/migrations/001.sql": "create table clients (id uuid, ssn text);" },
+      { name: "x", sensitiveData: ["none"], dataEntities: [], auth: "none" },
+    );
+    const v = await runCompliance(d, "t");
+    expect(v.status).toBe("block");
+    const ids = v.findings.map((f) => f.ruleId);
+    expect(ids).toContain("classification-mismatch");
+    expect(ids).toContain("unauthenticated-sensitive-data"); // full assessment ran on the inferred class
+  });
+
+  test("NO spec at all + sensitive code → same rescue (the no-front-half hole is closed)", async () => {
+    const d = app({ "src/records.ts": "interface Visit { diagnosis: string }" });
+    const v = await runCompliance(d, "t");
+    expect(v.status).toBe("block");
+    expect(v.findings.map((f) => f.ruleId)).toContain("classification-mismatch");
+  });
+
+  test("spec says 'none' and the code corroborates it → fast N/A preserved (no false blocks)", async () => {
+    const d = app(
+      { "supabase/migrations/001.sql": "create table todos (id uuid, title text);", "src/app.ts": "export const x = 1;" },
+      { name: "x", sensitiveData: ["none"], dataEntities: [] },
+    );
+    const v = await runCompliance(d, "t");
+    expect(v.status).toBe("n/a");
+    expect(v.blocking).toBe(0);
+  });
+
+  test("an HONEST declaration is unaffected: declared pii still assesses exactly as before", async () => {
+    const d = app(
+      { "supabase/migrations/001.sql": "create table clients (id uuid, ssn text);", "src/api.ts": "await db.from('clients').delete().eq('id', id);" },
+      { name: "x", sensitiveData: ["pii"], auth: "password", storesData: true },
+    );
+    const v = await runCompliance(d, "t");
+    expect(v.findings.map((f) => f.ruleId)).not.toContain("classification-mismatch");
+    expect(v.status).toBe("pass"); // auth + delete path present → advisories only
   });
 });
 

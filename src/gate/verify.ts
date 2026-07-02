@@ -21,7 +21,7 @@
  * `synthEnv`) are separated from the I/O (spawning node/npm) and unit-tested; the
  * launches are integration-tested.
  */
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
@@ -391,6 +391,56 @@ async function runBuild(projectPath: string, script: string): Promise<BuildOutco
   };
 }
 
+/** Conventional build-output dirs. Deliberately NOT DERIVED_DIRS: those are dirs the code
+ *  scanners must ignore — here they're exactly the artifacts we're looking FOR. */
+const ARTIFACT_DIRS = ["dist", "build", "out", ".next", "_site", "public/build"];
+
+/** SECURITY_AUDIT_4 (noted alongside D-1): `npm run build` exiting 0 used to fully satisfy the
+ *  build-verify path — a `"build": "true"` script shipped an app with nothing deployable. An
+ *  exit-0 build must also leave EVIDENCE: either a conventional output dir with content, or at
+ *  least one file written since the build started (covers custom outDirs; the mtime clause alone
+ *  would false-block cached no-op rebuilds, which the output-dir clause rescues). Returns a
+ *  blocking finding when neither exists, else null. */
+export function summarizeBuildArtifacts(projectPath: string, buildStartedMs: number): Finding | null {
+  for (const d of ARTIFACT_DIRS) {
+    try {
+      const dir = join(projectPath, d);
+      if (statSync(dir).isDirectory() && readdirSync(dir).length > 0) return null;
+    } catch {
+      /* dir absent — try the next */
+    }
+  }
+  const newer = (dir: string, depth: number): boolean => {
+    if (depth > 6) return false;
+    try {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name === ".git") continue;
+        const p = join(dir, e.name);
+        try {
+          if (e.isDirectory()) {
+            if (newer(p, depth + 1)) return true;
+          } else if (statSync(p).mtimeMs >= buildStartedMs) return true;
+        } catch {
+          /* race/unreadable → skip */
+        }
+      }
+    } catch {
+      /* unreadable dir → skip */
+    }
+    return false;
+  };
+  if (newer(projectPath, 0)) return null;
+  return {
+    tool: "verify",
+    ruleId: "build-no-artifacts",
+    severity: "high",
+    file: "package.json",
+    message:
+      "`npm run build` exited 0 but produced no build output — no dist/build/out/.next directory and no file written during the build. " +
+      "An exit code alone doesn't prove a deployable artifact; the build script may be a no-op.",
+  };
+}
+
 /** Read the rigor the front-half persisted (.vibehard/spec.json). Null → unknown
  *  (default rigor — 3 runs, no heavy clean-env check). */
 function readRigor(projectPath: string): Rigor | null {
@@ -663,7 +713,13 @@ export async function runVerify(
   }
 
   if (plan.kind === "build") {
-    findings.push(...summarizeBuild(await runBuild(projectPath, plan.script), projectPath));
+    const startedMs = Date.now();
+    const outcome = await runBuild(projectPath, plan.script);
+    findings.push(...summarizeBuild(outcome, projectPath));
+    if (outcome.exitCode === 0) {
+      const noArtifacts = summarizeBuildArtifacts(projectPath, startedMs);
+      if (noArtifacts) findings.push(noArtifacts);
+    }
     return verdictOf("verify", findings, ranAt);
   }
 
@@ -703,6 +759,13 @@ export const verifyGate = { name: "verify", run: (p: string) => runVerify(p) };
 export async function runVerifyFast(projectPath: string, ranAt: string = new Date().toISOString()): Promise<GateVerdict> {
   const pkg = readPkg(projectPath);
   if (!pkg?.scripts?.build) return runVerify(projectPath, ranAt);
-  return verdictOf("verify", summarizeBuild(await runBuild(projectPath, "build"), projectPath), ranAt);
+  const startedMs = Date.now();
+  const outcome = await runBuild(projectPath, "build");
+  const findings = summarizeBuild(outcome, projectPath);
+  if (outcome.exitCode === 0) {
+    const noArtifacts = summarizeBuildArtifacts(projectPath, startedMs);
+    if (noArtifacts) findings.push(noArtifacts);
+  }
+  return verdictOf("verify", findings, ranAt);
 }
 export const fastVerifyGate = { name: "verify", run: (p: string) => runVerifyFast(p) };

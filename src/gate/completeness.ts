@@ -9,7 +9,10 @@
  * finding is actionable, so the auto-fix loop's next pass GENERATES the missing feature (wired to
  * the schema, which planning already produced). Only `missing` blocks (the clearest signal); a
  * `partial` feature is surfaced but doesn't block (an LLM's "partial" judgment is too subjective
- * to gate a deploy on). No spec / no features / reviewer unavailable → not applicable, no block.
+ * to gate a deploy on). No spec / no features → not applicable, no block. A reviewer that THROWS
+ * (model outage, exhausted credits) fails CLOSED with a blocking `completeness-unverified`
+ * finding — an unverifiable app must not ship on silence (SECURITY_AUDIT_4 doc fix: this
+ * docstring previously claimed the opposite of what the catch block does).
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

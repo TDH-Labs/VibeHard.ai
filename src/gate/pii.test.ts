@@ -77,3 +77,19 @@ describe("runPii — classification-driven", () => {
     expect(v.status).toBe("pass");
   });
 });
+
+describe("runPii — D-1 (SECURITY_AUDIT_4): a 'none' declaration is falsifiable", () => {
+  test("spec says 'none' but the code stores diagnoses → gate RUNS: mismatch blocks + leaks still caught", async () => {
+    const dir = appDir(false, "interface Visit { diagnosis: string }\nconsole.log(visit.diagnosis)");
+    const v = await runPii(dir, "t");
+    expect(v.status).toBe("block");
+    const ids = v.findings.map((f) => f.ruleId);
+    expect(ids).toContain("classification-mismatch"); // the false claim itself
+    expect(ids).toContain("pii-in-logs"); // and the leak scan ran anyway
+  });
+
+  test("spec says 'none' and the code corroborates it → N/A preserved (email alone is not a signal)", async () => {
+    const v = await runPii(appDir(false, "console.log(user.email)"), "t");
+    expect(v.status).toBe("n/a");
+  });
+});
