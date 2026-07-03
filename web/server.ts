@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
+import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { decideRigor, llmInterviewer, llmIntake, reviewSpec, type InterviewTurn } from "../src/spec/index.ts";
 import { isBlocking } from "../src/types.ts";
 import { byoModelFactory } from "../src/engine/bolt/driver.ts";
@@ -93,6 +94,11 @@ const { platform, db: platformDb } = await Platform.open({ baseDir: ROOT, billin
 // this can be unconditional, same as `platform` itself (FileBuildProgressStore, the local-only
 // fallback, stays available in build-store.ts for callers that don't go through Platform.open).
 const buildStore: BuildProgressStore = new PgBuildProgressStore(platformDb.sql);
+// EPIC #33 (second 2026-07-03 gap): the email → tenantId identity map ALSO lived in a local
+// users.json — the builds survived a restart in Postgres but the pointer to them didn't, so the
+// auth seam minted returning users a fresh tenant and everything they owned looked gone. Identity
+// now rides the same durable sql; any surviving legacy file is imported once at boot (Pg wins).
+const userStore = new PgUserStore(platformDb.sql);
 const seenBillingEvents = new Set<string>(); // processed Stripe event ids → drop replays (idempotency)
 
 // ── tiny encrypted store for the per-tenant LLM key (AES-256-GCM) ───────────────
@@ -180,22 +186,10 @@ async function sweepStaleRunning(): Promise<void> {
   }
 }
 
-// ── users (email → {tenantId, name, hash}) ──────────────────────────────────────
-type User = { tenantId: string; name: string; hash: string };
-function users(): Record<string, User> {
-  if (!existsSync(USERS)) return {};
-  try {
-    return JSON.parse(readFileSync(USERS, "utf8")) as Record<string, User>;
-  } catch {
-    return {};
-  }
-}
-function putUser(email: string, u: User): void {
-  mkdirSync(WEB, { recursive: true });
-  const all = users();
-  all[email] = u;
-  writeFileSync(USERS, JSON.stringify(all, null, 2));
-}
+// ── users (email → {tenantId, name, hash}) — durable via userStore (platform_users) ────────────
+// The record shape lives in user-store.ts; USERS (the legacy users.json path) is kept only as the
+// one-time boot-import source below.
+type User = UserRecord;
 
 // ── sessions (in-memory; fine for a local single-process alpha) ─────────────────
 // audit2 C-6: sessions now EXPIRE (TTL). An in-memory Map with no expiry meant a token was valid
@@ -221,9 +215,9 @@ function sessionEmail(token: string | null): string | null {
   }
   return s.email;
 }
-function userOf(req: Request): { email: string; user: User } | null {
+async function userOf(req: Request): Promise<{ email: string; user: User } | null> {
   const email = sessionEmail(cookieOf(req));
-  const u = email ? users()[email] : null;
+  const u = email ? await userStore.get(email) : null;
   return email && u ? { email, user: u } : null;
 }
 // audit2 C-6: simple per-account login throttle (in-memory; alpha single-process).
@@ -307,10 +301,10 @@ async function authenticate(req: Request): Promise<{ email: string; user: User }
         if (email) clerkEmailCache.set(id, email);
         return email;
       },
-      findTenantByEmail: (email) => users()[email]?.tenantId ?? null,
+      findTenantByEmail: async (email) => (await userStore.get(email))?.tenantId ?? null,
       createTenant: async (email, name, id) => {
         const t = await platform.signUp(name);
-        putUser(email, { tenantId: t.id, name, hash: `clerk:${id}` }); // hash marks a Clerk-owned account (no password)
+        await userStore.put(email, { tenantId: t.id, name, hash: `clerk:${id}` }); // hash marks a Clerk-owned account (no password)
         return t.id;
       },
       getName: async (id) => {
@@ -319,7 +313,7 @@ async function authenticate(req: Request): Promise<{ email: string; user: User }
       },
     });
     if (!resolved) return null;
-    const user = users()[resolved.email];
+    const user = await userStore.get(resolved.email);
     return user ? { email: resolved.email, user } : null;
   } catch {
     return null; // a failed/forged session → unauthenticated, fail-closed, never a crash
@@ -358,10 +352,10 @@ const startSession = (email: string): string => setSession(email); // TTL-backed
  *  control of the provider identity, not of the local password account). Same-email OAuth accounts are
  *  fine (the verified email is the same person across providers). */
 async function ensureUser(email: string, name: string, provider: string): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const existing = users()[email];
+  const existing = await userStore.get(email);
   if (!existing) {
     const tenant = await platform.signUp(name || email.split("@")[0]!);
-    putUser(email, { tenantId: tenant.id, name: name || email, hash: `oauth:${provider}` });
+    await userStore.put(email, { tenantId: tenant.id, name: name || email, hash: `oauth:${provider}` });
     return { ok: true };
   }
   if (existing.hash.startsWith("oauth:")) return { ok: true }; // already an OAuth account → sign in
@@ -559,9 +553,9 @@ const server = Bun.serve({
     if (path === "/api/signup" && req.method === "POST") {
       const { email, password, name } = (await req.json()) as { email?: string; password?: string; name?: string };
       if (!email || !password || password.length < 8) return json({ error: "email and an 8+ char password are required" }, 400);
-      if (users()[email]) return json({ error: "an account with that email already exists" }, 409);
+      if (await userStore.get(email)) return json({ error: "an account with that email already exists" }, 409);
       const tenant = await platform.signUp(name || email.split("@")[0]!);
-      putUser(email, { tenantId: tenant.id, name: name || email, hash: await Bun.password.hash(password) });
+      await userStore.put(email, { tenantId: tenant.id, name: name || email, hash: await Bun.password.hash(password) });
       const token = setSession(email);
       return json({ ok: true, tenantId: tenant.id }, 200, { "set-cookie": `vh=${token}; Path=/; HttpOnly; SameSite=Lax` });
     }
@@ -571,7 +565,7 @@ const server = Bun.serve({
       const key = (email ?? "").toLowerCase().trim();
       // audit2 C-6: throttle password guessing per account (in-memory; alpha single-process).
       if (key && loginThrottled(key)) return json({ error: "too many attempts — wait a few minutes and try again" }, 429);
-      const u = email ? users()[email] : null;
+      const u = email ? await userStore.get(email) : null;
       // OAuth accounts have no password (hash is `oauth:<provider>`) — never let password-verify pass on them.
       const ok = !!u && !!email && !!password && !u.hash.startsWith("oauth:") && (await Bun.password.verify(password, u.hash));
       if (!ok) {
@@ -585,7 +579,7 @@ const server = Bun.serve({
 
     if (path === "/api/forgot" && req.method === "POST") {
       const { email } = (await req.json()) as { email?: string };
-      const u = email ? users()[email] : null;
+      const u = email ? await userStore.get(email) : null;
       let devLink: string | undefined;
       // Only email/password accounts can reset (OAuth accounts have no password to set).
       if (u && email && !u.hash.startsWith("oauth:")) {
@@ -607,10 +601,10 @@ const server = Bun.serve({
       const entry = token ? resetTokens.get(token) : null;
       if (!entry || entry.expires < Date.now()) return json({ error: "this reset link is invalid or has expired — request a new one" }, 400);
       if (!password || password.length < 8) return json({ error: "the new password must be at least 8 characters" }, 400);
-      const u = users()[entry.email];
+      const u = await userStore.get(entry.email);
       if (!u) return json({ error: "that account no longer exists" }, 400);
       u.hash = await Bun.password.hash(password);
-      putUser(entry.email, u);
+      await userStore.put(entry.email, u);
       resetTokens.delete(token);
       return json({ ok: true });
     }
@@ -1060,6 +1054,9 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
 }
 
 await sweepStaleRunning(); // resolve any builds left "running" by a previous server stop
+// One-time import of a surviving legacy users.json into the durable store (Pg rows always win).
+const importedUsers = await migrateLegacyUsersFile(userStore, USERS);
+if (importedUsers) console.log(`  imported ${importedUsers} account(s) from legacy users.json into platform_users`);
 console.log(`\n  VibeHard alpha → http://localhost:${server.port}\n  (sign up, add your LLM key, describe an app — the real pipeline runs)\n`);
 
 // Close the durable-DB connection cleanly on shutdown (container stop/redeploy sends SIGTERM).

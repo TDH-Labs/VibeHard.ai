@@ -47,8 +47,9 @@ export function frontendApiFromPublishableKey(pk: string): string | null {
 export interface ClerkTenantDeps {
   /** the Clerk user's primary email (caller fetches via clerkClient.users.getUser, cached) */
   getEmail: (userId: string) => Promise<string | null>;
-  /** existing local account for this email, or null */
-  findTenantByEmail: (email: string) => string | null;
+  /** existing local account for this email, or null (the durable user store is async, so this
+   *  may return a promise) */
+  findTenantByEmail: (email: string) => string | null | Promise<string | null>;
   /** create a local tenant+user for a first-seen Clerk user; returns the new tenantId (durable
    *  tenant creation is async, so this may return a promise) */
   createTenant: (email: string, name: string, userId: string) => string | Promise<string>;
@@ -64,7 +65,7 @@ export interface ClerkTenantDeps {
 export async function resolveTenantForClerkUser(userId: string, deps: ClerkTenantDeps): Promise<{ email: string; tenantId: string } | null> {
   const email = (await deps.getEmail(userId))?.trim().toLowerCase();
   if (!email) return null;
-  const existing = deps.findTenantByEmail(email);
+  const existing = await deps.findTenantByEmail(email);
   if (existing) return { email, tenantId: existing };
   const name = (await deps.getName?.(userId))?.trim() || email.split("@")[0]!;
   return { email, tenantId: await deps.createTenant(email, name, userId) };

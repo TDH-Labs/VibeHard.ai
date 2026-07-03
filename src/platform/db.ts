@@ -13,6 +13,7 @@ import { join } from "node:path";
 import postgres from "postgres";
 import { ensurePlatformSchema, ensureSubstrateSchema, pgliteSql, type Sql } from "./pg-store.ts";
 import { ensureBuildSchema } from "./build-store.ts";
+import { ensureUserSchema } from "./user-store.ts";
 
 export interface Db {
   sql: Sql;
@@ -32,6 +33,7 @@ async function ensureAllSchema(sql: Sql): Promise<void> {
   await ensurePlatformSchema(sql);
   await ensureSubstrateSchema(sql);
   await ensureBuildSchema(sql);
+  await ensureUserSchema(sql);
 }
 
 /**
