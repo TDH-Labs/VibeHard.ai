@@ -6,92 +6,125 @@
 <title>VibeHard — build</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0b0d0c;--bg2:#0e1110;--bg3:#121614;--surface:#141816;--text:#eef0ec;--text2:#cfd4ce;--muted:#98a09a;--dim:#6b736d;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.13);--teal:#2bd29b;--teal-ink:#06231a;--red:#ff6b6b;--amber:#f0b04a}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+/* ── tokens (web/landing/DESIGN.md §1) ───────────────────────────────────── */
+:root{
+  --k:#000000; --carbon:#0D0D0E; --raised:#141416;
+  --line:#2D2D2D; --line-dim:#1C1C1E;
+  --amber:#FFB000; --amber-t:#FFD98A; --amber-dim:#7A5200;
+  --red:#FF4D42;
+  --text:#E8E6E1; --text2:#A8A49C; --muted:#A8A49C; --dim:#6E6B64;
+  /* legacy aliases — anything still referencing the old names resolves into the new system */
+  --bg:#000000; --bg2:#0D0D0E; --bg3:#141416; --surface:#0D0D0E;
+  --teal:#FFB000; --teal-ink:#000000; --line2:#2D2D2D;
+}
+*{box-sizing:border-box;margin:0;padding:0;border-radius:0}
+body{background:var(--k);color:var(--text);font-family:'Archivo',sans-serif;font-stretch:100%;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--amber);color:#000}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);
+  background-size:72px 72px;opacity:.45}
+body::after{content:"";position:fixed;inset:-100px;pointer-events:none;z-index:2000;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
+  animation:grain .9s steps(3) infinite}
+@keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-40px,25px)}66%{transform:translate(30px,-35px)}100%{transform:translate(0,0)}}
+@media(prefers-reduced-motion:reduce){body::after{animation:none}}
 @keyframes vh-spin{to{transform:rotate(360deg)}}
 @keyframes vh-rise{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}
-a{color:var(--teal)}
-h1{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:40px;line-height:1.05;letter-spacing:-.03em}
-h2{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:19px;letter-spacing:-.01em;margin-bottom:4px}
+@media(prefers-reduced-motion:reduce){.card{animation:none!important}}
+a{color:var(--amber-t);text-decoration:none}
+:focus-visible{outline:1px solid var(--amber);outline-offset:3px}
+.disp{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.94}
+h1{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.96;font-size:clamp(32px,4.6vw,52px)}
+h2{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:8px}
 .mono{font-family:'JetBrains Mono',monospace}
-.eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+.lbl{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.led{display:inline-block;width:8px;height:8px;background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8);animation:led 2.2s steps(2) infinite;vertical-align:middle}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+@media(prefers-reduced-motion:reduce){.led{animation:none}}
 .muted{color:var(--muted)}
-nav{display:flex;align-items:center;justify-content:space-between;max-width:1140px;margin:0 auto;padding:22px 32px}
-.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text)}
-.brand span{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:20px;letter-spacing:-.01em}
-.navlinks{display:flex;align-items:center;gap:26px}
-.navlinks a{color:var(--muted);text-decoration:none;font-size:15px}
-.wrap{max-width:680px;margin:0 auto;padding:0 32px 80px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:26px;margin-bottom:18px;animation:vh-rise .4s ease both}
-label{display:block;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 7px}
-input,textarea{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:11px;color:var(--text);font:inherit;font-size:15px;padding:13px 15px}
-input:focus,textarea:focus{outline:none;border-color:var(--teal)}
-textarea{resize:vertical;min-height:90px;line-height:1.5}
-button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;background:var(--teal);color:var(--teal-ink);font:inherit;font-weight:600;font-size:15px;border:none;border-radius:999px;padding:12px 22px;cursor:pointer;text-decoration:none}
+nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.navin{max-width:1140px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:64px}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--text)}
+.brand .cube{width:14px;height:14px;background:var(--amber);flex:none}
+.brand span:last-child{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:18px;letter-spacing:.01em;text-transform:uppercase}
+.navlinks{display:flex;align-items:center;gap:22px}
+.navlinks a{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--text2);text-decoration:none}
+.navlinks a:hover{color:var(--amber-t)}
+.wrap{max-width:680px;margin:0 auto;padding:0 32px 80px;position:relative;z-index:1}
+.card{background:var(--carbon);border:1px solid var(--line);padding:26px;margin-bottom:18px;animation:vh-rise .4s linear both}
+label{display:block;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:14px 0 7px}
+input,textarea{width:100%;background:var(--k);border:1px solid var(--line);color:var(--text);font:inherit;font-size:15px;padding:13px 15px}
+input:focus,textarea:focus{outline:none;border-color:var(--amber)}
+textarea{resize:vertical;min-height:90px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--amber);padding:13px 22px;cursor:pointer;text-decoration:none;transition:background 80ms linear}
+button:hover,.btn:hover{background:var(--amber-t)}
 button:disabled{opacity:.5;cursor:default}
+button.ghost,.btn.ghost{background:transparent;color:var(--text2);border:1px solid var(--line)}
+button.ghost:hover,.btn.ghost:hover{background:transparent;border-color:var(--amber);color:var(--amber-t)}
 .oauth{display:flex;flex-direction:column;gap:10px}
-.oauth a{display:flex;align-items:center;justify-content:center;gap:11px;background:var(--bg3);border:1px solid var(--line2);color:var(--text);font-weight:500;font-size:15px;border-radius:999px;padding:12px 18px;text-decoration:none}
-.oauth a:hover{border-color:var(--teal)}
-.divider{display:flex;align-items:center;gap:14px;margin:20px 0;color:var(--dim);font-size:13px}
-.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.oauth a{display:flex;align-items:center;justify-content:center;gap:11px;background:var(--raised);border:1px solid var(--line);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;padding:12px 18px;text-decoration:none}
+.oauth a:hover{border-color:var(--amber)}
+.divider{display:flex;align-items:center;gap:14px;margin:20px 0;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line-dim)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .err{color:var(--red);font-size:14px;margin-top:10px;min-height:18px}
 .stages{display:flex;flex-direction:column;gap:1px}
 .stage{display:flex;align-items:center;gap:12px;padding:8px 0;font-size:14.5px;color:var(--dim);transition:color .25s}
 .stage .ico{width:20px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--dim)}
 .stage.active{color:var(--text);font-weight:600}
-.stage.active .ico,.stage.done .ico{color:var(--teal)}
+.stage.active .ico,.stage.done .ico{color:var(--amber)}
 .stage.done{color:var(--text2)}
-.sp{width:14px;height:14px;border:2px solid var(--teal);border-right-color:transparent;border-radius:50%;animation:vh-spin .8s linear infinite;display:inline-block}
-.elapsed{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--teal)}
-.pill{display:inline-flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal);background:rgba(43,210,155,.10);border:1px solid rgba(43,210,155,.28);padding:5px 12px;border-radius:999px}
-.console{background:#070908;border:1px solid var(--line);border-radius:13px;padding:15px 17px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.75;max-height:360px;overflow:auto;white-space:pre-wrap;color:#bcc4be;display:none;margin-top:15px}
-.console .step{color:var(--teal);font-weight:600;margin-top:10px;display:flex;align-items:center;gap:8px}
-.console .step::before{content:"";width:9px;height:9px;border:2px solid var(--teal);border-right-color:transparent;border-radius:50%;display:inline-block;animation:vh-spin .8s linear infinite}
+.sp{width:14px;height:14px;border:2px solid var(--amber);border-right-color:transparent;border-radius:50%;animation:vh-spin .8s linear infinite;display:inline-block}
+.elapsed{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber)}
+.pill{display:inline-flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);background:rgba(255,176,0,.08);border:1px solid rgba(255,176,0,.35);padding:5px 12px}
+.console{background:var(--k);border:1px solid var(--line);padding:15px 17px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.75;max-height:360px;overflow:auto;white-space:pre-wrap;color:var(--text2);display:none;margin-top:15px}
+.console .step{color:var(--amber);font-weight:700;margin-top:10px;display:flex;align-items:center;gap:8px}
+.console .step::before{content:"";width:9px;height:9px;border:2px solid var(--amber);border-right-color:transparent;border-radius:50%;display:inline-block;animation:vh-spin .8s linear infinite}
 .console .step.done::before{animation:none;border:none;content:"✓"}
 .console .bad{color:var(--red)}
-.result{display:none;margin-top:15px;border-radius:13px;padding:18px 20px}
-.result.live{background:rgba(43,210,155,.10);border:1px solid rgba(43,210,155,.4)}
-.result.held{background:rgba(240,176,74,.09);border:1px solid rgba(240,176,74,.4)}
-.result h3{font-family:'Space Grotesk',sans-serif;font-size:17px;margin-bottom:5px}
+.result{display:none;margin-top:15px;padding:18px 20px}
+.result.live{background:rgba(255,176,0,.07);border:1px solid var(--amber)}
+.result.held{background:rgba(255,176,0,.05);border:1px solid var(--amber-dim)}
+.result h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:15px;letter-spacing:.01em;margin-bottom:5px}
 .hide{display:none}
-.builds .b{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid var(--line);font-size:14px}
+.builds .b{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid var(--line-dim);font-size:14px}
 .tabs{display:flex;gap:20px;margin-bottom:6px}
-.tabs a{color:var(--muted);text-decoration:none;font-size:15px;cursor:pointer;padding-bottom:6px;border-bottom:2px solid transparent}
-.tabs a.on{color:var(--text);font-weight:600;border-bottom-color:var(--teal)}
-.banner{background:rgba(240,176,74,.09);border:1px solid rgba(240,176,74,.32);color:var(--amber);border-radius:11px;padding:11px 15px;font-size:13px;margin-bottom:18px}
-.glow{position:fixed;top:-120px;left:50%;transform:translateX(-50%);width:760px;height:460px;background:radial-gradient(ellipse at center,rgba(43,210,155,.13),transparent 68%);pointer-events:none;z-index:0}
+.tabs a{color:var(--muted);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;padding-bottom:6px;border-bottom:2px solid transparent}
+.tabs a.on{color:var(--text);font-weight:700;border-bottom-color:var(--amber)}
+.banner{background:rgba(255,176,0,.07);border:1px solid rgba(255,176,0,.35);color:var(--amber-t);padding:11px 15px;font-size:13px;margin-bottom:18px}
+summary.adv{cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);padding:6px 2px;user-select:none}
+summary.adv:hover{color:var(--text2)}
 .content{position:relative;z-index:1}
 </style>
 </head>
 <body>
-<div class="glow"></div>
 <div class="content">
 <nav>
-  <a class="brand" href="/">
-    <svg width="24" height="26" viewBox="0 0 26 28" aria-hidden="true" style="filter:drop-shadow(0 3px 5px rgba(0,0,0,.3))"><polygon points="13,3 23,8.5 13,14 3,8.5" fill="#34dba1"/><polygon points="3,8.5 13,14 13,25 3,19.5" fill="#15936f"/><polygon points="23,8.5 13,14 13,25 23,19.5" fill="#0c6e52"/></svg>
-    <span>VibeHard</span>
-  </a>
-  <div class="navlinks" id="who"><a href="/trust.html">What we check</a><a href="/trust.html">Trust &amp; security</a></div>
+  <div class="navin">
+    <a class="brand" href="/">
+      <span class="cube" aria-hidden="true"></span>
+      <span>VibeHard</span>
+    </a>
+    <div class="navlinks" id="who"><a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust</a></div>
+  </div>
 </nav>
 
 <div class="wrap">
 
   <!-- AUTH -->
   <div id="auth" class="hide">
-    <div style="text-align:center;margin:36px 0 26px">
-      <div class="eyebrow">Start building</div>
-      <h1 style="margin-top:12px">Build something real.</h1>
-      <p class="muted" style="font-size:17px;margin-top:10px">Sign in to describe an app and watch the full pipeline run.</p>
+    <div style="text-align:center;margin:44px 0 28px">
+      <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; SIGN IN</p>
+      <h1 style="margin-top:16px">Start <span style="color:var(--amber)">a build.</span></h1>
+      <p class="muted" style="font-size:16px;margin-top:12px;max-width:440px;margin-left:auto;margin-right:auto">Describe the app you need and watch the line run — spec, code, eleven gates, live.</p>
     </div>
     <div class="card" id="card-auth" style="max-width:420px;margin:0 auto">
       <div id="banner" class="banner hide"></div>
       <div class="oauth">
         <a href="/auth/google"><svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.02-3.7H.96v2.34A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.98 10.72a5.4 5.4 0 0 1 0-3.44V4.94H.96a9 9 0 0 0 0 8.12l3.02-2.34z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58A9 9 0 0 0 9 0 9 9 0 0 0 .96 4.94l3.02 2.34C4.68 5.16 6.66 3.58 9 3.58z"/></svg>Continue with Google</a>
-        <a href="/auth/github"><svg width="18" height="18" viewBox="0 0 16 16" fill="#eef0ec"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Continue with GitHub</a>
+        <a href="/auth/github"><svg width="18" height="18" viewBox="0 0 16 16" fill="#E8E6E1"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Continue with GitHub</a>
       </div>
       <div class="divider">or with email</div>
       <div class="tabs"><a id="tab-login" class="on">Log in</a><a id="tab-signup">Sign up</a></div>
@@ -125,23 +158,23 @@ button:disabled{opacity:.5;cursor:default}
 
   <!-- DASHBOARD -->
   <div id="dash" class="hide">
-    <div style="margin:30px 0 24px">
-      <div class="eyebrow">Your workspace</div>
-      <h1 style="margin-top:12px">Build something real.</h1>
-      <p class="muted" style="font-size:17px;margin-top:10px">Describe the app your business needs. We write the spec, build it, run all eleven security gates, and put it live — with its own private, secured database. Nothing to configure.</p>
+    <div style="margin:38px 0 26px">
+      <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; BUILD FLOOR</p>
+      <h1 style="margin-top:16px">Describe it <span style="color:var(--amber)">once.</span></h1>
+      <p class="muted" style="font-size:16px;margin-top:12px;max-width:560px">The app your business needs, the way you'd say it out loud. We write the spec, build it, run all eleven gates, and put it live — with its own private database. Nothing to configure.</p>
     </div>
 
     <div class="card">
-      <h2>Describe your app</h2>
-      <div id="resume-banner" class="hide" style="background:rgba(43,210,155,.08);border:1px solid rgba(43,210,155,.3);border-radius:11px;padding:12px 15px;margin:10px 0 0;font-size:14px;line-height:1.5"></div>
+      <h2>Intake // build order</h2>
+      <div id="resume-banner" class="hide" style="background:rgba(255,176,0,.07);border:1px solid rgba(255,176,0,.35);padding:12px 15px;margin:10px 0 0;font-size:14px;line-height:1.5"></div>
       <textarea id="prompt" placeholder="A client portal where each client signs in and sees only their own files and invoices…"></textarea>
-      <div style="margin-top:14px"><div class="muted" style="font-size:12.5px;margin-bottom:7px">Look &amp; feel</div><div id="design" class="row" style="flex-wrap:wrap;gap:8px"></div></div>
-      <div class="row" style="margin-top:14px"><button id="buildbtn">Build it →</button><button id="stopbtn" class="hide" style="background:transparent;border:1px solid var(--line2);color:var(--muted)">⏸ Stop</button><span class="muted" id="buildhint" style="font-size:13px"></span></div>
-      <div id="questions" class="hide" style="margin-top:16px;background:var(--bg2);border:1px solid var(--line2);border-radius:12px;padding:16px 18px">
+      <div style="margin-top:14px"><div class="lbl" style="font-size:10.5px;margin-bottom:8px">Look &amp; feel</div><div id="design" class="row" style="flex-wrap:wrap;gap:8px"></div></div>
+      <div class="row" style="margin-top:14px"><button id="buildbtn">Build it ▸</button><button id="stopbtn" class="hide ghost">⏸ Stop</button><span class="muted" id="buildhint" style="font-size:13px"></span></div>
+      <div id="questions" class="hide" style="margin-top:16px;background:var(--k);border:1px solid var(--line);padding:16px 18px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:3px"><span style="font-size:14.5px;font-weight:600">A couple of quick questions</span><span id="qprog" class="muted mono" style="font-size:11.5px"></span></div>
         <div class="muted" style="font-size:12.5px;margin-bottom:14px">Accept the suggestion, or edit it first — one at a time, so we build the right thing.</div>
         <div id="qlist"></div>
-        <div class="row" style="margin-top:6px"><button id="qcontinue">Answer →</button><a id="qskip" style="cursor:pointer;font-size:13px;color:var(--muted)">skip the rest &amp; build</a></div>
+        <div class="row" style="margin-top:6px"><button id="qcontinue">Answer ▸</button><a id="qskip" style="cursor:pointer;font-size:13px;color:var(--muted)">skip the rest &amp; build</a></div>
       </div>
       <div id="progress" class="hide" style="margin-top:20px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -158,12 +191,12 @@ button:disabled{opacity:.5;cursor:default}
     </div>
 
     <div class="card">
-      <h2>Your builds</h2>
+      <h2>Build log</h2>
       <div class="builds" id="builds"><span class="muted" style="font-size:14px">No builds yet.</span></div>
     </div>
 
     <details id="advanced" style="margin-bottom:18px">
-      <summary class="muted" style="cursor:pointer;font-size:13.5px;padding:6px 2px;user-select:none">Advanced — bring your own AI account &amp; services (optional)</summary>
+      <summary class="adv">Advanced — bring your own AI account &amp; services (optional)</summary>
       <div class="card" id="keycard" style="margin-top:14px">
         <h2>Your own AI account</h2>
         <p class="muted" style="font-size:14px;margin-top:2px">VibeHard's engine is included with your plan — you don't need this. If you'd rather builds run on your own Anthropic or OpenAI-compatible account, add its key here and we'll use it instead.</p>
@@ -172,7 +205,7 @@ button:disabled{opacity:.5;cursor:default}
       <div class="card" id="conncard">
         <h2>Your own services</h2>
         <p class="muted" style="font-size:14px;margin-top:2px">We create and manage a private database for every app automatically. If you'd rather attach your own Supabase or Stripe account, connect it here — keys are validated, encrypted, and never shared.</p>
-        <div id="connbanner" class="hide" style="margin-top:12px;border-radius:11px;padding:11px 14px;font-size:14px;line-height:1.5"></div>
+        <div id="connbanner" class="hide" style="margin-top:12px;padding:11px 14px;font-size:14px;line-height:1.5"></div>
         <div id="connlist" style="margin-top:14px;display:flex;flex-direction:column;gap:12px"></div>
       </div>
     </details>
@@ -215,7 +248,7 @@ const resetToken=new URLSearchParams(location.search).get("token");
 function showAuthCard(which){$("#card-auth").classList.toggle("hide",which!=="auth");$("#card-forgot").classList.toggle("hide",which!=="forgot");$("#card-reset").classList.toggle("hide",which!=="reset")}
 $("#forgot-link").onclick=()=>{$("#forgot-msg").textContent="";showAuthCard("forgot")};
 $("#forgot-back").onclick=()=>showAuthCard("auth");
-$("#forgot-btn").onclick=async()=>{const email=$("#forgot-email").value.trim();const {body}=await api("/api/forgot",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email})});if(body.devLink){$("#forgot-msg").innerHTML='Local mode — email isn\'t set up yet, so use this link to reset:<br><a href="'+body.devLink+'" style="color:var(--teal);font-weight:600">Set a new password →</a>'}else{$("#forgot-msg").textContent="If an account exists for that email, a reset link is on its way — check your inbox."}};
+$("#forgot-btn").onclick=async()=>{const email=$("#forgot-email").value.trim();const {body}=await api("/api/forgot",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email})});if(body.devLink){$("#forgot-msg").innerHTML='Local mode — email isn\'t set up yet, so use this link to reset:<br><a href="'+body.devLink+'" style="color:var(--amber-t);font-weight:600">Set a new password →</a>'}else{$("#forgot-msg").textContent="If an account exists for that email, a reset link is on its way — check your inbox."}};
 $("#reset-btn").onclick=async()=>{const password=$("#reset-pw").value;const {status,body}=await api("/api/reset",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({token:resetToken,password})});if(status>=400){$("#reset-msg").textContent=body.error;return}history.replaceState({},"","/app");$("#card-reset").innerHTML='<h2>Password updated ✓</h2><p class="muted" style="font-size:14px;margin-top:6px">Your password has been changed.</p><button id="to-login" style="margin-top:14px;width:100%">Log in</button>';$("#to-login").onclick=()=>{showAuthCard("auth");setTab("login")}};
 
 function renderKey(){
@@ -226,15 +259,15 @@ function keyForm(){
   $("#keystate").innerHTML='<input id="keyin" placeholder="sk-ant-…" style="margin-top:12px"><div class="row" style="margin-top:11px"><button id="savekey">Save key</button><span class="err" id="keyerr" style="margin:0"></span></div>';
   $("#savekey").onclick=async()=>{const key=$("#keyin").value.trim();const {status,body}=await api("/api/key",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key})});if(status>=400){$("#keyerr").textContent=body.error;return}await load()};
 }
-const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber)">⏸ held for review</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber)">deploy snag</span>',error:'<span class="bad">error</span>'};
+const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber)">⏸ held for review</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber)">deploy snag</span>',error:'<span class="bad" style="color:var(--red)">error</span>'};
 function renderBuilds(){
   if(!me.builds||!me.builds.length){$("#builds").innerHTML='<span class="muted" style="font-size:14px">No builds yet.</span>';return}
   $("#builds").innerHTML=me.builds.map((b,i)=>{
     const badge=STATUS_BADGE[b.status]||b.status;
     let action="";
-    if(b.status==="live"&&b.url)action=`<a href="${esc(b.url)}" target="_blank" style="color:var(--teal);font-size:13px">open →</a>`;
+    if(b.status==="live"&&b.url)action=`<a href="${esc(b.url)}" target="_blank" style="color:var(--amber-t);font-size:13px">open →</a>`;
     else if(b.status==="blocked")action=`<a class="lk" data-act="held" data-i="${i}" style="cursor:pointer;color:var(--amber);font-size:13px">see what's flagged →</a>`;
-    else if(b.status==="paused"||b.status==="running")action=`<a class="lk" data-act="resume" data-i="${i}" style="cursor:pointer;color:var(--teal);font-size:13px">resume →</a>`;
+    else if(b.status==="paused"||b.status==="running")action=`<a class="lk" data-act="resume" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px">resume →</a>`;
     return `<div class="b" style="align-items:flex-start"><div style="flex:1"><div style="font-size:13.5px">${esc((b.prompt||b.app).slice(0,64))}</div><div class="muted mono" style="font-size:11.5px;margin-top:2px">${badge}</div><div class="held-slot" data-i="${i}"></div></div>${action}</div>`;
   }).join("");
   document.querySelectorAll("#builds .lk").forEach(el=>el.onclick=()=>{const b=me.builds[+el.dataset.i];if(el.dataset.act==="resume")startBuild(b.prompt,b.app);else renderHeld(b.app,el.closest(".b").querySelector('.held-slot[data-i="'+el.dataset.i+'"]'))});
@@ -242,11 +275,11 @@ function renderBuilds(){
 async function renderFunctest(app,el){
   if(!el||!app)return;
   const ex=el.querySelector?el.querySelector(".functest-panel"):null;if(ex)ex.remove();
-  const wrap=document.createElement("div");wrap.className="functest-panel";wrap.style.cssText="margin-top:14px;padding-top:14px;border-top:1px solid var(--line2)";
+  const wrap=document.createElement("div");wrap.className="functest-panel";wrap.style.cssText="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)";
   wrap.innerHTML='<div class="muted" style="font-size:12.5px">Checking it does what you asked…</div>';el.appendChild(wrap);
   const {body}=await api("/api/functest?app="+encodeURIComponent(app));
   if(!body||!body.checks||!body.checks.length){wrap.remove();return}
-  const I={works:'<span style="color:var(--teal)">✓</span>',partial:'<span style="color:var(--amber)">◐</span>',missing:'<span style="color:#ff6b6b">✗</span>'};
+  const I={works:'<span style="color:var(--amber)">✓</span>',partial:'<span style="color:var(--amber-t)">◐</span>',missing:'<span style="color:var(--red)">✗</span>'};
   const s=body.summary||{};
   wrap.innerHTML='<div style="font-weight:600;font-size:13.5px;margin-bottom:8px">Does it do what you asked? <span class="muted" style="font-weight:400">'+(s.works||0)+'/'+(s.total||0)+' working'+(s.partial?' · '+s.partial+' partial':'')+(s.missing?' · '+s.missing+' missing':'')+'</span></div>'+body.checks.map(c=>'<div style="margin-bottom:7px;font-size:13px">'+(I[c.status]||'')+' '+esc(c.feature)+'<div class="muted" style="font-size:11.5px;margin-left:18px;line-height:1.45">'+esc(c.note||'')+'</div></div>').join("");
 }
@@ -256,10 +289,10 @@ async function renderCredentials(app,el){
   const {body}=await api("/api/credentials?app="+encodeURIComponent(app));
   if(!body||!body.required||!body.required.length)return;
   const have=new Set(body.have||[]);const missing=body.required.filter(c=>!have.has(c.key));
-  const wrap=document.createElement("div");wrap.className="creds-panel";wrap.style.cssText="margin-top:14px;padding-top:14px;border-top:1px solid var(--line2)";
-  wrap.innerHTML='<div style="font-weight:600;font-size:13.5px;margin-bottom:3px">🔑 Keys this app needs '+(missing.length?'— '+missing.length+' to add':'— all set ✓')+'</div><div class="muted" style="font-size:12px;margin-bottom:10px">Saved to your account, encrypted, and added to your app at deploy — never written into the code.</div>'+body.required.map(c=>{const hk=have.has(c.key);return '<div style="margin-bottom:10px"><div style="font-size:13px">'+(hk?'<span style="color:var(--teal)">✓</span> ':'')+esc(c.label)+'</div><div class="muted" style="font-size:11.5px;margin:2px 0 '+(hk?'0':'5px')+'">'+esc(c.help)+'</div>'+(hk?'':'<div class="row"><input data-k="'+esc(c.key)+'" placeholder="paste your key" style="flex:1"><button class="creds-save" data-k="'+esc(c.key)+'">Save</button></div>')+'</div>';}).join("");
+  const wrap=document.createElement("div");wrap.className="creds-panel";wrap.style.cssText="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)";
+  wrap.innerHTML='<div style="font-weight:600;font-size:13.5px;margin-bottom:3px">🔑 Keys this app needs '+(missing.length?'— '+missing.length+' to add':'— all set ✓')+'</div><div class="muted" style="font-size:12px;margin-bottom:10px">Saved to your account, encrypted, and added to your app at deploy — never written into the code.</div>'+body.required.map(c=>{const hk=have.has(c.key);return '<div style="margin-bottom:10px"><div style="font-size:13px">'+(hk?'<span style="color:var(--amber)">✓</span> ':'')+esc(c.label)+'</div><div class="muted" style="font-size:11.5px;margin:2px 0 '+(hk?'0':'5px')+'">'+esc(c.help)+'</div>'+(hk?'':'<div class="row"><input data-k="'+esc(c.key)+'" placeholder="paste your key" style="flex:1"><button class="creds-save" data-k="'+esc(c.key)+'">Save</button></div>')+'</div>';}).join("");
   // Once any key is saved, offer a one-click re-deploy so the new keys reach the live app.
-  if(have.size){const rb=document.createElement("button");rb.textContent="Redeploy with my keys →";rb.style.marginTop="6px";rb.onclick=()=>{wrap.remove();startBuild(null,app,"ship")};wrap.appendChild(rb);}
+  if(have.size){const rb=document.createElement("button");rb.textContent="Redeploy with my keys ▸";rb.style.marginTop="6px";rb.onclick=()=>{wrap.remove();startBuild(null,app,"ship")};wrap.appendChild(rb);}
   el.appendChild(wrap);
   wrap.querySelectorAll(".creds-save").forEach(b=>b.onclick=async()=>{const k=b.getAttribute("data-k");const inp=wrap.querySelector('input[data-k="'+k+'"]');const v=((inp&&inp.value)||"").trim();if(!v)return;b.disabled=true;b.textContent="…";const {status}=await api("/api/integrations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,value:v})});if(status>=400){b.disabled=false;b.textContent="Save";return}await renderCredentials(app,el)});
 }
@@ -269,7 +302,7 @@ async function renderHeld(app,el){
   const {body}=await api("/api/held?app="+encodeURIComponent(app));
   const wrap=document.createElement("div");wrap.className="held-findings";wrap.style.marginTop="12px";
   if(body.findings&&body.findings.length){
-    wrap.innerHTML=body.findings.map(f=>'<div style="margin-bottom:8px;padding:10px 12px;background:var(--bg2);border:1px solid var(--line2);border-radius:8px"><div style="font-size:13px;font-weight:600">'+esc(f.title)+'</div><div class="muted" style="font-size:12.5px;margin-top:3px;line-height:1.5">'+esc(f.detail)+'</div></div>').join("")+'<div class="muted" style="font-size:12px;margin-top:4px">An engineer has been notified ('+esc(body.state||"queued")+'). You\'ll be told when it\'s resolved.</div>';
+    wrap.innerHTML=body.findings.map(f=>'<div style="margin-bottom:8px;padding:10px 12px;background:var(--carbon);border:1px solid var(--line)"><div style="font-size:13px;font-weight:600">'+esc(f.title)+'</div><div class="muted" style="font-size:12.5px;margin-top:3px;line-height:1.5">'+esc(f.detail)+'</div></div>').join("")+'<div class="muted" style="font-size:12px;margin-top:4px">An engineer has been notified ('+esc(body.state||"queued")+'). You\'ll be told when it\'s resolved.</div>';
   }else{
     wrap.innerHTML='<div class="muted" style="font-size:12.5px">An engineer has been notified and will review this. You\'ll be told when it\'s resolved.</div>';
   }
@@ -289,7 +322,7 @@ const STAGES=[
 let stageIdx=-1, buildTimer=null, stuckTimer=null, curES=null;
 const stageEl=k=>document.querySelector('.stage[data-key="'+k+'"]');
 const esc=s=>(s||"").replace(/[<>&"']/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"}[c]));
-function renderStages(){$("#stages").innerHTML=STAGES.map(s=>`<div class="stage" data-key="${s.key}"><span class="ico">○</span><span class="lbl">${s.label}</span></div>`).join("")}
+function renderStages(){$("#stages").innerHTML=STAGES.map(s=>`<div class="stage" data-key="${s.key}"><span class="ico">○</span><span class="lbl2">${s.label}</span></div>`).join("")}
 function paintStages(activeIdx){STAGES.forEach((s,j)=>{const el=stageEl(s.key);if(!el)return;const ico=el.querySelector(".ico");el.classList.remove("active","done");if(j<activeIdx){el.classList.add("done");ico.textContent="✓"}else if(j===activeIdx){el.classList.add("active");ico.innerHTML='<span class="sp"></span>'}else{ico.textContent="○"}})}
 function finishStages(lastIdx){STAGES.forEach((s,j)=>{const el=stageEl(s.key);if(!el)return;const ico=el.querySelector(".ico");el.classList.remove("active","done");if(j<=lastIdx){el.classList.add("done");ico.textContent="✓"}else{ico.textContent="○"}})}
 function notify(title,body){if(!("Notification" in window)||Notification.permission!=="granted"||!document.hidden)return;try{new Notification("VibeHard — "+title,{body})}catch(e){}}
@@ -315,7 +348,7 @@ const GATE_LABELS={sast:"Code security",secrets:"Secret scan","depvuln":"Depende
 const GATE_ORDER=["sast","secrets","depvuln","rls","compliance","pii","prod-readiness","verify"];
 let gateState={};
 function renderGates(){
-  const ic={pass:'<span style="color:var(--teal)">✓</span>',block:'<span style="color:var(--amber)">✗</span>',warn:'<span style="color:var(--amber)">⚠</span>'};
+  const ic={pass:'<span style="color:var(--amber)">✓</span>',block:'<span style="color:var(--red)">✗</span>',warn:'<span style="color:var(--amber-t)">⚠</span>'};
   $("#gatelist").innerHTML=GATE_ORDER.filter(g=>gateState[g]).map(g=>`<div style="font-size:12.5px">${ic[gateState[g]]||"○"} ${GATE_LABELS[g]||g}</div>`).join("");
   if(Object.keys(gateState).length)$("#gatelist").classList.remove("hide");
 }
@@ -333,7 +366,7 @@ const DESIGNS=[{key:"clean",name:"Clean & minimal"},{key:"warm",name:"Warm & fri
 let selectedDesign="clean";
 function renderDesignPicker(){
   const el=$("#design");if(!el)return;
-  el.innerHTML=DESIGNS.map(d=>{const on=d.key===selectedDesign;return '<button class="dchip" data-d="'+d.key+'" style="font-size:12.5px;padding:6px 12px;cursor:pointer;border-radius:8px;background:'+(on?'var(--teal)':'transparent')+';color:'+(on?'#04110d':'var(--muted)')+';border:1px solid '+(on?'var(--teal)':'var(--line2)')+'">'+d.name+'</button>';}).join("");
+  el.innerHTML=DESIGNS.map(d=>{const on=d.key===selectedDesign;return '<button class="dchip" data-d="'+d.key+'" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:7px 12px;cursor:pointer;background:'+(on?'var(--amber)':'transparent')+';color:'+(on?'#000':'var(--muted)')+';border:1px solid '+(on?'var(--amber)':'var(--line)')+'">'+d.name+'</button>';}).join("");
   el.querySelectorAll(".dchip").forEach(b=>b.onclick=()=>{selectedDesign=b.getAttribute("data-d");renderDesignPicker()});
 }
 function startBuild(prompt,resumeApp,mode){
@@ -367,7 +400,7 @@ function startBuild(prompt,resumeApp,mode){
       else{res.className="result held";res.innerHTML='<h3>The build hit an error.</h3><span class="muted">Open the live log to see what happened.</span>';notify("Build error","Open the build to see what happened.")}
     }
     res.style.display="block";
-    load(true).then(()=>{const b=me.builds&&me.builds[0];if(!b)return;if(r==="blocked")renderHeld(b.app,res);if(r==="live"||r==="blocked"||r==="deploy-failed"){renderFunctest(b.app,res);renderCredentials(b.app,res);}if(r==="live"){const pb=document.createElement("button");pb.textContent="✨ Polish the look";pb.style.cssText="margin-top:12px;background:transparent;border:1px solid var(--line2);color:var(--text)";pb.onclick=()=>startBuild(null,b.app,"polish");res.appendChild(pb);}});
+    load(true).then(()=>{const b=me.builds&&me.builds[0];if(!b)return;if(r==="blocked")renderHeld(b.app,res);if(r==="live"||r==="blocked"||r==="deploy-failed"){renderFunctest(b.app,res);renderCredentials(b.app,res);}if(r==="live"){const pb=document.createElement("button");pb.textContent="✨ Polish the look";pb.className="ghost";pb.style.marginTop="12px";pb.onclick=()=>startBuild(null,b.app,"polish");res.appendChild(pb);}});
   });
 }
 const MAX_Q=7;
@@ -393,7 +426,7 @@ async function askNext(prompt,turns){
     html+='<div id="qopts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">';
     for(const o of opts){
       const rec=(o.label===q.recommended);
-      html+='<button type="button" class="qopt" data-label="'+esc(o.label)+'" style="text-align:left;padding:9px 11px;border:1px solid '+(rec?'var(--accent,#6366f1)':'var(--border,#2a2a2a)')+';border-radius:9px;background:transparent;color:var(--text);cursor:pointer">'
+      html+='<button type="button" class="qopt" data-label="'+esc(o.label)+'" style="text-align:left;font-family:\'Archivo\',sans-serif;font-weight:400;letter-spacing:0;text-transform:none;font-size:13px;padding:9px 11px;border:1px solid '+(rec?'var(--amber)':'var(--line)')+';background:transparent;color:var(--text);cursor:pointer">'
         +'<div style="font-weight:600">'+esc(o.label)+(rec?' <span style="font-weight:400;opacity:.65">· recommended</span>':'')+'</div>'
         +(o.detail?'<div style="font-size:12px;opacity:.68;margin-top:2px">'+esc(o.detail)+'</div>':'')
         +'</button>';
@@ -421,25 +454,25 @@ function renderResume(){
   const ab=me.activeBuild,b=$("#resume-banner");
   if(ab&&ab.status==="paused"){
     b.classList.remove("hide");
-    b.innerHTML='⏸ You have a paused build: <b>'+esc(ab.prompt).slice(0,70)+'…</b><br><a id="do-resume" style="cursor:pointer;color:var(--teal);font-weight:600">Resume — continues where it left off →</a><a id="do-discard" style="cursor:pointer;color:var(--muted);margin-left:14px;font-size:13px">discard</a>';
+    b.innerHTML='⏸ You have a paused build: <b>'+esc(ab.prompt).slice(0,70)+'…</b><br><a id="do-resume" style="cursor:pointer;color:var(--amber-t);font-weight:600">Resume — continues where it left off →</a><a id="do-discard" style="cursor:pointer;color:var(--muted);margin-left:14px;font-size:13px">discard</a>';
     $("#do-resume").onclick=()=>startBuild(ab.prompt,ab.app);
     $("#do-discard").onclick=()=>b.classList.add("hide");
   }else if(ab&&ab.status==="running"&&!curES){
     b.classList.remove("hide");
-    b.innerHTML='⚙ A build is running in the background. <a id="do-stop" style="cursor:pointer;color:var(--teal);font-weight:600">Stop &amp; pause it</a> to resume later.';
+    b.innerHTML='⚙ A build is running in the background. <a id="do-stop" style="cursor:pointer;color:var(--amber-t);font-weight:600">Stop &amp; pause it</a> to resume later.';
     $("#do-stop").onclick=async()=>{await api("/api/build/stop",{method:"POST"});setTimeout(()=>load(),900)};
   }else b.classList.add("hide");
 }
 
 // ── connectors: Supabase (validated key-import) + Stripe (Connect OAuth) ────────
 const CONN_MSG={"stripe-ok":["ok","Stripe connected — your apps can now take payments on your account."],"stripe-ok-test":["ok","Stripe connected in test mode — switch to a live account when you're ready to charge."],"stripe-not-configured":["warn","Stripe Connect isn't set up on this server yet."],"stripe-denied":["warn","You declined the Stripe connection — nothing was saved."],"stripe-state":["warn","That Stripe link expired. Try Connect again."],"stripe-failed":["warn","Couldn't finish the Stripe connection. Try again."],"signin-first":["warn","Sign in first, then connect Stripe."]};
-function connBanner(kind,text){const b=$("#connbanner");if(!kind){b.classList.add("hide");return}b.classList.remove("hide");const ok=kind==="ok";b.style.background=ok?"rgba(43,210,155,.08)":"rgba(240,180,80,.10)";b.style.border="1px solid "+(ok?"rgba(43,210,155,.3)":"rgba(240,180,80,.35)");b.style.color=ok?"var(--text)":"var(--amber)";b.textContent=text;}
+function connBanner(kind,text){const b=$("#connbanner");if(!kind){b.classList.add("hide");return}b.classList.remove("hide");const ok=kind==="ok";b.style.background=ok?"rgba(255,176,0,.07)":"rgba(255,176,0,.05)";b.style.border="1px solid "+(ok?"rgba(255,176,0,.4)":"rgba(255,176,0,.3)");b.style.color=ok?"var(--text)":"var(--amber-t)";b.textContent=text;}
 async function renderConnections(){
   const {body:st}=await api("/api/connect/status");if(!st||st.error)return;
   const sb=st.supabase,stripe=st.stripe;
   const pill=on=>on?'<span class="pill">● connected</span>':'<span class="muted" style="font-size:13px">not connected</span>';
   $("#connlist").innerHTML=
-    '<div style="border:1px solid var(--line2);border-radius:12px;padding:14px 16px">'
+    '<div style="border:1px solid var(--line);padding:14px 16px">'
       +'<div class="row" style="justify-content:space-between"><div><strong style="font-size:15px">Supabase</strong> <span class="muted" style="font-size:13px">· your database</span></div>'+pill(sb)+'</div>'
       +'<div id="sbform" class="'+(sb?'hide':'')+'" style="margin-top:12px">'
         +'<input id="sb-url" placeholder="Project URL — https://xxxx.supabase.co">'
@@ -450,7 +483,7 @@ async function renderConnections(){
       +'</div>'
       +(sb?'<div style="margin-top:8px"><a id="sb-replace" style="cursor:pointer;font-size:13px;color:var(--muted)">replace keys</a></div>':'')
     +'</div>'
-    +'<div style="border:1px solid var(--line2);border-radius:12px;padding:14px 16px">'
+    +'<div style="border:1px solid var(--line);padding:14px 16px">'
       +'<div class="row" style="justify-content:space-between"><div><strong style="font-size:15px">Stripe</strong> <span class="muted" style="font-size:13px">· take payments</span></div>'+pill(stripe)+'</div>'
       +'<div style="margin-top:12px">'+(st.stripeOffered
           ?'<button id="stripe-connect">'+(stripe?'Reconnect Stripe':'Connect Stripe')+'</button> <span class="muted" style="font-size:12.5px">opens Stripe — no key to copy</span>'
@@ -464,22 +497,22 @@ async function renderConnections(){
     const {status,body}=await api("/api/connect/supabase",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url,anonKey,serviceKey})});
     sbSave.disabled=false;sbSave.textContent="Validate & connect";
     const checks=(body&&body.checks)||[];
-    $("#sb-checks").innerHTML=checks.map(c=>(c.ok?'<span style="color:var(--teal)">✓</span> ':'<span class="bad">✕</span> ')+esc(c.detail)).join("<br>");
+    $("#sb-checks").innerHTML=checks.map(c=>(c.ok?'<span style="color:var(--amber)">✓</span> ':'<span class="bad" style="color:var(--red)">✕</span> ')+esc(c.detail)).join("<br>");
     if(status<400){connBanner("ok","Supabase connected — project "+esc(body.ref)+".");await renderConnections()}
   };
 }
 async function load(keep){
   const sp=new URLSearchParams(location.search);const cp=sp.get("connect");if(cp&&CONN_MSG[cp]){const[k,t]=CONN_MSG[cp];connBanner(k,t);history.replaceState({},"","/app")}
   const {body}=await api("/api/me");me=body;
-  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/trust.html">What we check</a><a href="/trust.html">Trust &amp; security</a>';
+  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust</a>';
     // Clerk has a LIVE client session but the server rejected it (misconfig: azp/authorizedParties,
     // wrong instance keys, clock skew…). Remounting SignIn here redirect-loops forever — the already-
     // signed-in widget instantly bounces back and we land in this branch again. Fail LOUDLY instead.
     if(window.__CLERK&&window.Clerk&&window.Clerk.user){const c=$("#card-auth");if(c)c.innerHTML='<div style="max-width:420px"><b>Sign-in hit a server configuration problem.</b><p class="muted">Your identity was verified, but the server refused the session. This is a configuration issue on our side, not something you did.</p><button id="clerk-signout">Sign out and try again</button></div>';const so=$("#clerk-signout");if(so)so.onclick=async()=>{try{await window.Clerk.signOut()}catch{}location.reload()};return}
     if(window.__CLERK&&window.Clerk){mountClerkSignIn()}else{showAuthCard("auth")}return}
   $("#auth").classList.add("hide");$("#dash").classList.remove("hide");
-  if(window.__CLERK&&window.Clerk){$("#who").innerHTML=`<span class="muted" style="font-size:14px">${me.email} · ${me.plan}</span> <span id="clerk-userbtn"></span>`;try{window.Clerk.mountUserButton(document.getElementById("clerk-userbtn"))}catch{}}
-  else{$("#who").innerHTML=`<span class="muted" style="font-size:14px">${me.email} · ${me.plan}</span> <a id="logout" style="cursor:pointer;font-size:15px">log out</a>`;$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST"});await load()};}
+  if(window.__CLERK&&window.Clerk){$("#who").innerHTML=`<span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2)">${me.email} · ${me.plan}</span> <span id="clerk-userbtn"></span>`;try{window.Clerk.mountUserButton(document.getElementById("clerk-userbtn"))}catch{}}
+  else{$("#who").innerHTML=`<span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2)">${me.email} · ${me.plan}</span> <a id="logout" style="cursor:pointer">log out</a>`;$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST"});await load()};}
   renderKey();renderConnections();renderBuilds();renderResume();renderDesignPicker();renderOrch();
   // The landing hero ("Engage ignition") stashes the visitor's idea so it survives the signup wall.
   try{const idea=localStorage.getItem("vh.idea");if(idea&&!$("#prompt").value){$("#prompt").value=idea;localStorage.removeItem("vh.idea")}}catch{}
@@ -503,9 +536,9 @@ function orchApp(){return me&&me.builds&&me.builds[0]&&me.builds[0].app}
 function orchBubble(who,text,kind){
   const log=$("#orchlog"),d=document.createElement("div");
   const mine=who==="you";
-  const bg=mine?"var(--teal)":(kind==="held"||kind==="error")?"rgba(240,110,110,.12)":(kind==="done")?"rgba(43,210,155,.10)":"var(--bg2)";
-  const col=mine?"#04201a":"var(--text)";
-  d.style.cssText=`align-self:${mine?"flex-end":"flex-start"};max-width:84%;background:${bg};color:${col};border:1px solid var(--line2);border-radius:12px;padding:9px 12px;font-size:14px;line-height:1.5;white-space:pre-wrap`;
+  const bg=mine?"var(--amber)":(kind==="held"||kind==="error")?"rgba(255,77,66,.10)":(kind==="done")?"rgba(255,176,0,.08)":"var(--raised)";
+  const col=mine?"#000":"var(--text)";
+  d.style.cssText=`align-self:${mine?"flex-end":"flex-start"};max-width:84%;background:${bg};color:${col};border:1px solid var(--line);padding:9px 12px;font-size:14px;line-height:1.5;white-space:pre-wrap`;
   d.textContent=text;log.appendChild(d);log.scrollTop=log.scrollHeight;
 }
 async function orchSend(text){
@@ -528,7 +561,7 @@ function renderOrch(){
     orchBound=true;
     $("#orchsend").onclick=()=>orchSend($("#orchin").value);
     $("#orchin").addEventListener("keydown",e=>{if(e.key==="Enter")orchSend($("#orchin").value)});
-    $("#orchquick").innerHTML=["status","why","retry"].map(q=>`<a class="lk" data-q="${q}" style="cursor:pointer;font-size:12.5px;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:3px 11px">${q}</a>`).join("");
+    $("#orchquick").innerHTML=["status","why","retry"].map(q=>`<a class="lk" data-q="${q}" style="cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);padding:4px 11px">${q}</a>`).join("");
     $("#orchquick").querySelectorAll(".lk").forEach(el=>el.onclick=()=>orchSend(el.dataset.q));
     orchBubble("bot","Hi — I'm watching your latest build. Ask me \"status\", \"why\", \"retry\", or \"ship\".","info");
   }
@@ -549,7 +582,7 @@ async function loadClerk(cfg){const pk=cfg.publishableKey;let fapi=cfg.frontendA
 async function boot(){
   let cfg=null;try{cfg=(await api("/api/auth-config")).body}catch{}
   if(cfg&&cfg.clerk&&cfg.publishableKey){window.__CLERK=cfg;await loadClerk(cfg);return load()}
-  if(resetToken){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/trust.html">What we check</a><a href="/trust.html">Trust &amp; security</a>';showAuthCard("reset")}
+  if(resetToken){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust</a>';showAuthCard("reset")}
   else load();
 }
 boot();
