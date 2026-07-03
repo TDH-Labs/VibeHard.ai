@@ -15,6 +15,7 @@ import { join, resolve, sep } from "node:path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
+import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { decideRigor, llmInterviewer, llmIntake, reviewSpec, type InterviewTurn } from "../src/spec/index.ts";
 import { isBlocking } from "../src/types.ts";
 import { byoModelFactory } from "../src/engine/bolt/driver.ts";
@@ -86,6 +87,12 @@ const stripeConnectStates = new Map<string, string>(); // state → tenantId (CS
 // deployed apps survive a restart/redeploy. `new Platform(...)` (file-backed only, wiped by an
 // ephemeral cloud box) would silently lose this guarantee; Platform.open() is required here.
 const { platform, db: platformDb } = await Platform.open({ baseDir: ROOT, billing: stripeBilling });
+// EPIC #33 (closing the 2026-07-03 gap): active-build/build-history tracking rides the SAME durable
+// `sql` connection platform.ts already proved works for tenants — Platform.open() always returns a
+// working sql (managed Postgres via DATABASE_URL, or embedded disk-persisted pglite locally), so
+// this can be unconditional, same as `platform` itself (FileBuildProgressStore, the local-only
+// fallback, stays available in build-store.ts for callers that don't go through Platform.open).
+const buildStore: BuildProgressStore = new PgBuildProgressStore(platformDb.sql);
 const seenBillingEvents = new Set<string>(); // processed Stripe event ids → drop replays (idempotency)
 
 // ── tiny encrypted store for the per-tenant LLM key (AES-256-GCM) ───────────────
@@ -154,18 +161,19 @@ function integrationKeys(tenantId: string): string[] {
 }
 
 /** On boot, no build subprocess is alive, so any record still marked "running" is stale (the server
- *  died mid-build). Flip it to "paused" so it shows as resumable instead of falsely in-progress. */
-function sweepStaleRunning(): void {
-  const tdir = join(ROOT, "tenants");
-  if (!existsSync(tdir)) return;
-  for (const id of readdirSync(tdir)) {
+ *  died mid-build). Flip it to "paused" so it shows as resumable instead of falsely in-progress.
+ *  EPIC #33: now reads `buildStore.listTenantIds()` (durable Postgres) instead of enumerating a
+ *  local directory — this is the exact sweep that was silently finding nothing after a restart,
+ *  since the local ~/.vibehard/tenants tree it used to scan was wiped along with everything else. */
+async function sweepStaleRunning(): Promise<void> {
+  for (const id of await buildStore.listTenantIds()) {
     try {
-      const ab = readActiveBuild(id);
-      if (ab?.status === "running") writeActiveBuild(id, { ...ab, status: "paused" });
-      const builds = listTenantBuilds(id);
-      let changed = false;
-      for (const b of builds) if (b.status === "running") ((b.status = "paused"), (changed = true));
-      if (changed) saveTenantBuilds(id, builds);
+      const ab = await buildStore.getActive(id);
+      if (ab?.status === "running") await buildStore.setActive(id, { ...ab, status: "paused" });
+      const builds = await buildStore.listBuilds(id);
+      for (const b of builds) {
+        if (b.status === "running") await buildStore.patchBuild(id, b.app, { status: "paused" });
+      }
     } catch {
       /* skip a tenant we can't read */
     }
@@ -472,56 +480,11 @@ async function sendResetLink(email: string, link: string): Promise<boolean> {
 }
 
 // ── build control: track the running subprocess per tenant (for Stop) + persist the active build
-//    so a stopped build can be resumed, even across a page reload ──
+//    so a stopped build can be resumed, even across a page reload — durably (EPIC #33), via
+//    `buildStore` above, not local files (ActiveBuild/BuildRecord types live in build-store.ts) ──
 const running = new Map<string, Bun.Subprocess>();
 const stopFlags = new Set<string>();
 const tenantDir = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/[^a-zA-Z0-9_-]/g, "_"));
-type ActiveBuild = { app: string; prompt: string; status: "running" | "paused" | "live" | "blocked" | "deploy-failed" | "error" };
-function readActiveBuild(tenantId: string): ActiveBuild | null {
-  const p = join(tenantDir(tenantId), "active-build.json");
-  if (!existsSync(p)) return null;
-  try {
-    return JSON.parse(readFileSync(p, "utf8")) as ActiveBuild;
-  } catch {
-    return null;
-  }
-}
-function writeActiveBuild(tenantId: string, b: ActiveBuild): void {
-  mkdirSync(tenantDir(tenantId), { recursive: true });
-  writeFileSync(join(tenantDir(tenantId), "active-build.json"), JSON.stringify(b, null, 2));
-}
-
-// ── persistent build history (so projects survive re-login; the "Your projects" list) ──────────
-type BuildRecord = { app: string; prompt: string; status: ActiveBuild["status"]; at: number; ticket?: string; url?: string };
-function buildsFile(tenantId: string): string {
-  return join(tenantDir(tenantId), "builds.json");
-}
-function listTenantBuilds(tenantId: string): BuildRecord[] {
-  const p = buildsFile(tenantId);
-  if (!existsSync(p)) return [];
-  try {
-    return JSON.parse(readFileSync(p, "utf8")) as BuildRecord[];
-  } catch {
-    return [];
-  }
-}
-function saveTenantBuilds(tenantId: string, list: BuildRecord[]): void {
-  mkdirSync(tenantDir(tenantId), { recursive: true });
-  writeFileSync(buildsFile(tenantId), JSON.stringify(list.slice(0, 50), null, 2));
-}
-function appendBuild(tenantId: string, rec: BuildRecord): void {
-  const list = listTenantBuilds(tenantId);
-  list.unshift(rec);
-  saveTenantBuilds(tenantId, list);
-}
-function patchBuild(tenantId: string, app: string, patch: Partial<BuildRecord>): void {
-  const list = listTenantBuilds(tenantId);
-  const i = list.findIndex((b) => b.app === app);
-  if (i >= 0) {
-    list[i] = { ...list[i]!, ...patch };
-    saveTenantBuilds(tenantId, list);
-  }
-}
 
 // ── orchestrator: the conversational owner of a build (the chat panel's backend) ───────────
 type InboxMsg = { at: number; kind: OutboundMessage["kind"]; text: string };
@@ -672,8 +635,8 @@ const server = Bun.serve({
         // own key (hasKey) is an optional override, not a prerequisite. The build child process
         // already inherits the operator key from process.env; this flag just tells the UI not to gate.
         turnkey: Boolean(process.env.OPENROUTER_API_KEY || process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY),
-        builds: listTenantBuilds(auth.user.tenantId), // persistent project history (survives re-login)
-        activeBuild: readActiveBuild(auth.user.tenantId), // a running/paused build the dashboard can stop or resume
+        builds: await buildStore.listBuilds(auth.user.tenantId), // persistent project history (survives re-login)
+        activeBuild: await buildStore.getActive(auth.user.tenantId), // a running/paused build the dashboard can stop or resume
       });
     }
 
@@ -808,7 +771,7 @@ const server = Bun.serve({
       // What a HELD build flagged, in plain English — so "held for review" isn't a dead-end.
       if (!auth) return json({ error: "sign in first" }, 401);
       const app = url.searchParams.get("app");
-      const rec = listTenantBuilds(auth.user.tenantId).find((b) => b.app === app);
+      const rec = (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app);
       if (!rec?.ticket) return json({ state: null, findings: [] });
       const sink = new LocalEscalationSink(process.env.VIBEHARD_QUEUE_DIR ?? join(homedir(), ".vibehard", "queue"));
       const ticket = await sink.get(rec.ticket);
@@ -825,7 +788,7 @@ const server = Bun.serve({
       if (!auth) return json({ error: "sign in first" }, 401);
       const { app, text } = (await req.json()) as { app?: string; text?: string };
       if (!app || !text?.trim()) return json({ error: "app and text required" }, 400);
-      if (!listTenantBuilds(auth.user.tenantId).some((b) => b.app === app)) return json({ error: "unknown build" }, 404);
+      if (!(await buildStore.listBuilds(auth.user.tenantId)).some((b) => b.app === app)) return json({ error: "unknown build" }, 404);
       const reply = await getOrchestrator(auth.user.tenantId, app).onMessage(text.trim());
       return json({ reply });
     }
@@ -844,7 +807,7 @@ const server = Bun.serve({
       // #11: LLM QA — does the built app implement the features the spec captured? (advisory)
       if (!auth) return json({ checks: [] });
       const app = url.searchParams.get("app");
-      const rec = app ? listTenantBuilds(auth.user.tenantId).find((b) => b.app === app) : null;
+      const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ checks: [] });
       const workspace = join(tenantDir(auth.user.tenantId), "apps", app!);
       const specPath = join(workspace, ".vibehard", "spec.json");
@@ -900,7 +863,7 @@ const server = Bun.serve({
       // What third-party keys the built app needs (from its .env.example) + which the tenant has saved.
       if (!auth) return json({ error: "sign in first" }, 401);
       const app = url.searchParams.get("app");
-      const rec = app ? listTenantBuilds(auth.user.tenantId).find((b) => b.app === app) : null;
+      const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ required: [], have: [] });
       const required = requiredCredentialsForApp(join(tenantDir(auth.user.tenantId), "apps", app!));
       return json({ required, have: integrationKeys(auth.user.tenantId) });
@@ -929,7 +892,7 @@ const server = Bun.serve({
       const app = resumeApp ?? `app-${Date.now().toString(36)}`;
       const denied = await guardBuild(auth.user.tenantId, app);
       if (denied) return json({ error: denied }, 403);
-      return buildStream(auth.user.tenantId, prompt, app, "build", design);
+      return await buildStream(auth.user.tenantId, prompt, app, "build", design);
     }
 
     if (path === "/api/redeploy" || path === "/api/polish") {
@@ -937,11 +900,11 @@ const server = Bun.serve({
       if (!auth) return json({ error: "sign in first" }, 401);
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit2 C-6 CSRF
       const app = url.searchParams.get("app")?.trim();
-      const rec = app ? listTenantBuilds(auth.user.tenantId).find((b) => b.app === app) : null;
+      const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ error: "no such build" }, 404);
       const denied = await guardBuild(auth.user.tenantId, app!);
       if (denied) return json({ error: denied }, 403);
-      return buildStream(auth.user.tenantId, rec.prompt, app, path === "/api/polish" ? "polish" : "ship");
+      return await buildStream(auth.user.tenantId, rec.prompt, app, path === "/api/polish" ? "polish" : "ship");
     }
 
     // marketing site (the .dc design) — static fallback for "/" and every *.dc.html / asset
@@ -965,7 +928,7 @@ async function guardBuild(tenantId: string, app: string): Promise<string | null>
   }
 }
 
-function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode: "build" | "ship" | "polish" = "build", design?: string): Response {
+async function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode: "build" | "ship" | "polish" = "build", design?: string): Promise<Response> {
   // C1/B-4 (defense in depth): every caller validates resumeApp, but this is the choke point that
   // mkdirSync's + execs in the workspace, so an unsafe value here can never form a path — fall
   // back to a fresh, always-safe id rather than traverse.
@@ -981,10 +944,10 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
   }
   mkdirSync(workspace, { recursive: true });
   stopFlags.delete(tenantId);
-  writeActiveBuild(tenantId, { app, prompt, status: "running" });
+  await buildStore.setActive(tenantId, { app, prompt, status: "running" });
   // Record in the persistent history (or flip an existing record back to running on resume).
-  if (resumeApp && listTenantBuilds(tenantId).some((b) => b.app === app)) patchBuild(tenantId, app, { status: "running" });
-  else appendBuild(tenantId, { app, prompt, status: "running", at: Date.now() });
+  if (resumeApp && (await buildStore.listBuilds(tenantId)).some((b) => b.app === app)) await buildStore.patchBuild(tenantId, app, { status: "running" });
+  else await buildStore.appendBuild(tenantId, { app, prompt, status: "running", at: Date.now() });
   let heldTicket: string | undefined; // captured from the build's ::held marker
   let liveUrl: string | undefined; // captured from ship's "LIVE → <url>" line
   const byo = loadKey(tenantId);
@@ -1008,9 +971,9 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
   env.VIBEHARD_TENANT_KEYS = integrationKeys(tenantId).join(",");
   if (design) env.VIBEHARD_DESIGN = design; // #12: the chosen design preset → codegen styling
   const enc = new TextEncoder();
-  const finish = (status: ActiveBuild["status"]) => {
-    writeActiveBuild(tenantId, { app, prompt, status });
-    patchBuild(tenantId, app, { status, ...(heldTicket ? { ticket: heldTicket } : {}), ...(liveUrl ? { url: liveUrl } : {}) });
+  const finish = async (status: ActiveBuild["status"]) => {
+    await buildStore.setActive(tenantId, { app, prompt, status });
+    await buildStore.patchBuild(tenantId, app, { status, ...(heldTicket ? { ticket: heldTicket } : {}), ...(liveUrl ? { url: liveUrl } : {}) });
   };
   const stream = new ReadableStream({
     async start(controller) {
@@ -1059,11 +1022,11 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
           const buildCode = await runStep("Building + gating your app…", ["build", prompt, workspace]);
           if (stopped()) {
             stopFlags.delete(tenantId);
-            finish("paused");
+            await finish("paused");
             return send("done", "paused");
           }
           if (buildCode !== 0) {
-            finish("blocked"); // gate held or the build couldn't pass
+            await finish("blocked"); // gate held or the build couldn't pass
             return send("done", "blocked");
           }
         } else if (mode === "polish") {
@@ -1073,14 +1036,14 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
         const shipCode = await runStep(shipLabel, ["ship", workspace]);
         if (stopped()) {
           stopFlags.delete(tenantId);
-          finish("paused");
+          await finish("paused");
           return send("done", "paused");
         }
         const status = shipCode === 0 ? "live" : "deploy-failed";
-        finish(status);
+        await finish(status);
         send("done", status);
       } catch (e) {
-        finish("error");
+        await finish("error");
         send("log", `error: ${e instanceof Error ? e.message : String(e)}`);
         send("done", "error");
       } finally {
@@ -1096,7 +1059,7 @@ function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode:
   return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
 }
 
-sweepStaleRunning(); // resolve any builds left "running" by a previous server stop
+await sweepStaleRunning(); // resolve any builds left "running" by a previous server stop
 console.log(`\n  VibeHard alpha → http://localhost:${server.port}\n  (sign up, add your LLM key, describe an app — the real pipeline runs)\n`);
 
 // Close the durable-DB connection cleanly on shutdown (container stop/redeploy sends SIGTERM).
