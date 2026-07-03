@@ -690,11 +690,22 @@ const server = Bun.serve({
       return json({ ok: true });
     }
 
+    if (path === "/api/billing/plans") {
+      // Frontend needs plan name → priceId to start checkout, but only the reverse (priceId → plan)
+      // is configured (that's what the webhook needs). Invert it here so the price IDs live in exactly
+      // one place (VIBEHARD_STRIPE_PRICE_MAP) — the checkout buttons never hardcode a price ID.
+      const planToPrice: Record<string, string> = {};
+      for (const [priceId, plan] of Object.entries(PRICE_TO_PLAN)) planToPrice[plan] = priceId;
+      return json({ configured: Boolean(stripeBilling), plans: planToPrice });
+    }
+
     if (path === "/api/billing/checkout" && req.method === "POST") {
       if (!auth) return json({ error: "sign in first" }, 401);
+      if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit3 D-2 CSRF
       if (!stripeBilling) return json({ error: "billing isn't configured" }, 503);
       const { priceId } = (await req.json()) as { priceId?: string };
       if (!priceId) return json({ error: "which plan? (priceId required)" }, 400);
+      if (!(priceId in PRICE_TO_PLAN)) return json({ error: "unknown plan" }, 400); // only checkout for prices we actually map to a plan
       try {
         const customer = await stripeBilling.stripe.createCustomer({ email: auth.email, name: auth.user.name, tenantId: auth.user.tenantId });
         const session = await stripeBilling.stripe.createCheckoutSession({

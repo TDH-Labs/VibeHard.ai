@@ -93,6 +93,8 @@ nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter
 .card ul{list-style:none;margin:20px 0 28px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:2.3;color:var(--text2)}
 .card ul .a{color:var(--amber)}
 .card .btn{margin-top:auto;justify-content:center}
+.card .btn[aria-busy="true"]{opacity:.6;pointer-events:none}
+.planerr{margin-top:10px;font-size:12.5px;color:var(--red)}
 .samegate{margin-top:20px;padding:20px 22px;border:1px solid var(--amber-dim);background:#120e04;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.06em;color:var(--amber-t);text-align:center}
 /* faq */
 .faq{border:1px solid var(--line);margin-top:46px}
@@ -183,7 +185,8 @@ footer .col a:hover{color:var(--amber-t)}
           <li>full 11-gate line, no exceptions</li>
           <li>live deploys with custom domains</li>
         </ul>
-        <a class="btn" href="/app">Start on Starter</a>
+        <a class="btn" href="/app" data-plan="starter">Start on Starter</a>
+        <p class="planerr" data-planerr hidden></p>
       </div>
       <div class="card">
         <span class="pname">Pro</span>
@@ -194,7 +197,8 @@ footer .col a:hover{color:var(--amber-t)}
           <li>full 11-gate line, no exceptions</li>
           <li>bring your own model key (advanced)</li>
         </ul>
-        <a class="btn ghost" href="/app">Go Pro</a>
+        <a class="btn ghost" href="/app" data-plan="pro">Go Pro</a>
+        <p class="planerr" data-planerr hidden></p>
       </div>
     </div>
     <div class="samegate" data-rv>Same eleven gates. Same live database attack. Same signed sentinel. Every tier, every build.</div>
@@ -273,6 +277,34 @@ footer .col a:hover{color:var(--amber-t)}
   if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){els.forEach(function(e){e.classList.add('on')});return}
   var io=new IntersectionObserver(function(es){es.forEach(function(x){if(x.isIntersecting){x.target.classList.add('on');io.unobserve(x.target)}})},{threshold:.15});
   els.forEach(function(e){io.observe(e)});
+})();
+</script>
+<script>
+(function(){
+  var els=document.querySelectorAll('[data-plan]');
+  els.forEach(function(el){
+    el.addEventListener('click',async function(ev){
+      ev.preventDefault();
+      var plan=el.getAttribute('data-plan');
+      var errEl=el.parentElement.querySelector('[data-planerr]');
+      function showErr(msg){if(errEl){errEl.textContent=msg;errEl.hidden=false}}
+      if(errEl)errEl.hidden=true;
+      el.setAttribute('aria-busy','true');
+      try{
+        var me=await fetch('/api/me').then(function(r){return r.json()});
+        if(!me.authed){try{localStorage.setItem('vh.plan',plan)}catch(e){}location.href='/app';return}
+        if(me.plan===plan){showErr("You're already on this plan.");el.removeAttribute('aria-busy');return}
+        var plans=await fetch('/api/billing/plans').then(function(r){return r.json()});
+        if(!plans.configured){showErr("Billing isn't set up yet — check back soon.");el.removeAttribute('aria-busy');return}
+        var priceId=plans.plans&&plans.plans[plan];
+        if(!priceId){showErr("That plan isn't available right now.");el.removeAttribute('aria-busy');return}
+        var co=await fetch('/api/billing/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId:priceId})});
+        var body=await co.json();
+        if(co.ok&&body.url){location.href=body.url}
+        else{showErr(body.error||'Checkout failed — try again.');el.removeAttribute('aria-busy')}
+      }catch(e){showErr('Something went wrong — try again.');el.removeAttribute('aria-busy')}
+    });
+  });
 })();
 </script>
 </body>

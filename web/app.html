@@ -483,6 +483,18 @@ async function load(keep){
   renderKey();renderConnections();renderBuilds();renderResume();renderDesignPicker();renderOrch();
   // The landing hero ("Engage ignition") stashes the visitor's idea so it survives the signup wall.
   try{const idea=localStorage.getItem("vh.idea");if(idea&&!$("#prompt").value){$("#prompt").value=idea;localStorage.removeItem("vh.idea")}}catch{}
+  // The pricing page stashes the clicked plan when a signed-out visitor picks Starter/Pro, the same
+  // way the hero stashes the idea — pick it back up now that auth is confirmed and finish checkout.
+  try{const plan=localStorage.getItem("vh.plan");if(plan){localStorage.removeItem("vh.plan");
+    if(me.plan!==plan){
+      const plansRes=await api("/api/billing/plans");
+      const priceId=plansRes.body&&plansRes.body.plans&&plansRes.body.plans[plan];
+      if(priceId){
+        const coRes=await api("/api/billing/checkout",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({priceId})});
+        if(coRes.body&&coRes.body.url)location.href=coRes.body.url;
+      }
+    }
+  }}catch{}
 }
 
 // ── build assistant (orchestrator) chat panel ──────────────────────────────────
