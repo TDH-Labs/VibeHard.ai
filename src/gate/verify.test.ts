@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import {
   isUp,
   parseEnvKeys,
   resolveSandboxHost,
+  runVerify,
   safeToolEnv,
   summarizeBuild,
   summarizeBuildArtifacts,
@@ -19,11 +21,13 @@ import {
   summarizeShutdown,
   summarizeVerify,
   synthEnv,
+  synthVerifyDockerfile,
   verifyRuns,
 } from "./verify.ts";
 import { verdictOf } from "../types.ts";
 import type { HostProvider } from "../substrate/types.ts";
 import { FlyHostProvider } from "../substrate/fly.ts";
+import type { CommandResult, CommandRunner } from "../substrate/vercel.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
 
@@ -394,5 +398,119 @@ describe("summarizeBuildArtifacts — an exit-0 build must leave evidence (SECUR
     const startedMs = Date.now() + 5;
     await Bun.write(join(d, "node_modules", "x", "index.js"), "x");
     expect(summarizeBuildArtifacts(d, startedMs)?.ruleId).toBe("build-no-artifacts");
+  });
+});
+
+describe("synthVerifyDockerfile — EPIC #32 minimal image for the build/node sandboxed paths", () => {
+  test("installs deps, exposes 8080, CMDs the given entry", () => {
+    const d = synthVerifyDockerfile("server.js");
+    expect(d).toContain("FROM node:20-alpine");
+    expect(d).toContain("RUN npm install --no-audit --no-fund");
+    expect(d).toContain("EXPOSE 8080");
+    expect(d).toContain('ENV PORT=8080');
+    expect(d).toContain('CMD ["node", "server.js"]');
+  });
+
+  test("null entry (build-only — the exec sandbox always overrides the command) → still valid Dockerfile syntax", () => {
+    const d = synthVerifyDockerfile(null);
+    expect(d).toContain('CMD ["node", "--version"]');
+  });
+});
+
+function fakeHostProvider(over: Partial<HostProvider> = {}): HostProvider {
+  return {
+    name: "fake-fly",
+    deploy: async (_w, _e, ref) => ({ url: "https://sbx.fly.dev", hostRef: ref ?? "sbx" }),
+    teardown: async () => {},
+    ...over,
+  };
+}
+function fakeExecRunner(result: Partial<CommandResult> = {}) {
+  const calls: string[][] = [];
+  const runner: CommandRunner = {
+    run: async (cmd) => {
+      calls.push(cmd);
+      return { exitCode: 0, stdout: "", stderr: "", ...result };
+    },
+  };
+  return { runner, calls };
+}
+
+describe("runVerify — build kind, EPIC #32 sandboxed exec path", () => {
+  test("a Fly host configured → runs in the exec sandbox, never touches host npm/local runBuild", async () => {
+    const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "vite build" } }) });
+    const { runner, calls } = fakeExecRunner({ exitCode: 0, stdout: "built\n" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
+    });
+    expect(v.findings).toEqual([]); // pass, no findings
+    expect(calls.some((c) => c[1] === "machine" && c[2] === "run")).toBe(true);
+    // never fell through to a local `npm run build` on the host — no dist/ was produced locally
+    expect(existsSync(join(d, "dist"))).toBe(false);
+  });
+
+  test("the sandboxed build fails → a build-failed finding carrying the sandbox's log", async () => {
+    const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "vite build" } }) });
+    const { runner } = fakeExecRunner({ exitCode: 1, stderr: "Module not found: foo\n" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
+    });
+    expect(v.findings.length).toBeGreaterThan(0);
+    expect(v.findings.some((f) => f.message.includes("Module not found"))).toBe(true);
+  });
+
+  test("no Fly host configured → resolveSandboxHost returns undefined, falling through unchanged", () => {
+    // Structural, not behavioral: with no flyHost/token, `resolveSandboxHost(deps.flyHost)` in the
+    // build branch is falsy, so execution falls through past the new `if (flyHost) {...; return}`
+    // block to the exact pre-existing `runBuild` call below it — unmodified code, already covered
+    // by this file's other build-kind tests (e.g. summarizeBuildArtifacts, "true" script). A real
+    // `npm run build` invocation here is redundant coverage AND flaky in this sandboxed test env
+    // (npm's own startup network check hangs with no outbound access) — resolveSandboxHost's own
+    // gating logic already has dedicated tests above.
+    //
+    // Bun auto-loads .env for every `bun` invocation (including `bun test`), so a real
+    // FLY_API_TOKEN can be live in process.env here — must clear it first, same as the
+    // `resolveSandboxHost` describe block above.
+    const saved = process.env.FLY_API_TOKEN;
+    delete process.env.FLY_API_TOKEN;
+    try {
+      expect(resolveSandboxHost(undefined)).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.FLY_API_TOKEN;
+      else process.env.FLY_API_TOKEN = saved;
+    }
+  });
+});
+
+describe("runVerify — node kind, EPIC #32 sandboxed deploy path", () => {
+  test("a Fly host configured → deploys+probes the sandbox, and the synthesized Dockerfile never lingers", async () => {
+    const d = await scratch({ "server.js": "require('http').createServer((_,r)=>r.end('ok')).listen(process.env.PORT)" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flySandboxFetch: async () => ({ status: 200 }), // the sandbox's own HTTP probe — never a real network call in tests
+    });
+    expect(v.findings).toEqual([]); // fakeHostProvider's deploy + a healthy fake probe → pass
+    expect(existsSync(join(d, "Dockerfile"))).toBe(false); // transient — cleaned up after
+  });
+
+  test("the sandboxed deploy comes up but serves unhealthy → sandbox-boot-failed, Dockerfile still cleaned up", async () => {
+    const d = await scratch({ "server.js": "console.log('x')" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flySandboxFetch: async () => ({ status: 502 }),
+    });
+    expect(v.findings.some((f) => f.ruleId === "sandbox-boot-failed")).toBe(true);
+    expect(existsSync(join(d, "Dockerfile"))).toBe(false);
+  });
+
+  test("Dockerfile is cleaned up even when the sandboxed deploy throws", async () => {
+    const d = await scratch({ "server.js": "console.log('x')" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider({ deploy: async () => { throw new Error("fly deploy failed"); } }),
+    });
+    expect(v.findings.some((f) => f.ruleId === "sandbox-boot-failed")).toBe(true);
+    expect(existsSync(join(d, "Dockerfile"))).toBe(false);
   });
 });

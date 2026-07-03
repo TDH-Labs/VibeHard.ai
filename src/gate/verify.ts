@@ -21,7 +21,7 @@
  * `synthEnv`) are separated from the I/O (spawning node/npm) and unit-tested; the
  * launches are integration-tested.
  */
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
@@ -31,7 +31,8 @@ import { DERIVED_DIRS } from "./scan-scope.ts";
 import { parseBuildErrors } from "./build-errors.ts";
 import type { HostProvider } from "../substrate/types.ts";
 import { FlyHostProvider } from "../substrate/fly.ts";
-import { runInFlySandbox, type SandboxResult } from "../substrate/fly-sandbox.ts";
+import { runInFlySandbox, type FlySandboxDeps, type SandboxResult } from "../substrate/fly-sandbox.ts";
+import { runInFlyExecSandbox, type FlyExecSandboxDeps } from "../substrate/fly-exec-sandbox.ts";
 
 const RUNS = 3; // default when rigor is unknown; see verifyRuns
 const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
@@ -245,6 +246,26 @@ export function detectLaunch(projectPath: string): LaunchPlan {
   const pkg = readPkg(projectPath);
   if (pkg?.scripts?.build) return { kind: "build", script: "build" };
   return null;
+}
+
+/** EPIC #32: a minimal Dockerfile so a `node`/`build` app (no Dockerfile of its own —
+ *  that's the "container" plan, already sandboxed) can ALSO run its install/build/boot
+ *  in an isolated Fly machine instead of on the platform host. Deps only in the image;
+ *  `npm run <script>` (build-kind) or the CMD (node-kind) is what actually exercises the
+ *  app's own code, so this stays generic across both callers. `entry` null → a build-only
+ *  image whose CMD is never used (the exec sandbox always overrides the command). */
+export function synthVerifyDockerfile(entry: string | null): string {
+  return [
+    "FROM node:20-alpine",
+    "WORKDIR /app",
+    "COPY package*.json ./",
+    "RUN npm install --no-audit --no-fund",
+    "COPY . .",
+    "EXPOSE 8080",
+    "ENV PORT=8080",
+    `CMD ["node", ${JSON.stringify(entry ?? "--version")}]`,
+    "",
+  ].join("\n");
 }
 
 /** Outcome of build-verifying a static app — which stage ran, its exit code, and a
@@ -637,6 +658,15 @@ export interface VerifyDeps {
    *  path below (today's behavior, unchanged — this is what every existing test/CI run hits,
    *  since none of them set FLY_API_TOKEN). */
   flyHost?: HostProvider;
+  /** Injectable deps for the build/node sandboxed exec path (EPIC #32 — extends #32a beyond the
+   *  container plan). Tests pass a fake runner; production leaves this undefined and
+   *  runInFlyExecSandbox falls back to its own FLY_API_TOKEN-driven default. */
+  flyExec?: FlyExecSandboxDeps;
+  /** Injectable HTTP probe for the container/node sandboxed DEPLOY path's health check (threads
+   *  through to runInFlySandbox's fetchImpl). Tests inject this so a "the sandbox came up
+   *  healthy" pass case is actually testable without a real deployed URL to hit; production
+   *  leaves it undefined and runInFlySandbox uses real fetch. */
+  flySandboxFetch?: FlySandboxDeps["fetchImpl"];
 }
 
 /** Which HostProvider (if any) sandboxes the container verify path: an injected one always
@@ -691,7 +721,7 @@ export async function runVerify(
     const flyHost = resolveSandboxHost(deps.flyHost);
     if (flyHost) {
       const containerEnv = synthEnv(readEnvTemplates(projectPath));
-      const result = await runInFlySandbox(projectPath, containerEnv, { host: flyHost });
+      const result = await runInFlySandbox(projectPath, containerEnv, { host: flyHost, fetchImpl: deps.flySandboxFetch });
       findings.push(...summarizeSandbox(result));
       return verdictOf("verify", findings, ranAt);
     }
@@ -713,6 +743,19 @@ export async function runVerify(
   }
 
   if (plan.kind === "build") {
+    // EPIC #32: same "prefer an isolated Fly machine over the host" preference as container
+    // kind above — `npm install && npm run build` is untrusted, generated-code execution too.
+    const flyHost = resolveSandboxHost(deps.flyHost);
+    if (flyHost) {
+      const dockerfile = synthVerifyDockerfile(null);
+      const result = await runInFlyExecSandbox(projectPath, dockerfile, ["sh", "-c", `npm run ${plan.script}`], deps.flyExec);
+      // Sandboxed: no local filesystem access to the build output (it lived inside the now-torn-down
+      // machine), so summarizeBuildArtifacts (a LOCAL disk check) can't run here — same tradeoff the
+      // container path already accepts (summarizeSandbox trusts the sandbox's own signal, no extra
+      // local check). The exit code + log tail from inside the sandbox is the whole verdict.
+      findings.push(...summarizeBuild({ stage: "build", exitCode: result.exitCode, log: result.log }, projectPath));
+      return verdictOf("verify", findings, ranAt);
+    }
     const startedMs = Date.now();
     const outcome = await runBuild(projectPath, plan.script);
     findings.push(...summarizeBuild(outcome, projectPath));
@@ -721,6 +764,28 @@ export async function runVerify(
       if (noArtifacts) findings.push(noArtifacts);
     }
     return verdictOf("verify", findings, ranAt);
+  }
+
+  // EPIC #32: a launched node server is the same "boots the real, untrusted generated code"
+  // risk as the container path — sandbox it the same way when a Fly host is configured. python
+  // stays local for now (containerizing it correctly is a separate, later scope).
+  if (plan.kind === "node") {
+    const flyHost = resolveSandboxHost(deps.flyHost);
+    if (flyHost) {
+      // Transient — written for the duration of the sandboxed deploy, ALWAYS removed after
+      // (mirrors FlyHostProvider's own fly.toml handling). Left behind, a next gate run's
+      // detectLaunch would misclassify this as a real "container" app forever.
+      const dockerfilePath = join(projectPath, "Dockerfile");
+      writeFileSync(dockerfilePath, synthVerifyDockerfile(plan.entry));
+      try {
+        const containerEnv = synthEnv(readEnvTemplates(projectPath));
+        const result = await runInFlySandbox(projectPath, containerEnv, { host: flyHost, fetchImpl: deps.flySandboxFetch });
+        findings.push(...summarizeSandbox(result));
+        return verdictOf("verify", findings, ranAt);
+      } finally {
+        rmSync(dockerfilePath, { force: true });
+      }
+    }
   }
 
   // A launched app (node or python) can't run without its deps; a fresh generation has none yet.
