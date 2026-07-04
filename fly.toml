@@ -31,7 +31,8 @@ primary_region = "iad"
   path = "/app"
 
 [[vm]]
-  # 256MB starved the box during codegen: health checks failed and the build subprocess died
-  # right as the gates spun up (observed 2026-07-04, attempts 4-5). Builds run in-process until
+  # 256MB starved codegen (attempts 4-5); 1GB STILL OOM-killed mid-gate-run on attempt 7
+  # ("Out of memory: Killed process ... anon-rss:796836kB" — Next.js typecheck+build alongside
+  # the web server + embedded Postgres has no headroom at 1GB). Builds run in-process until
   # EPIC #32 moves them fully off-box — give the machine real headroom.
-  memory = "1gb"
+  memory = "2gb"
