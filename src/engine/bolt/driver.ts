@@ -48,8 +48,9 @@ export async function generateTextResilient(
       const sig = e instanceof Error ? `${e.name} ${e.message}` : String(e);
       // JSONParseError/Unexpected EOF: the PROVIDER's own response body failed to parse — same
       // degeneration class as above, surfaced by the SDK before we ever see text.
-      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|JSON parse|JSONParseError|JSON parsing failed|Unexpected EOF|whitespace-only|\b(429|500|502|503|504)\b/i.test(sig);
+      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|JSON parse|JSONParseError|JSON parsing failed|Invalid JSON response|Unexpected EOF|whitespace-only|\b(429|500|502|503|504)\b/i.test(sig);
       if (!transient || attempt === retries) throw e;
+      console.error(`[llm-retry] attempt ${attempt + 1}/${retries + 1} failed transiently (${sig.slice(0, 120)}) — retrying`);
       await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // linear backoff
     }
   }
