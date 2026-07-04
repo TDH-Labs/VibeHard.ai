@@ -66,7 +66,12 @@ export function checkContainer(dockerfile: string | null, hasDockerignore: boole
     out.push(f("container-runs-as-root", "high", "Dockerfile", "The container has no non-root USER, so it runs as root — a compromise then has full container privileges. Add a non-root USER."));
   }
   if (!/^\s*FROM\s+\S+@sha256:[0-9a-f]{64}/im.test(dockerfile)) {
-    out.push(f("unpinned-base-image", "high", "Dockerfile", "The base image isn't pinned by digest (@sha256:…), so the build isn't reproducible and could pull a changed image. Pin the FROM image by digest."));
+    // A model asked to "pin by digest" has no way to know a real registry digest and will
+    // fabricate plausible-looking hex — the autofix loop resolves and injects the real one
+    // deterministically (normalizeDockerfile in autofix.ts) before this ever reaches a fixer
+    // round in the common case. This message only reaches the model when that lookup failed
+    // (offline, private registry) — so it must NOT ask for a digest it can't actually know.
+    out.push(f("unpinned-base-image", "high", "Dockerfile", "The base image isn't pinned by digest (@sha256:…), so the build isn't reproducible and could pull a changed image. Use a specific version tag (never `latest` or no tag) — do not hand-write a @sha256 digest yourself, since a fabricated one will fail to resolve and break the build; a concrete tag is enough for the platform to pin automatically."));
   }
   if (!hasDockerignore) {
     out.push(f("missing-dockerignore", "medium", "Dockerfile", "No .dockerignore — local files and secrets (.env, node_modules, .git) can leak into the build context. Add one."));

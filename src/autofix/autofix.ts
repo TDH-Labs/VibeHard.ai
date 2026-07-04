@@ -12,9 +12,10 @@ import { defaultFixer, type Fixer } from "./fixer.ts";
 import { captureSurface, tamperReason } from "./anti-tamper.ts";
 import { recordRound } from "../journal/journal.ts";
 import { recordCandidate, recordResolution } from "../fleet/fleet.ts";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
+import { pinDockerfileDigests } from "../gate/docker-pin.ts";
 
 const DERIVED = new Set<string>(DERIVED_DIRS);
 const sigOf = (f: Finding): string => `${f.tool}:${f.ruleId}`;
@@ -74,6 +75,21 @@ function captureResolutions(ws: string, stack: string | undefined, prev: Finding
   const changed = [...now].filter(([p, h]) => preFixHashes.get(p) !== h).map(([p]) => p);
   for (const f of prev) {
     if (!currentSigs.has(sigOf(f))) recordResolution(stack, sigOf(f), { message: f.message, files: changed });
+  }
+}
+
+/** Resolves and rewrites the workspace Dockerfile's base-image digest(s) with the real,
+ *  currently-published value — including replacing a fabricated one an LLM hand-wrote to
+ *  satisfy prod-readiness's unpinned-base-image finding. Runs every round (cheap no-op once
+ *  correct) so the gate and the deploy sandbox always see a resolvable FROM. */
+async function normalizeDockerfile(workspacePath: string): Promise<void> {
+  for (const name of ["Dockerfile", "dockerfile"]) {
+    const path = join(workspacePath, name);
+    if (!existsSync(path)) continue;
+    const before = readFileSync(path, "utf8");
+    const { content, changed } = await pinDockerfileDigests(before);
+    if (changed) writeFileSync(path, content);
+    return; // only one Dockerfile is expected per app (matches prod-readiness's readFirst)
   }
 }
 
@@ -182,6 +198,10 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   let stopReason = `reached the ${nte}-attempt ceiling`;
 
   while (attempts < nte) {
+    // Deterministic normalization before the gate ever looks: a hand-written or fabricated
+    // base-image digest gets replaced with the real one here, so neither the gate nor the
+    // deploy sandbox ever has to deal with a FROM line that can't resolve.
+    await normalizeDockerfile(workspacePath);
     // FAST inner loop (cheap verify proxy); a pass is confirmed by the full suite ONCE — the
     // human-engineer pattern: iterate cheap, verify full only at convergence.
     const r = await gateConfirmed(workspacePath);
