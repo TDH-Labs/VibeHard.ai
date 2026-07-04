@@ -27,3 +27,9 @@ primary_region = "iad"
   method = "GET"
   timeout = "5s"
   path = "/app"
+
+[[vm]]
+  # 256MB starved the box during codegen: health checks failed and the build subprocess died
+  # right as the gates spun up (observed 2026-07-04, attempts 4-5). Builds run in-process until
+  # EPIC #32 moves them fully off-box — give the machine real headroom.
+  memory = "1gb"
