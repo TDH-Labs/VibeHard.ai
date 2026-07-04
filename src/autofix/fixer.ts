@@ -114,9 +114,17 @@ export function readFixSources(root: string, findings: Finding[], cap: number): 
   return out;
 }
 
-function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped: DepBumpResult["majorBumped"], cap: number): string {
+export function buildFixPrompt(workspacePath: string, findings: Finding[], majorBumped: DepBumpResult["majorBumped"], cap: number): string {
   const lines: string[] = [
     "The app you generated FAILED the deploy gate. Make the MINIMAL changes needed to pass. Output the corrected and any new files as bolt file actions (<boltArtifact> with <boltAction type=\"file\" filePath=\"...\">). Do not regenerate unrelated files; do not explain.",
+    "",
+    // Found live 2026-07-04: asked only for "minimal changes," the fixer's first move on an RLS
+    // finding was to DROP the flagged tables — a table that doesn't exist can't fail an RLS check,
+    // and deleting it IS a minimal diff. The anti-tamper check (audit CRITICAL-1) catches and
+    // rejects this every time, so it never ships — but it burns the whole attempt on a fix that
+    // was always going to be refused. Forbidding it here is a pure improvement: it can only reduce
+    // rejected attempts, since the enforcement backstop stays exactly as strict either way.
+    "NEVER satisfy a finding by deleting, dropping, renaming-to-orphan, or commenting out a table, column, migration, RLS policy, or security file — that is tampering, not a fix, and is automatically detected and rejected (the round is wasted, not accepted). If a finding seems to require removing something, that's a signal you have the wrong approach: add the missing policy/scoping/control instead of removing what it protects.",
     "",
   ];
   if (majorBumped.length) {

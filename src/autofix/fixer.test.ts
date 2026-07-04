@@ -75,4 +75,18 @@ describe("defaultFixer — no-op generation guard", () => {
     await fixer(dir, [blockingVerdict()]);
     expect(readFileSync(join(dir, "app", "page.tsx"), "utf8")).toContain("fixed"); // the fix landed
   });
+
+  test("every fix prompt forbids deleting/dropping protected surface as a shortcut", async () => {
+    // Found live 2026-07-04: asked for "minimal changes" with no guardrail, the fixer's first move
+    // on an RLS finding was to DROP the flagged tables (a gone table can't fail an RLS check) —
+    // caught and rejected by anti-tamper every time, but the whole attempt was wasted on a fix that
+    // was always going to be refused. This asserts the warning reaches the model, not just exists
+    // in source — a text edit to the prompt that a typo silently dropped wouldn't be caught otherwise.
+    const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+    await defaultFixer({ modelFactory: () => model })(workspace(), [blockingVerdict()]);
+    const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(sent).toMatch(/deleting|dropping/i);
+    expect(sent).toMatch(/table|migration|RLS policy/i);
+    expect(sent).toMatch(/tampering/i);
+  });
 });
