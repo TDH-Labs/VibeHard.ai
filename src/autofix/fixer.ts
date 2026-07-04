@@ -118,19 +118,16 @@ export function buildFixPrompt(workspacePath: string, findings: Finding[], major
   const lines: string[] = [
     "The app you generated FAILED the deploy gate. Make the MINIMAL changes needed to pass. Output the corrected and any new files as bolt file actions (<boltArtifact> with <boltAction type=\"file\" filePath=\"...\">). Do not regenerate unrelated files; do not explain.",
     "",
-    // Found live 2026-07-04: asked only for "minimal changes," the fixer's first move on an RLS
-    // finding was to DROP the flagged tables — a table that doesn't exist can't fail an RLS check,
-    // and deleting it IS a minimal diff. The anti-tamper check (audit CRITICAL-1) catches and
-    // rejects this every time, so it never ships — but it burns the whole attempt on a fix that
-    // was always going to be refused. Forbidding it here is a pure improvement: it can only reduce
-    // rejected attempts, since the enforcement backstop stays exactly as strict either way.
-    "NEVER satisfy a finding by deleting, dropping, renaming-to-orphan, or commenting out a table, column, migration, RLS policy, or security file — that is tampering, not a fix, and is automatically detected and rejected (the round is wasted, not accepted). If a finding seems to require removing something, that's a signal you have the wrong approach: add the missing policy/scoping/control instead of removing what it protects.",
-    // Same round, same build, a sibling shortcut on the SAME "minimal changes" instruction: with
-    // table-dropping now forbidden above, the fixer's next move was `@ts-ignore`/`eslint-disable`/
-    // `as any` on the flagged lines instead — silencing the check instead of fixing what it flagged.
-    // Also auto-detected and rejected (a suppression-directive COUNT INCREASE is tampering), so this
-    // is the same pure improvement: naming it here can only reduce futile, already-doomed attempts.
-    "NEVER satisfy a finding by adding a suppression directive (@ts-ignore, @ts-expect-error, eslint-disable, biome-ignore, nosemgrep, `as any`, `as unknown as`) on the flagged line — that silences the check instead of fixing what it flagged, is tampering, and is automatically detected and rejected the same way deletion is. Fix the actual type/lint/security issue.",
+    // Found live 2026-07-04, one build, three separate rounds: asked only for "minimal changes,"
+    // the fixer tried THREE distinct ways to make a finding disappear instead of fixing it — drop
+    // the flagged table, add a suppression comment, then remove the query that read the table. Each
+    // is auto-detected and rejected (anti-tamper, audit CRITICAL-1 — a gate made green by shrinking
+    // protected surface is never accepted), so none of them ever ship — but each burned a whole
+    // attempt on a fix that was always doomed. Patching these one at a time as they're discovered is
+    // a losing game (anti-tamper checks ~8 distinct shrinkage patterns); naming the whole CLASS once
+    // is a pure improvement — it can only reduce futile attempts, the enforcement backstop is exactly
+    // as strict either way.
+    "NEVER satisfy a finding by making the flagged thing disappear instead of fixing what's wrong with it. This covers every form: deleting or dropping a table, column, migration, or security file; commenting out or gutting a flagged file; removing the query/data-access that touches a flagged table; deleting a gate's input file; disabling row-level security or removing/weakening an RLS policy (including a policy rewritten to `using (true)`); or adding a suppression directive (@ts-ignore, @ts-expect-error, eslint-disable, biome-ignore, nosemgrep, `as any`, `as unknown as`) on the flagged line. All of these are tampering, not a fix — automatically detected and rejected, wasting the round. If a finding seems to require removing or silencing something, that's a signal you have the wrong approach: add the missing policy/scoping/control/type-correctness instead of making the flagged surface vanish.",
     "",
   ];
   if (majorBumped.length) {

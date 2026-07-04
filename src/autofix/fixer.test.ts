@@ -103,4 +103,19 @@ describe("defaultFixer — no-op generation guard", () => {
     expect(sent).toMatch(/eslint-disable/i);
     expect(sent).toMatch(/as any/i);
   });
+
+  test("every fix prompt forbids removing the query/data-access to a flagged table as a shortcut", async () => {
+    // Found live 2026-07-04, SAME build, a third round, a third distinct shortcut: with both
+    // deletion and suppression now forbidden, the fixer's next move was removing the .from('table')
+    // CALL that read the flagged table — the table and file both survive, only the access is gone,
+    // so the finding vanishes without the underlying issue being fixed. Also auto-detected and
+    // rejected (a tableRefs shrinkage is tampering). This is what prompted consolidating all the
+    // known tamper forms into one guardrail instead of patching them one at a time as discovered.
+    const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+    await defaultFixer({ modelFactory: () => model })(workspace(), [blockingVerdict()]);
+    const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(sent).toMatch(/query|data-access/i);
+    expect(sent).toMatch(/row-level security|RLS/i);
+    expect(sent).toMatch(/using \(true\)|weakened/i);
+  });
 });
