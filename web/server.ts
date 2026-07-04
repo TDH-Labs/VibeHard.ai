@@ -1006,6 +1006,16 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
           /* browser disconnected (e.g. page reload) — build continues; active-build.json is truth */
         }
       };
+      // Heartbeat: codegen goes minutes without a log line, and an idle SSE connection gets cut by
+      // the edge proxy — both observed stream drops (2026-07-04) happened exactly there. An SSE
+      // comment line every 20s keeps the connection warm; browsers ignore it.
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(enc.encode(`: hb\n\n`));
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 20_000);
       const runStep = async (label: string, args: string[]): Promise<number> => {
         send("step", label);
         const proc = Bun.spawn(["bun", CLI, ...args], { cwd: join(import.meta.dir, ".."), env, stdout: "pipe", stderr: "pipe" });
@@ -1070,6 +1080,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
         send("done", "error");
       } finally {
         running.delete(tenantId);
+        clearInterval(heartbeat);
         try {
           controller.close();
         } catch {
