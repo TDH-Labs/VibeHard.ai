@@ -550,7 +550,10 @@ const server = Bun.serve({
 
     // "/" deliberately NOT here: the root is the marketing site (serveStatic fallthrough below);
     // the product lives at /app.
-    if (path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML));
+    // no-store: the app shell inlines all its JS — a browser heuristically caching it keeps running
+    // PRE-DEPLOY code after a fix ships (last night's SSE-reconnect storm outlived its own fix by
+    // five hours in an open tab). The page is one small file; always fetch it fresh.
+    if (path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML), { headers: { "cache-control": "no-store" } });
     if (path === "/auth/stripe/connect" || path === "/auth/stripe/callback") return handleStripeConnect(req, url, path);
     if (path.startsWith("/auth/")) return handleOAuth(url, path);
 
