@@ -17,6 +17,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync }
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
+import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
 import { decideRigor, llmInterviewer, llmIntake, reviewSpec, type InterviewTurn } from "../src/spec/index.ts";
 import { isBlocking } from "../src/types.ts";
 import { byoModelFactory } from "../src/engine/bolt/driver.ts";
@@ -99,6 +100,11 @@ const buildStore: BuildProgressStore = new PgBuildProgressStore(platformDb.sql);
 // auth seam minted returning users a fresh tenant and everything they owned looked gone. Identity
 // now rides the same durable sql; any surviving legacy file is imported once at boot (Pg wins).
 const userStore = new PgUserStore(platformDb.sql);
+// EPIC #33 (final sweep): the per-tenant LLM key, integrations keychain, and orchestrator inbox
+// were the last file-local tenant state — wiped on every deploy like the two gaps before them.
+// Secret values are stored as the SAME AES-256-GCM ciphertext the files held; plaintext never
+// touches the table.
+const tenantKv = new PgTenantKvStore(platformDb.sql);
 const seenBillingEvents = new Set<string>(); // processed Stripe event ids → drop replays (idempotency)
 
 // ── tiny encrypted store for the per-tenant LLM key (AES-256-GCM) ───────────────
@@ -123,47 +129,34 @@ function decrypt(blob: string): string | null {
     return null;
   }
 }
-const keyPath = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/[^a-zA-Z0-9_-]/g, "_"), "llm-key.enc");
-function saveKey(tenantId: string, key: string): void {
-  const p = keyPath(tenantId);
-  mkdirSync(join(p, ".."), { recursive: true });
-  writeFileSync(p, encrypt(key));
+// Durable via tenantKv (EPIC #33 final sweep) — the value in the table is the same AES-256-GCM
+// ciphertext llm-key.enc used to hold.
+async function saveKey(tenantId: string, key: string): Promise<void> {
+  await tenantKv.put(tenantId, "llm-key", encrypt(key));
 }
-function loadKey(tenantId: string): string | null {
-  const p = keyPath(tenantId);
-  return existsSync(p) ? decrypt(readFileSync(p, "utf8")) : null;
+async function loadKey(tenantId: string): Promise<string | null> {
+  const enc = await tenantKv.get(tenantId, "llm-key");
+  return enc ? decrypt(enc) : null;
 }
 
 // ── integrations keychain (backlog #5): a tenant's third-party keys (Stripe, OAuth, email…),
 //    saved once (encrypted, each value separately) and injected into every build/ship subprocess. ──
-const integrationsPath = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/[^a-zA-Z0-9_-]/g, "_"), "integrations.json");
-function loadIntegrations(tenantId: string): Record<string, string> {
-  const p = integrationsPath(tenantId);
-  if (!existsSync(p)) return {};
-  try {
-    const enc = JSON.parse(readFileSync(p, "utf8")) as Record<string, string>;
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(enc)) {
-      try {
-        out[k] = decrypt(v);
-      } catch {
-        /* skip a value we can't decrypt */
-      }
-    }
-    return out;
-  } catch {
-    return {};
+// Durable via tenantKv rows `integration:<name>` (EPIC #33 final sweep) — each value stored as
+// the same per-value ciphertext integrations.json used to hold.
+async function loadIntegrations(tenantId: string): Promise<Record<string, string>> {
+  const enc = await tenantKv.list(tenantId, "integration:");
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(enc)) {
+    const plain = decrypt(v);
+    if (plain !== null) out[k] = plain; // skip a value we can't decrypt
   }
+  return out;
 }
-function saveIntegration(tenantId: string, key: string, value: string): void {
-  const p = integrationsPath(tenantId);
-  mkdirSync(join(p, ".."), { recursive: true });
-  const enc = existsSync(p) ? (JSON.parse(readFileSync(p, "utf8")) as Record<string, string>) : {};
-  enc[key] = encrypt(value);
-  writeFileSync(p, JSON.stringify(enc, null, 2));
+async function saveIntegration(tenantId: string, key: string, value: string): Promise<void> {
+  await tenantKv.put(tenantId, `integration:${key}`, encrypt(value));
 }
-function integrationKeys(tenantId: string): string[] {
-  return Object.keys(loadIntegrations(tenantId));
+async function integrationKeys(tenantId: string): Promise<string[]> {
+  return Object.keys(await tenantKv.list(tenantId, "integration:"));
 }
 
 /** On boot, no build subprocess is alive, so any record still marked "running" is stale (the server
@@ -431,7 +424,7 @@ async function handleStripeConnect(req: Request, url: URL, path: string): Promis
   stripeConnectStates.delete(state);
   try {
     const tokens = await exchangeStripeConnectCode({ clientSecret: STRIPE_SECRET, code });
-    for (const [k, v] of Object.entries(stripeKeychainEntries(tokens))) saveIntegration(tenantId, k, v);
+    for (const [k, v] of Object.entries(stripeKeychainEntries(tokens))) await saveIntegration(tenantId, k, v);
     return redirect(`/app?connect=stripe-ok${tokens.livemode ? "" : "-test"}`);
   } catch {
     return redirect("/app?connect=stripe-failed"); // never surface the raw error / any key material
@@ -482,30 +475,29 @@ const tenantDir = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/
 
 // ── orchestrator: the conversational owner of a build (the chat panel's backend) ───────────
 type InboxMsg = { at: number; kind: OutboundMessage["kind"]; text: string };
-const inboxPath = (tenantId: string, app: string) => join(tenantDir(tenantId), "apps", app, ".vibehard", "orchestrator-inbox.json");
-function readInbox(tenantId: string, app: string): InboxMsg[] {
+// Durable via tenantKv rows `inbox:<app>` (EPIC #33 final sweep) — plain JSON, not secret.
+async function readInbox(tenantId: string, app: string): Promise<InboxMsg[]> {
   try {
-    return JSON.parse(readFileSync(inboxPath(tenantId, app), "utf8")) as InboxMsg[];
+    const raw = await tenantKv.get(tenantId, `inbox:${app}`);
+    return raw ? (JSON.parse(raw) as InboxMsg[]) : [];
   } catch {
     return [];
   }
 }
-function appendInbox(tenantId: string, app: string, m: OutboundMessage): void {
-  const p = inboxPath(tenantId, app);
-  mkdirSync(join(tenantDir(tenantId), "apps", app, ".vibehard"), { recursive: true });
-  const list = readInbox(tenantId, app);
+async function appendInbox(tenantId: string, app: string, m: OutboundMessage): Promise<void> {
+  const list = await readInbox(tenantId, app);
   list.push({ at: Date.now(), kind: m.kind, text: m.text });
-  writeFileSync(p, JSON.stringify(list.slice(-200), null, 2));
+  await tenantKv.put(tenantId, `inbox:${app}`, JSON.stringify(list.slice(-200)));
 }
 // one orchestrator per (tenant, app) so the confirm-state survives across requests
 const orchestrators = new Map<string, Orchestrator>();
-function getOrchestrator(tenantId: string, app: string): Orchestrator {
+async function getOrchestrator(tenantId: string, app: string): Promise<Orchestrator> {
   const key = `${tenantId}:${app}`;
   let o = orchestrators.get(key);
   if (!o) {
     const workspace = join(tenantDir(tenantId), "apps", app);
     const channel: Channel = { send: (m) => appendInbox(tenantId, app, m) };
-    const byo = loadKey(tenantId);
+    const byo = await loadKey(tenantId);
     const modelFactory = byo ? byoModelFactory(byo.startsWith("sk-ant-") ? { anthropicKey: byo } : { openaiKey: byo }) : undefined;
     const tools = realBuildTools(workspace, {
       onRetryDone: (ok) =>
@@ -624,7 +616,7 @@ const server = Bun.serve({
         email: auth.email,
         name: auth.user.name,
         plan: t?.plan ?? "free",
-        hasKey: loadKey(auth.user.tenantId) !== null,
+        hasKey: (await loadKey(auth.user.tenantId)) !== null,
         // Turnkey: the platform carries its own LLM key, so builds work with ZERO setup — a tenant's
         // own key (hasKey) is an optional override, not a prerequisite. The build child process
         // already inherits the operator key from process.env; this flag just tells the UI not to gate.
@@ -643,7 +635,7 @@ const server = Bun.serve({
       // opaque token (real keys are 40+ chars), bounded to keep junk out of the keychain.
       const looksLikeKey = /^(sk-ant-|sk-|sk_|sbp_|xai-|gsk_)[A-Za-z0-9_-]{16,}$/.test(k) || /^[A-Za-z0-9_-]{40,200}$/.test(k);
       if (!looksLikeKey) return json({ error: "that doesn't look like an API key" }, 400);
-      saveKey(auth.user.tenantId, k);
+      await saveKey(auth.user.tenantId, k);
       return json({ ok: true });
     }
 
@@ -753,7 +745,7 @@ const server = Bun.serve({
       const { prompt, history } = (await req.json()) as { prompt?: string; history?: InterviewTurn[] };
       if (!prompt?.trim()) return json({ done: true });
       try {
-        const byo = loadKey(auth.user.tenantId);
+        const byo = await loadKey(auth.user.tenantId);
         const modelFactory = byo ? byoModelFactory(byo.startsWith("sk-ant-") ? { anthropicKey: byo } : { openaiKey: byo }) : undefined;
         return json(await llmInterviewer({ modelFactory })(prompt.trim(), Array.isArray(history) ? history : []));
       } catch {
@@ -783,7 +775,7 @@ const server = Bun.serve({
       const { app, text } = (await req.json()) as { app?: string; text?: string };
       if (!app || !text?.trim()) return json({ error: "app and text required" }, 400);
       if (!(await buildStore.listBuilds(auth.user.tenantId)).some((b) => b.app === app)) return json({ error: "unknown build" }, 404);
-      const reply = await getOrchestrator(auth.user.tenantId, app).onMessage(text.trim());
+      const reply = await (await getOrchestrator(auth.user.tenantId, app)).onMessage(text.trim());
       return json({ reply });
     }
 
@@ -794,7 +786,7 @@ const server = Bun.serve({
       const since = Number(url.searchParams.get("since") ?? 0);
       // C1: `app` is a path segment — reject traversal before it reaches readInbox's join().
       if (!app || !isSafeAppName(app)) return json({ messages: [] });
-      return json({ messages: readInbox(auth.user.tenantId, app).filter((m) => m.at > since) });
+      return json({ messages: (await readInbox(auth.user.tenantId, app)).filter((m) => m.at > since) });
     }
 
     if (path === "/api/functest") {
@@ -810,7 +802,7 @@ const server = Bun.serve({
         const spec = JSON.parse(readFileSync(specPath, "utf8")) as { features?: string[] };
         const features = Array.isArray(spec.features) ? spec.features : [];
         if (!features.length) return json({ checks: [] });
-        const byo = loadKey(auth.user.tenantId);
+        const byo = await loadKey(auth.user.tenantId);
         const modelFactory = byo ? byoModelFactory(byo.startsWith("sk-ant-") ? { anthropicKey: byo } : { openaiKey: byo }) : undefined;
         const checks = await llmFunctionalReviewer({ modelFactory })(features, workspace);
         return json({ checks, summary: summarize(checks) });
@@ -826,7 +818,7 @@ const server = Bun.serve({
       const { key, value } = (await req.json()) as { key?: string; value?: string };
       if (!key || !/^[A-Z][A-Z0-9_]*$/.test(key)) return json({ error: "key must be UPPER_SNAKE_CASE" }, 400);
       if (!value || !value.trim()) return json({ error: "value required" }, 400);
-      saveIntegration(auth.user.tenantId, key, value.trim());
+      await saveIntegration(auth.user.tenantId, key, value.trim());
       return json({ ok: true });
     }
 
@@ -838,14 +830,14 @@ const server = Bun.serve({
       const { url: sbUrl, anonKey, serviceKey } = (await req.json()) as { url?: string; anonKey?: string; serviceKey?: string };
       const result = await validateSupabaseConnection({ url: sbUrl ?? "", anonKey: anonKey ?? "", serviceKey: serviceKey ?? "" });
       if (!result.ok) return json({ ok: false, checks: result.checks }, 400);
-      for (const [k, v] of Object.entries(supabaseKeychainEntries({ url: sbUrl!, anonKey: anonKey!, serviceKey: serviceKey! }))) saveIntegration(auth.user.tenantId, k, v);
+      for (const [k, v] of Object.entries(supabaseKeychainEntries({ url: sbUrl!, anonKey: anonKey!, serviceKey: serviceKey! }))) await saveIntegration(auth.user.tenantId, k, v);
       return json({ ok: true, ref: result.ref, checks: result.checks });
     }
 
     if (path === "/api/connect/status") {
       // Which connectors the tenant has wired (presence only — never the values) + which are offered.
       if (!auth) return json({ error: "sign in first" }, 401);
-      const have = integrationKeys(auth.user.tenantId);
+      const have = await integrationKeys(auth.user.tenantId);
       return json({
         supabase: have.includes("SUPABASE_URL") && have.includes("SUPABASE_SERVICE_ROLE_KEY"),
         stripe: have.includes("STRIPE_SECRET_KEY"),
@@ -860,7 +852,7 @@ const server = Bun.serve({
       const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ required: [], have: [] });
       const required = requiredCredentialsForApp(join(tenantDir(auth.user.tenantId), "apps", app!));
-      return json({ required, have: integrationKeys(auth.user.tenantId) });
+      return json({ required, have: await integrationKeys(auth.user.tenantId) });
     }
 
     if (path === "/api/build/stop" && req.method === "POST") {
@@ -944,7 +936,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
   else await buildStore.appendBuild(tenantId, { app, prompt, status: "running", at: Date.now() });
   let heldTicket: string | undefined; // captured from the build's ::held marker
   let liveUrl: string | undefined; // captured from ship's "LIVE → <url>" line
-  const byo = loadKey(tenantId);
+  const byo = await loadKey(tenantId);
   // The tenant's key (if set) overrides the operator's for THIS build's child process. The
   // override must be TOTAL: providerOf() in the child resolves openrouter → opencode → anthropic
   // by env presence, so the operator's gateway keys must be REMOVED or they'd out-prioritize the
@@ -958,11 +950,11 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
     else if (byo.startsWith("sk-or-")) env.OPENROUTER_API_KEY = byo;
     else env.OPENCODE_API_KEY = byo; // other OpenAI-compatible / gateway key
   }
-  Object.assign(env, loadIntegrations(tenantId)); // the tenant's third-party keys → deploy injects the app's subset (#5)
+  Object.assign(env, await loadIntegrations(tenantId)); // the tenant's third-party keys → deploy injects the app's subset (#5)
   // C-6 (audit3): the build subprocess env merges operator + tenant values; tell deploy-time
   // collectAppEnv which keys are the TENANT's own (their keychain) so an operator value under a
   // colliding name (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) is never injected into the tenant app.
-  env.VIBEHARD_TENANT_KEYS = integrationKeys(tenantId).join(",");
+  env.VIBEHARD_TENANT_KEYS = (await integrationKeys(tenantId)).join(",");
   if (design) env.VIBEHARD_DESIGN = design; // #12: the chosen design preset → codegen styling
   const enc = new TextEncoder();
   const finish = async (status: ActiveBuild["status"]) => {
@@ -1057,6 +1049,9 @@ await sweepStaleRunning(); // resolve any builds left "running" by a previous se
 // One-time import of a surviving legacy users.json into the durable store (Pg rows always win).
 const importedUsers = await migrateLegacyUsersFile(userStore, USERS);
 if (importedUsers) console.log(`  imported ${importedUsers} account(s) from legacy users.json into platform_users`);
+// Same for the per-tenant files (llm-key.enc, integrations.json, orchestrator inboxes).
+const importedKv = await migrateLegacyTenantFiles(tenantKv, ROOT);
+if (importedKv) console.log(`  imported ${importedKv} legacy tenant file entr${importedKv === 1 ? "y" : "ies"} into tenant_kv`);
 console.log(`\n  VibeHard alpha → http://localhost:${server.port}\n  (sign up, add your LLM key, describe an app — the real pipeline runs)\n`);
 
 // Close the durable-DB connection cleanly on shutdown (container stop/redeploy sends SIGTERM).
