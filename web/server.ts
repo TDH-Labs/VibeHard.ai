@@ -466,6 +466,33 @@ async function sendResetLink(email: string, link: string): Promise<boolean> {
   }
 }
 
+/** The app's held-for-review UI tells the customer "an engineer has been notified" — this is what
+ *  makes that sentence true until the full reviewer layer (EPIC #39) exists: every held build
+ *  emails the operator (VIBEHARD_OPERATOR_EMAIL) with enough context to open the queue ticket.
+ *  Best-effort and fire-and-forget: a notification failure must never affect the build's outcome,
+ *  and it always leaves a server-log line as the fallback trail. */
+async function notifyOperatorHeld(info: { tenantId: string; app: string; prompt: string; ticket?: string }): Promise<void> {
+  const line = `[held] tenant ${info.tenantId} app ${info.app}${info.ticket ? ` ticket ${info.ticket}` : ""} — "${info.prompt.slice(0, 120)}"`;
+  console.log(line);
+  const to = process.env.VIBEHARD_OPERATOR_EMAIL;
+  const key = process.env.RESEND_API_KEY;
+  if (!to || !key) return; // log-only until both are configured
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM || "VibeHard <onboarding@resend.dev>",
+        to,
+        subject: `Build held for review — ${info.app}`,
+        html: `<p>A build was held by the gates and needs a human decision.</p><ul><li><b>App:</b> ${info.app}</li><li><b>Tenant:</b> ${info.tenantId}</li>${info.ticket ? `<li><b>Ticket:</b> ${info.ticket}</li>` : ""}<li><b>Prompt:</b> ${info.prompt.slice(0, 300).replace(/</g, "&lt;")}</li></ul><p>Findings are on the tenant's dashboard ("see what's flagged") and in the escalation queue.</p>`,
+      }),
+    });
+  } catch {
+    /* the console line above is the fallback trail */
+  }
+}
+
 // ── build control: track the running subprocess per tenant (for Stop) + persist the active build
 //    so a stopped build can be resumed, even across a page reload — durably (EPIC #33), via
 //    `buildStore` above, not local files (ActiveBuild/BuildRecord types live in build-store.ts) ──
@@ -960,6 +987,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
   const finish = async (status: ActiveBuild["status"]) => {
     await buildStore.setActive(tenantId, { app, prompt, status });
     await buildStore.patchBuild(tenantId, app, { status, ...(heldTicket ? { ticket: heldTicket } : {}), ...(liveUrl ? { url: liveUrl } : {}) });
+    if (status === "blocked") void notifyOperatorHeld({ tenantId, app, prompt, ticket: heldTicket });
   };
   const stream = new ReadableStream({
     async start(controller) {
