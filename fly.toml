@@ -13,9 +13,13 @@ primary_region = "iad"
 [http_service]
   internal_port = 8080
   force_https = true
+  # Builds run as in-process subprocesses on these machines (EPIC #32's full sandbox isolation is
+  # the eventual fix). Scale-to-zero KILLED a build mid-codegen on 2026-07-04: the SSE stream
+  # dropped, traffic hit zero, Fly stopped the machine, the subprocess died, and the boot sweep
+  # paused the orphan. Keep one machine always running until builds are fully off-box.
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[http_service.checks]]
   grace_period = "10s"
