@@ -894,6 +894,10 @@ const server = Bun.serve({
       if (!auth) return json({ error: "sign in first" }, 401);
       // audit2 C-6: this GET has side effects (spawns a build) — reject a cross-origin caller (CSRF).
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403);
+      // A dropped EventSource AUTO-RECONNECTS to this same GET. Without this guard the reconnect
+      // minted a fresh app id, burned quota, and raced the in-flight build to a bogus "blocked"
+      // with zero findings (found live 2026-07-04, fresh-eyes walkthrough). One build per tenant.
+      if (running.has(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
       const prompt = url.searchParams.get("prompt")?.trim();
       const resumeApp = url.searchParams.get("app")?.trim() || undefined; // resume an existing workspace
       const design = url.searchParams.get("design")?.trim() || undefined; // #12 chosen design preset
@@ -912,6 +916,7 @@ const server = Bun.serve({
       // redeploy: re-ship with the tenant's now-saved keys (#5). polish: art-director pass + re-ship (#12).
       if (!auth) return json({ error: "sign in first" }, 401);
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit2 C-6 CSRF
+      if (running.has(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409); // same reconnect guard as /api/build
       const app = url.searchParams.get("app")?.trim();
       const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ error: "no such build" }, 404);

@@ -388,7 +388,11 @@ function startBuild(prompt,resumeApp,mode){
   const es=new EventSource(u);curES=es;
   es.addEventListener("step",e=>{const t=JSON.parse(e.data);if(/Provisioning|deploy/i.test(t))setStage("deploy");line(t,"")});
   es.addEventListener("log",e=>{const t=JSON.parse(e.data);const k=detectStage(t);if(k)setStage(k);onGateLine(t);const m=t.match(/https?:\/\/[^\s]+/);if(m&&/LIVE|fly\.dev|vercel\.app/.test(t))lastUrl=m[0];line(t,/🛑|BLOCK|error|✕/.test(t)?"bad":"")});
-  es.onerror=()=>{if(es.readyState===2){/* closed by server after done — handled there */return}line("(connection interrupted — the build keeps running on the server; reload to reattach)","bad")};
+  es.onerror=()=>{if(es.readyState===2){/* closed by server after done — handled there */return}
+    // EventSource AUTO-RECONNECTS on error — against a build-starting GET that spawned a duplicate
+    // build and killed the in-flight one (2026-07-04). Close it; the build keeps running server-side.
+    es.close();curES=null;clearInterval(buildTimer);clearTimeout(stuckTimer);
+    line("(connection interrupted — the build keeps running on the server; reload this page to reattach)","bad")};
   es.addEventListener("done",e=>{
     es.close();curES=null;clearInterval(buildTimer);clearTimeout(stuckTimer);$("#buildbtn").disabled=false;$("#stopbtn").classList.add("hide");$("#stage-desc").textContent="";
     const r=JSON.parse(e.data);
