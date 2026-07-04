@@ -125,6 +125,12 @@ export function buildFixPrompt(workspacePath: string, findings: Finding[], major
     // was always going to be refused. Forbidding it here is a pure improvement: it can only reduce
     // rejected attempts, since the enforcement backstop stays exactly as strict either way.
     "NEVER satisfy a finding by deleting, dropping, renaming-to-orphan, or commenting out a table, column, migration, RLS policy, or security file — that is tampering, not a fix, and is automatically detected and rejected (the round is wasted, not accepted). If a finding seems to require removing something, that's a signal you have the wrong approach: add the missing policy/scoping/control instead of removing what it protects.",
+    // Same round, same build, a sibling shortcut on the SAME "minimal changes" instruction: with
+    // table-dropping now forbidden above, the fixer's next move was `@ts-ignore`/`eslint-disable`/
+    // `as any` on the flagged lines instead — silencing the check instead of fixing what it flagged.
+    // Also auto-detected and rejected (a suppression-directive COUNT INCREASE is tampering), so this
+    // is the same pure improvement: naming it here can only reduce futile, already-doomed attempts.
+    "NEVER satisfy a finding by adding a suppression directive (@ts-ignore, @ts-expect-error, eslint-disable, biome-ignore, nosemgrep, `as any`, `as unknown as`) on the flagged line — that silences the check instead of fixing what it flagged, is tampering, and is automatically detected and rejected the same way deletion is. Fix the actual type/lint/security issue.",
     "",
   ];
   if (majorBumped.length) {

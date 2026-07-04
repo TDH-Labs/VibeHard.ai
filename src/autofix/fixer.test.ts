@@ -89,4 +89,18 @@ describe("defaultFixer — no-op generation guard", () => {
     expect(sent).toMatch(/table|migration|RLS policy/i);
     expect(sent).toMatch(/tampering/i);
   });
+
+  test("every fix prompt forbids suppression directives as a shortcut", async () => {
+    // Found live 2026-07-04, same build, same round: with table-dropping now forbidden, the
+    // fixer's NEXT move on the same findings was @ts-ignore/eslint-disable/`as any` on the flagged
+    // lines instead — also auto-detected and rejected (a suppression-count increase is tampering),
+    // but again a wasted attempt. Same fix, same reasoning: name it so it isn't tried at all.
+    const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+    await defaultFixer({ modelFactory: () => model })(workspace(), [blockingVerdict()]);
+    const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(sent).toMatch(/suppression/i);
+    expect(sent).toMatch(/ts-ignore/i);
+    expect(sent).toMatch(/eslint-disable/i);
+    expect(sent).toMatch(/as any/i);
+  });
 });
