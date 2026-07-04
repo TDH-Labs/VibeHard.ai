@@ -21,7 +21,11 @@ export type BuyOrBuild = "buy" | "build";
 export interface BuyVsBuild {
   category: string;
   recommendation: BuyOrBuild;
-  service: string; // the suggested service when recommending buy
+  service: string; // the headline suggestion (services[0]) — kept for narrative text
+  services: string[]; // every accepted option for this category, e.g. ["Clerk","Auth0","Supabase Auth"] —
+  // crosscheck.ts matches the architecture's declared stack against ALL of these, not just the
+  // headline one, so an app that legitimately bought a different accepted option (e.g. Supabase
+  // Auth instead of Clerk) isn't flagged as if it silently ignored the advisory.
   rationale: string;
 }
 
@@ -56,6 +60,7 @@ export function buyVsBuild(spec: Spec): BuyVsBuild[] {
         category: cat.key,
         recommendation: "buy",
         service: cat.services[0]!,
+        services: cat.services,
         rationale: `First ask whether you need ${cat.key} at all — an unrequested capability is the cheapest thing to cut. If you do need it, don't build it: a mature ${cat.key} service exists (${cat.services.join(" / ")}), and integrating ${cat.services[0]} is almost always safer and faster than rebuilding it — unless cost, data-residency/compliance, or integration complexity rule it out, in which case build with that rationale recorded. Default stays build; you decide.`,
       });
     }

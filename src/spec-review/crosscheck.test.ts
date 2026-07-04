@@ -63,9 +63,27 @@ describe("crossCheck — spec ↔ PRD ↔ architecture consistency", () => {
     expect(crossCheck(nonSensitive, prd({ spec: nonSensitive }), noData).find((x) => x.ruleId === "architecture-misses-data-layer")?.severity).toBe("medium");
   });
 
-  test("a workstream that builds a BUY category → builds-what-should-be-bought (advisory)", () => {
-    const p = prd({ buyVsBuild: [{ category: "payments", recommendation: "buy", service: "Stripe", rationale: "use Stripe" }] });
-    const a = arch({ workstreams: [ws("db", ["supabase/migrations/1.sql"], "schema"), ws("payments", ["pay.ts"], "build payment processing")] });
+  test("a workstream that builds a BUY category, with NO evidence the service was adopted → builds-what-should-be-bought (advisory)", () => {
+    const p = prd({ buyVsBuild: [{ category: "payments", recommendation: "buy", service: "Stripe", services: ["Stripe"], rationale: "use Stripe" }] });
+    const a = arch({ stack: "Next.js + Supabase", workstreams: [ws("db", ["supabase/migrations/1.sql"], "schema"), ws("payments", ["pay.ts"], "build payment processing")] });
     expect(crossCheck(spec(), p, a).map((x) => x.ruleId)).toContain("builds-what-should-be-bought");
+  });
+
+  test("the regression this closes: the architecture's stack already names an accepted option → no false-positive finding", () => {
+    // Found 2026-07-04: this fired on every real build regardless of outcome, including ones that
+    // correctly wired Supabase Auth (an accepted buy option, not hand-rolled) or Resend (the
+    // headline recommendation itself) — because it only ever checked the workstream's NAME, never
+    // what the architecture said it was actually using.
+    const p = prd({
+      buyVsBuild: [
+        { category: "authentication", recommendation: "buy", service: "Clerk", services: ["Clerk", "Auth0", "Supabase Auth"], rationale: "r" },
+        { category: "email & notifications", recommendation: "buy", service: "Resend", services: ["Resend", "SendGrid", "Twilio"], rationale: "r" },
+      ],
+    });
+    const a = arch({
+      stack: "Next.js + Supabase (Postgres + Auth + RLS) + TypeScript + Tailwind + Resend",
+      workstreams: [ws("db", ["supabase/migrations/1.sql"], "schema"), ws("auth", ["auth.ts"], "sign-in via Supabase Auth"), ws("email", ["mail.ts"], "send notifications via Resend")],
+    });
+    expect(crossCheck(spec(), p, a).map((x) => x.ruleId)).not.toContain("builds-what-should-be-bought");
   });
 });

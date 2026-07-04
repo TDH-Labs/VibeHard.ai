@@ -49,14 +49,24 @@ export function crossCheck(spec: Spec, prd: Prd, arch: Architecture): Finding[] 
   }
 
   // 3. Don't rebuild a commodity buy-vs-build said to BUY (advisory — a heuristic nudge).
+  // A workstream NAME matching the category isn't evidence of a violation by itself — "auth" is
+  // the workstream every app needs whether it's hand-rolled OR wired to Supabase Auth (itself an
+  // accepted buy option, see buy-vs-build.ts). Check the architecture's OWN declared stack for
+  // ANY accepted service in the category first; only fire when the stack gives no evidence any
+  // of them were actually adopted. (Found 2026-07-04: this fired on every build regardless of
+  // outcome — including ones that correctly used Resend/Supabase Auth — because it never looked
+  // past the workstream's name. A finding nobody can ever satisfy isn't a check, it's noise.)
+  const stackLower = arch.stack.toLowerCase();
+  const stackEvidencesService = (service: string): boolean => service.toLowerCase().split(/\s+/).some((word) => stackLower.includes(word));
   for (const b of prd.buyVsBuild) {
     if (b.recommendation !== "buy") continue;
+    if (b.services.some(stackEvidencesService)) continue; // the stack already names an accepted option — bought, not built
     const key = b.category.toLowerCase().split(/[^a-z]+/).filter(Boolean)[0];
     if (!key) continue;
     const re = new RegExp(`\\b${key}`, "i");
     if (arch.workstreams.some((w) => re.test(w.name) || re.test(w.responsibility))) {
       out.push(
-        f("builds-what-should-be-bought", "medium", `A workstream appears to build "${b.category}", which buy-vs-build recommends buying (${b.service}). Confirm you mean to build it rather than integrate.`),
+        f("builds-what-should-be-bought", "medium", `A workstream appears to build "${b.category}", and the architecture's stack doesn't name ${b.services.join("/")} or any other accepted option — confirm you mean to hand-build it rather than integrate.`),
       );
     }
   }
