@@ -32,11 +32,23 @@ export async function generateTextResilient(
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      return await generateText({ ...args, abortSignal: AbortSignal.timeout(timeoutMs) });
+      const result = await generateText({ ...args, abortSignal: AbortSignal.timeout(timeoutMs) });
+      // A 200 whose text is pure whitespace is provider degeneration (observed live 2026-07-04:
+      // OpenRouter returned a body of newlines mid-PRD and the build died). Retry it like any
+      // other transient fault instead of handing garbage to the trust boundary.
+      if (!result.text.trim()) {
+        lastErr = new Error("whitespace-only model response");
+        if (attempt === retries) throw lastErr;
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      return result;
     } catch (e) {
       lastErr = e;
       const sig = e instanceof Error ? `${e.name} ${e.message}` : String(e);
-      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|\b(429|500|502|503|504)\b/i.test(sig);
+      // JSONParseError/Unexpected EOF: the PROVIDER's own response body failed to parse — same
+      // degeneration class as above, surfaced by the SDK before we ever see text.
+      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|JSON parse|JSONParseError|JSON parsing failed|Unexpected EOF|whitespace-only|\b(429|500|502|503|504)\b/i.test(sig);
       if (!transient || attempt === retries) throw e;
       await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // linear backoff
     }

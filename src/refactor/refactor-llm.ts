@@ -5,12 +5,11 @@
  * survives — these only propose. Reuses the engine ModelFactory + the bolt engine
  * (like the auto-fixer), so provider/model selection stays single-sourced.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import { readAppSources } from "../gate/rls.ts";
 import type { EngineConfig } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, type ModelFactory , generateTextResilient} from "../engine/bolt/driver.ts";
 import { BoltEngine } from "../engine/bolt/engine.ts";
 import { liveBoltDriver } from "../engine/bolt/driver.ts";
 import { coerceRefactorBrief, type RefactorBrief, type Refactorer, type Scorer } from "./refactor.ts";
@@ -52,7 +51,7 @@ export function llmScorer(opts: RefactorLlmOptions = {}): Scorer {
   return async (workspace) => {
     const sources = await readAppSources(workspace);
     if (sources.length === 0) return { targets: [], summary: "no source to review" };
-    const { text } = await generateText({
+    const { text } = await generateTextResilient({
       model: modelFactory(config),
       system: SCORE_SYSTEM_PROMPT,
       prompt: `Project files:\n\n${sourceBlock(sources)}`,

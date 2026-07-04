@@ -111,16 +111,27 @@ export function llmFunctionalReviewer(opts: FunctionalReviewOptions = {}): Funct
     // "all present" on consecutive runs). Give it real headroom, and retry once before giving up.
     let lastLen = 0;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const { text } = await generateTextResilient({
-        model: modelFactory(config),
-        system: FUNCTEST_SYSTEM_PROMPT,
-        prompt,
-        maxOutputTokens: 16_000,
-        temperature: 0, // judge the SAME code the same way every round — sampling variance made the
-        // completeness verdict wobble (a feature flagged missing one round, present the next),
-        // which stops a finished build from converging (completeness is never green at the same
-        // time as the other gates). Greedy decoding makes the grade stable + reproducible.
-      });
+      let text = "";
+      try {
+        // retries: 0 — this loop IS the retry policy here, and the wrapper now throws on a
+        // whitespace-only response, which this reviewer must convert to its own loud
+        // FunctionalReviewUnavailable rather than let escape as a generic error.
+        ({ text } = await generateTextResilient(
+          {
+            model: modelFactory(config),
+            system: FUNCTEST_SYSTEM_PROMPT,
+            prompt,
+            maxOutputTokens: 16_000,
+            temperature: 0, // judge the SAME code the same way every round — sampling variance made the
+            // completeness verdict wobble (a feature flagged missing one round, present the next),
+            // which stops a finished build from converging (completeness is never green at the same
+            // time as the other gates). Greedy decoding makes the grade stable + reproducible.
+          },
+          { retries: 0 },
+        ));
+      } catch {
+        text = ""; // an unusable response counts as a failed attempt of THIS loop
+      }
       lastLen = (text ?? "").length;
       const checks = coerceChecks(tryExtractJsonObject(text ?? ""));
       if (checks.length) return checks;

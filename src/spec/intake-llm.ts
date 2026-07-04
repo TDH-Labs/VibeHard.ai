@@ -5,11 +5,10 @@
  * readiness. Reuses the engine's ModelFactory so provider/model selection is the
  * single source of truth (§13). The I/O half — the loop in intake.ts stays pure.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { isBlocking } from "../types.ts";
 import type { EngineConfig } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, type ModelFactory , generateTextResilient} from "../engine/bolt/driver.ts";
 import { coerceSpec, tryExtractJsonObject } from "./coerce.ts";
 import type { Intake } from "./intake.ts";
 
@@ -67,7 +66,7 @@ export function llmIntake(opts: LlmIntakeOptions = {}): Intake {
         ].join("\n")
       : `App idea: ${prompt}\n\nReturn the PRD JSON.`;
 
-    const { text } = await generateText({
+    const { text } = await generateTextResilient({
       model: modelFactory(config),
       system: INTAKE_SYSTEM_PROMPT,
       prompt: user,

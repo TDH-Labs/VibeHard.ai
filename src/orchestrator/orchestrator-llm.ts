@@ -4,10 +4,9 @@
  * takes an action; the orchestrator runs deterministic code for each verb and gates the
  * consequential ones behind a human confirm. LLM proposes the intent, deterministic disposes.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import type { EngineConfig } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, type ModelFactory , generateTextResilient} from "../engine/bolt/driver.ts";
 import { tryExtractJsonObject } from "../spec/coerce.ts";
 import type { Classification, Classifier, Intent } from "./orchestrator.ts";
 
@@ -34,7 +33,7 @@ export function llmClassifier(opts: { modelFactory?: ModelFactory; config?: Engi
   const config = opts.config ?? configForStage("functest"); // a light model is plenty for routing
   return async (message, context) => {
     try {
-      const { text } = await generateText({
+      const { text } = await generateTextResilient({
         model: modelFactory(config),
         system: SYSTEM,
         prompt: `Build context: ${context}\n\nTheir message: ${message}`,

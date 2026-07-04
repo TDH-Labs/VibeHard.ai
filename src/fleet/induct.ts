@@ -9,9 +9,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, type ModelFactory , generateTextResilient} from "../engine/bolt/driver.ts";
 import { tryExtractJsonObject } from "../spec/coerce.ts";
 import type { EngineConfig } from "../types.ts";
 import { addConvention, promotable, type Candidate, type Convention, type Phase } from "./fleet.ts";
@@ -101,7 +100,7 @@ export function llmInductor(opts: InductorOptions = {}): Inductor {
   const config = opts.config ?? configForStage("review"); // a reasoning model judges generality
   return async (candidate) => {
     try {
-      const { text } = await generateText({ model: modelFactory(config), system: INDUCT_SYSTEM, prompt: renderCandidate(candidate), maxOutputTokens: 4000, abortSignal: AbortSignal.timeout(60_000) });
+      const { text } = await generateTextResilient({ model: modelFactory(config), system: INDUCT_SYSTEM, prompt: renderCandidate(candidate), maxOutputTokens: 4000, abortSignal: AbortSignal.timeout(60_000) });
       return coerceConvention(tryExtractJsonObject(text), candidate);
     } catch {
       return null; // a transient failure just skips this candidate — never crashes induction

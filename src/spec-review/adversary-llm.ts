@@ -9,11 +9,10 @@
  * Honest limit: an LLM reviewing an LLM's plan has correlated blind spots — this
  * reduces risk, it doesn't eliminate it. The human stays the ultimate front-half judge.
  */
-import { generateText } from "ai";
 import { configForStage } from "../config/models.ts";
 import { tryExtractJsonObject } from "../spec/index.ts";
 import type { EngineConfig, Finding } from "../types.ts";
-import { defaultModelFactory, type ModelFactory } from "../engine/bolt/driver.ts";
+import { defaultModelFactory, type ModelFactory , generateTextResilient} from "../engine/bolt/driver.ts";
 import type { Adversary, FrontHalfBundle } from "./review.ts";
 
 const ADVERSARY_SYSTEM_PROMPT = `You are a SKEPTICAL senior reviewer. Find what is WRONG with this plan (spec → PRD → architecture) BEFORE it is built. Assume it is flawed and look hard — do NOT rubber-stamp. Cover these lenses:
@@ -60,7 +59,7 @@ export function llmAdversary(opts: LlmAdversaryOptions = {}): Adversary {
       prd: { requirements: bundle.prd.requirements, nfrs: bundle.prd.nfrs, buyVsBuild: bundle.prd.buyVsBuild },
       architecture: { stack: bundle.architecture.stack, workstreams: bundle.architecture.workstreams },
     };
-    const { text } = await generateText({ model: modelFactory(config), system: ADVERSARY_SYSTEM_PROMPT, prompt: `Plan to review:\n${JSON.stringify(summary)}`, maxOutputTokens: 4000 });
+    const { text } = await generateTextResilient({ model: modelFactory(config), system: ADVERSARY_SYSTEM_PROMPT, prompt: `Plan to review:\n${JSON.stringify(summary)}`, maxOutputTokens: 4000 });
     return coerceAdversarialFindings(tryExtractJsonObject(text));
   };
 }
