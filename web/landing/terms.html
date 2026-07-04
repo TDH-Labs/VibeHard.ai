@@ -68,7 +68,7 @@ footer a:hover{color:var(--amber-t)}
   <div class="banner"><b>This is a working draft, not final legal text.</b> It's written to be accurate about what the product actually does, but it has not been reviewed by counsel. Get it reviewed before relying on it for a real signup or billing relationship at scale.</div>
 
   <h2>1. What VibeHard is</h2>
-  <p>VibeHard is a software factory with an inspection line. You describe an application; VibeHard drafts a specification, generates code against it, and runs a fixed sequence of automated checks ("gates") before the application is deployed. A build that fails a gate does not ship. Findings a gate can't resolve automatically are routed to a human reviewer scoped to the specific flagged issue.</p>
+  <p>VibeHard is a software factory with an inspection line. You describe an application; VibeHard drafts a specification, generates code against it, and runs a fixed sequence of automated checks ("gates") before the application is deployed. A build that fails a gate does not ship. Findings the automated fix loop can't resolve hold the build; a held build does not deploy.</p>
 
   <h2>2. What VibeHard does not claim</h2>
   <p>Passing the gate line means a build met the specific, deterministic checks each gate runs — nothing more. <b>VibeHard does not claim that any generated application is "HIPAA-compliant," "SOC 2 certified," or compliant with any other regulatory framework.</b> Compliance with a legal or regulatory standard is a determination only you and your counsel can make about your specific use. Gate output can inform that determination; it is not a substitute for it.</p>
@@ -83,8 +83,8 @@ footer a:hover{color:var(--amber-t)}
   <h2>5. Acceptable use</h2>
   <p>You may not use VibeHard to build applications intended to violate law, to knowingly circumvent the security gates, or to attempt to access another customer's application or data. Attempting to defeat the isolation between applications is a violation of these terms regardless of whether the attempt succeeds.</p>
 
-  <h2>6. Held builds and human review</h2>
-  <p>When a gate flags something it cannot resolve automatically, your build is held and routed to a human reviewer for that specific issue. Held builds do not deploy until resolved. This applies at every plan tier and is not a paid add-on.</p>
+  <h2>6. Held builds</h2>
+  <p>When a gate flags something the automated fix loop cannot resolve, your build is held. Held builds do not deploy until the findings are resolved — by re-running the fix loop or by revising your request. This applies at every plan tier.</p>
 
   <h2>7. Service availability and changes</h2>
   <p>VibeHard is provided on an as-available basis. Features, gate behavior, and pricing may change; material changes to pricing or plan limits will be communicated in advance where practical. VibeHard is not liable for downtime, data loss, or business interruption beyond what applicable law requires.</p>

@@ -140,19 +140,19 @@ footer .col a:hover{color:var(--amber-t)}
 
 <section id="why">
   <div class="rail pad" style="padding-bottom:clamp(64px,9vh,110px)">
-    <div class="sechead"><p class="lbl">WHY A HUMAN REVIEW DOESN'T COST EXTRA</p></div>
-    <h2 class="disp" style="margin:22px 0 10px;max-width:820px" data-rv>Every review stays <span style="color:var(--amber)">narrow by design.</span></h2>
+    <div class="sechead"><p class="lbl">WHY SAFETY DOESN'T COST EXTRA</p></div>
+    <h2 class="disp" style="margin:22px 0 10px;max-width:820px" data-rv>A held build is <span style="color:var(--amber)">baseline behavior.</span></h2>
     <div class="econ" data-rv>
       <div>
-        <p>When a build hits something a gate can't resolve on its own, it doesn't sit in a queue waiting for an expensive open-ended engagement. The gate has already localized the exact flagged slice — the one policy, the one field, the one migration — so a reviewer isn't auditing your whole app. They're looking at one specific thing, with the context needed to judge it and nothing more.</p>
-        <p>That's the difference between a 15-minute specialist visit and a full workup, and it's why this can be baseline behavior instead of a premium add-on. <b>Every tier gets it.</b> There's no "upgrade to unlock a real person" — a held build routes to review the same way whether you're paying $0 or $199 a month. The tiers below set your daily build throughput. They don't set your safety margin.</p>
+        <p>When a build hits something the fix loop can't safely close, it holds. The gates have already localized the exact flagged slice — the one policy, the one field, the one migration — and the dashboard translates each finding into plain English, so you can see precisely what stopped the release.</p>
+        <p>Holding is how the line works, at every tier. There's no "upgrade to unlock the safety checks" — a build holds the same way whether you're paying $0 or $199 a month, and from the hold you rerun the fix loop or refine the request and build again. The tiers below set your daily build throughput. They don't set your safety margin.</p>
       </div>
       <div class="econtile">
-        <div class="head">Why the math works</div>
-        <div class="row"><span>Reviewer scope</span><span>the exact flagged slice</span></div>
-        <div class="row"><span>Target review time</span><span>~20–30 min</span></div>
-        <div class="row"><span>What breaks the model</span><span>an open-ended review</span></div>
-        <div class="row"><span>What keeps it narrow</span><span>the gate's own localization</span></div>
+        <div class="head">What a hold gives you</div>
+        <div class="row"><span>Findings</span><span>localized to the flagged slice</span></div>
+        <div class="row"><span>Language</span><span>plain English, no jargon</span></div>
+        <div class="row"><span>Your next move</span><span>rerun the loop, or refine</span></div>
+        <div class="row"><span>What never happens</span><span>an unverified deploy</span></div>
       </div>
     </div>
   </div>
@@ -162,7 +162,7 @@ footer .col a:hover{color:var(--amber-t)}
   <div class="rail pad" style="padding-bottom:clamp(64px,9vh,110px)">
     <div class="sechead"><p class="lbl">THE TIERS</p></div>
     <h2 class="disp" style="margin:22px 0 10px" data-rv>Pick your <span style="color:var(--amber)">throughput.</span></h2>
-    <p style="max-width:600px;font-size:17px" data-rv>Every plan runs the full 11-gate line and the identical hold-and-review path. Plans differ in how much you can build per day and how many projects you can hold at once.</p>
+    <p style="max-width:600px;font-size:17px" data-rv>Every plan runs the full 11-gate line and the identical hold path. Plans differ in how much you can build per day and how many projects you can hold at once.</p>
     <div class="cards" data-rv>
       <div class="card">
         <span class="pname">Free</span>
@@ -211,8 +211,8 @@ footer .col a:hover{color:var(--amber-t)}
     <h2 class="disp" style="margin:22px 0 10px" data-rv>Before you <span style="color:var(--amber)">pick a plan.</span></h2>
     <div class="faq" data-rv>
       <div class="faqrow">
-        <h3>Do I pay more if my build gets flagged for review?</h3>
-        <p>No. Routing a held build to a reviewer is baseline gate behavior for anything that needs judgment instead of a mechanical fix, and it's included at every tier equally.</p>
+        <h3>Do I pay more if my build gets held?</h3>
+        <p>No. Holding a build that can't pass is baseline gate behavior, included at every tier equally. From the hold you rerun the fix loop or refine your request and build again.</p>
       </div>
       <div class="faqrow">
         <h3>What happens when I hit my daily build limit?</h3>
@@ -228,7 +228,7 @@ footer .col a:hover{color:var(--amber-t)}
       </div>
       <div class="faqrow">
         <h3>What if a build never converges?</h3>
-        <p>The repair loop is bounded. If it exhausts its rounds without a clean pass, the build is held and routed to a person with every finding attached — it never ships broken, and it never just sits there either.</p>
+        <p>The repair loop is bounded. If it exhausts its rounds without a clean pass, the build is held with every finding attached, in plain English — it never ships broken. Rerun the loop or adjust the request; nothing deploys until the line is green.</p>
       </div>
     </div>
   </div>

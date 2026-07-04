@@ -112,6 +112,8 @@ Return ONLY JSON:
 export interface InterviewerOptions {
   modelFactory?: ModelFactory;
   config?: EngineConfig;
+  /** test seam: run one model call (system, prompt) → raw text. Defaults to the live model. */
+  generate?: (system: string, prompt: string) => Promise<string>;
 }
 
 /** Soft minimum the caller's prompt enforces for a non-trivial app (the first question establishes
@@ -134,19 +136,46 @@ function renderHistory(prompt: string, history: InterviewTurn[]): string {
   return lines.join("\n");
 }
 
-/** The live interviewer — one model call per question. */
+/** Appended when the model tries to end the interview without asking a single question — the one
+ *  outcome that reads as "grill-me asked nothing". It must stand by that choice explicitly. */
+const ZERO_QUESTION_NUDGE = `
+
+You just returned done WITHOUT ASKING A SINGLE QUESTION. That is only correct for a genuinely trivial tool — no users, no login, no stored data. If this app has ANY of those, ask the first question now (scope, or who-can-see-whose-data). Only return done again if you are certain the tool is trivial.`;
+
+/** The live interviewer — one model call per question, hardened so the interview actually happens:
+ *  a transient model/gateway error retries once before the fail-safe "done" (a single 502 used to
+ *  silently skip the whole interview), and a done-with-zero-questions answer is challenged once
+ *  before it's accepted. Failures log a marker so a skipped interview is diagnosable in prod. */
 export function llmInterviewer(opts: InterviewerOptions = {}): Interviewer {
   const modelFactory = opts.modelFactory ?? defaultModelFactory;
   // The interview is user-facing and short — uses the "intake" stage model (a capable reasoning
   // model by default, not the fast build model). Override with VIBEHARD_MODEL_INTAKE.
   const config: EngineConfig = opts.config ?? configForStage("intake");
-  return async (prompt: string, history: InterviewTurn[]) => {
-    try {
-      const { text } = await generateText({ model: modelFactory(config), system: INTERVIEW_SYSTEM_PROMPT, prompt: renderHistory(prompt, history), maxOutputTokens: 8000, abortSignal: AbortSignal.timeout(45_000) });
-      return coerceStep(tryExtractJsonObject(text));
-    } catch {
-      return { done: true, question: null }; // fail-safe: any error ends the interview, build proceeds
+  const generate =
+    opts.generate ??
+    (async (system: string, prompt: string) => {
+      const { text } = await generateText({ model: modelFactory(config), system, prompt, maxOutputTokens: 8000, abortSignal: AbortSignal.timeout(45_000) });
+      return text;
+    });
+  const ask = async (user: string): Promise<InterviewStep | null> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        return coerceStep(tryExtractJsonObject(await generate(INTERVIEW_SYSTEM_PROMPT, user)));
+      } catch (e) {
+        console.error(`[interview] attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
+    return null;
+  };
+  return async (prompt: string, history: InterviewTurn[]) => {
+    const user = renderHistory(prompt, history);
+    let step = await ask(user);
+    if (!step) return { done: true, question: null }; // fail-safe after retries: build proceeds
+    if (step.done && history.length === 0) {
+      step = (await ask(user + ZERO_QUESTION_NUDGE)) ?? step;
+      if (step.done) console.error("[interview] ended with zero questions (model judged the tool trivial twice)");
+    }
+    return step;
   };
 }
 

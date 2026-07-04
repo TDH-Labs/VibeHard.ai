@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How it works — VibeHard</title>
-<meta name="description" content="You describe the app. VibeHard drafts a binding spec, writes the code, runs eleven deterministic gates, and hands anything a machine can't judge to a person. Here is the sequence, in full.">
+<meta name="description" content="You describe the app. VibeHard drafts a binding spec, writes the code, runs eleven deterministic gates, and holds anything that can't pass. Here is the sequence, in full.">
 <meta property="og:title" content="How it works — VibeHard">
 <meta property="og:description" content="The full sequence from a sentence to a signed, deployed build.">
 <meta property="og:type" content="website">
@@ -151,9 +151,9 @@ footer .col a:hover{color:var(--amber-t)}
         <p>The code gets generated against that spec. Then eleven independent gates run in fixed order — static analysis, secret scanning, a live two-tenant attack against the real database, a boot test repeated until it stops being flaky. Nothing ships on "looks right." It ships on "survived." <a href="/trust.html">See every gate</a>.</p>
       </div>
       <div>
-        <div class="n">03 // JUDGMENT</div>
-        <h3>The rest goes to a person</h3>
-        <p>Most findings get fixed and re-checked automatically — that loop is below. Findings that need judgment, not a mechanical correction, route to a vetted reviewer scoped to the exact flagged slice, who signs off on the piece a gate can't decide alone.</p>
+        <div class="n">03 // THE HOLD</div>
+        <h3>It converges, or it holds</h3>
+        <p>Most findings get fixed and re-checked automatically — that loop is below. A build that can't reach a clean pass inside the loop's bounded rounds is held before anything ships. You see every finding in plain English, and you can rerun the loop or refine the request.</p>
       </div>
     </div>
   </div>
@@ -162,8 +162,8 @@ footer .col a:hover{color:var(--amber-t)}
 <section id="loop-section" style="background:var(--carbon)">
   <div class="rail pad" style="padding-bottom:clamp(64px,9vh,110px)">
     <div class="sechead"><p class="lbl">02 / THE REPAIR LOOP</p></div>
-    <h2 class="disp" style="margin:22px 0 10px;max-width:820px" data-rv>Most builds never <span style="color:var(--amber)">reach a human.</span></h2>
-    <p style="max-width:660px;font-size:17px" data-rv>A blocked gate becomes a work order: the system rewrites the flagged piece, re-runs the gates, and repeats, bounded, until it converges. You describe what you want. The output gets debugged without you.</p>
+    <h2 class="disp" style="margin:22px 0 10px;max-width:820px" data-rv>A blocked gate becomes <span style="color:var(--amber)">a work order.</span></h2>
+    <p style="max-width:660px;font-size:17px" data-rv>The system rewrites the flagged piece, re-runs the gates, and repeats, bounded, until it converges. You describe what you want. The output gets debugged without you.</p>
     <div class="loop" data-rv>
       <div class="diagram" aria-label="The repair loop: gate, block, fix, re-gate, converge or hold">
         <div class="st">GATE <span class="arr">▸</span></div>
@@ -178,8 +178,8 @@ footer .col a:hover{color:var(--amber-t)}
           A missing access policy, an unpinned dependency, a leaked-into-logs field — these have a correct answer a machine can apply and a gate can verify. <b>The fixer never gets to lower the bar to pass</b> — weakening a check to dodge a finding is caught and the round is voided.
         </div>
         <div>
-          <h4>What goes to a person instead</h4>
-          If the loop exhausts its bounded rounds, the build doesn't ship broken and it doesn't wait forever either — it's <b>held</b>, packaged with every verdict and finding, and routed to a reviewer. That's the one exit that isn't automatic, and it's the only one that needs to be.
+          <h4>What happens when it can't</h4>
+          If the loop exhausts its bounded rounds, the build doesn't ship broken and it doesn't pretend to pass — it's <b>held</b>, with every verdict and finding attached in plain English. Rerun the loop, or change the request and build again. Nothing leaves the floor unverified.
         </div>
       </div>
     </div>

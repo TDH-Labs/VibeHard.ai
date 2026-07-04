@@ -259,7 +259,7 @@ function keyForm(){
   $("#keystate").innerHTML='<input id="keyin" placeholder="sk-ant-…" style="margin-top:12px"><div class="row" style="margin-top:11px"><button id="savekey">Save key</button><span class="err" id="keyerr" style="margin:0"></span></div>';
   $("#savekey").onclick=async()=>{const key=$("#keyin").value.trim();const {status,body}=await api("/api/key",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key})});if(status>=400){$("#keyerr").textContent=body.error;return}await load()};
 }
-const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber)">⏸ held for review</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber)">deploy snag</span>',error:'<span class="bad" style="color:var(--red)">error</span>'};
+const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber)">⏸ held by the gates</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber)">deploy snag</span>',error:'<span class="bad" style="color:var(--red)">error</span>'};
 function renderBuilds(){
   if(!me.builds||!me.builds.length){$("#builds").innerHTML='<span class="muted" style="font-size:14px">No builds yet.</span>';return}
   $("#builds").innerHTML=me.builds.map((b,i)=>{
@@ -302,9 +302,9 @@ async function renderHeld(app,el){
   const {body}=await api("/api/held?app="+encodeURIComponent(app));
   const wrap=document.createElement("div");wrap.className="held-findings";wrap.style.marginTop="12px";
   if(body.findings&&body.findings.length){
-    wrap.innerHTML=body.findings.map(f=>'<div style="margin-bottom:8px;padding:10px 12px;background:var(--carbon);border:1px solid var(--line)"><div style="font-size:13px;font-weight:600">'+esc(f.title)+'</div><div class="muted" style="font-size:12.5px;margin-top:3px;line-height:1.5">'+esc(f.detail)+'</div></div>').join("")+'<div class="muted" style="font-size:12px;margin-top:4px">An engineer has been notified ('+esc(body.state||"queued")+'). You\'ll be told when it\'s resolved.</div>';
+    wrap.innerHTML=body.findings.map(f=>'<div style="margin-bottom:8px;padding:10px 12px;background:var(--carbon);border:1px solid var(--line)"><div style="font-size:13px;font-weight:600">'+esc(f.title)+'</div><div class="muted" style="font-size:12.5px;margin-top:3px;line-height:1.5">'+esc(f.detail)+'</div></div>').join("")+'<div class="muted" style="font-size:12px;margin-top:4px">The fix loop couldn\'t close these on its own. Tell the assistant below to "retry" to run it again, or refine your description and rebuild.</div>';
   }else{
-    wrap.innerHTML='<div class="muted" style="font-size:12.5px">An engineer has been notified and will review this. You\'ll be told when it\'s resolved.</div>';
+    wrap.innerHTML='<div class="muted" style="font-size:12.5px">The gates held this build before anything shipped. Tell the assistant below to "retry" to run the fix loop again, or refine your description and rebuild.</div>';
   }
   el.appendChild(wrap);
 }
@@ -395,7 +395,7 @@ function startBuild(prompt,resumeApp,mode){
     if(r==="paused"){finishStages(stageIdx);res.className="result held";res.innerHTML='<h3>⏸ Build paused.</h3><span class="muted">Your finished stages are saved. Resume any time and it continues from here — no work repeated.</span>';res.style.display="block";notify("Build paused","Resume any time — your work is saved.");load(true);return}
     if(r==="live"){finishStages(STAGES.length-1);res.className="result live";res.innerHTML=`<h3>✓ Shipped — safe to go live.</h3>${lastUrl?`<a href="${lastUrl}" target="_blank">${lastUrl}</a>`:'<span class="muted">deployed</span>'}`;notify("Build shipped ✓",lastUrl||"Your app is live.")}
     else{finishStages(stageIdx);
-      if(r==="blocked"){res.className="result held";res.innerHTML='<h3>Held for review.</h3><span class="muted">A security check flagged something the auto-fixer couldn\'t safely close, so we stopped before shipping — nothing unsafe went live. Here\'s exactly what a reviewer is looking at:</span>';notify("Held for review","A gate stopped the build — nothing unsafe shipped.")}
+      if(r==="blocked"){res.className="result held";res.innerHTML='<h3>Held by the gates.</h3><span class="muted">A security check flagged something the fix loop couldn\'t safely close, so the build stopped before shipping — nothing unsafe went live. Here\'s exactly what was flagged:</span>';notify("Held by the gates","A gate stopped the build — nothing unsafe shipped.")}
       else if(r==="deploy-failed"){res.className="result held";res.innerHTML='<h3>Gates passed; deploy hit a snag.</h3><span class="muted">The build itself is safe; the provisioning/deploy step needs attention (often credentials). See the live log.</span>';notify("Deploy hit a snag","Gates passed; the deploy step needs attention.")}
       else{res.className="result held";res.innerHTML='<h3>The build hit an error.</h3><span class="muted">Open the live log to see what happened.</span>';notify("Build error","Open the build to see what happened.")}
     }
@@ -414,8 +414,11 @@ async function beginBuild(prompt){
 }
 async function askNext(prompt,turns){
   let step=null;
-  // OPTIONAL: bound the wait (25s) so a slow/stalled question can never strand the flow.
-  try{step=await Promise.race([api("/api/intake/next",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt,history:turns})}).then(r=>r.body),new Promise(res=>setTimeout(()=>res({done:true}),25000))])}catch(e){step={done:true}}
+  // OPTIONAL: bound the wait so a stalled question can never strand the flow — but generously
+  // (90s): the intake model is a reasoning model and the server retries a failed call once.
+  // The old 25s bound fired BEFORE the model's first token and silently skipped the whole
+  // interview — "grill me" asked nothing.
+  try{step=await Promise.race([api("/api/intake/next",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt,history:turns})}).then(r=>r.body),new Promise(res=>setTimeout(()=>res({done:true}),90000))])}catch(e){step={done:true}}
   $("#buildhint").textContent="";
   if(!step||step.done||!step.question||!step.question.question||turns.length>=MAX_Q){$("#buildbtn").disabled=false;$("#questions").classList.add("hide");finishInterview(prompt,turns);return}
   const q=step.question;

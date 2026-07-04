@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { coerceStep, foldInterview, type InterviewTurn } from "./interview.ts";
+import { coerceStep, foldInterview, llmInterviewer, type InterviewTurn } from "./interview.ts";
 
 describe("coerceStep (trust boundary)", () => {
   test("a well-formed question step (options default to [])", () => {
@@ -58,5 +58,57 @@ describe("foldInterview (pure)", () => {
   test("drops blank answers; none → original prompt", () => {
     expect(foldInterview("p", [{ question: "Q?", answer: "  " }])).toBe("p");
     expect(foldInterview("p", [])).toBe("p");
+  });
+});
+
+describe("llmInterviewer hardening (injected generate)", () => {
+  const Q = JSON.stringify({ done: false, question: { question: "Who logs in?", options: [], recommended: "Just you" } });
+  const DONE = JSON.stringify({ done: true });
+
+  test("a transient error retries once instead of skipping the interview", async () => {
+    let calls = 0;
+    const interviewer = llmInterviewer({
+      generate: async () => {
+        calls++;
+        if (calls === 1) throw new Error("502 from gateway");
+        return Q;
+      },
+    });
+    const step = await interviewer("a client portal with logins", []);
+    expect(calls).toBe(2);
+    expect(step.done).toBe(false);
+    expect(step.question?.question).toBe("Who logs in?");
+  });
+
+  test("two consecutive errors fail safe to done (build never blocks)", async () => {
+    const interviewer = llmInterviewer({ generate: async () => { throw new Error("down"); } });
+    expect(await interviewer("anything", [])).toEqual({ done: true, question: null });
+  });
+
+  test("done with ZERO questions is challenged once — a real question on the second ask wins", async () => {
+    const answers = [DONE, Q];
+    let sawNudge = false;
+    const interviewer = llmInterviewer({
+      generate: async (_system, prompt) => {
+        if (prompt.includes("WITHOUT ASKING A SINGLE QUESTION")) sawNudge = true;
+        return answers.shift()!;
+      },
+    });
+    const step = await interviewer("a portal where clients see their own invoices", []);
+    expect(sawNudge).toBe(true);
+    expect(step.done).toBe(false);
+  });
+
+  test("done at zero stands only if the model repeats it under protest (trivial tool)", async () => {
+    const interviewer = llmInterviewer({ generate: async () => DONE });
+    expect(await interviewer("a page that shows the current time", [])).toEqual({ done: true, question: null });
+  });
+
+  test("done AFTER questions were asked is accepted without a challenge", async () => {
+    let calls = 0;
+    const interviewer = llmInterviewer({ generate: async () => { calls++; return DONE; } });
+    const step = await interviewer("an app", [{ question: "Who logs in?", answer: "Just me" }, { question: "Payments?", answer: "No" }, { question: "Edge case?", answer: "None" }]);
+    expect(calls).toBe(1);
+    expect(step.done).toBe(true);
   });
 });
