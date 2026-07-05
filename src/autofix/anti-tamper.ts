@@ -47,6 +47,11 @@ export interface ProtectedSurface {
   flaggedSizes: Record<string, number>;
   /** Count of suppression directives in source — an increase = a check silenced rather than fixed. */
   suppressions: number;
+  /** Content hash of every property test (tests/properties/*.test.ts). EPIC #53: the tests are
+   *  generated from the PRD's acceptance criteria and are READ-ONLY for fixes — any edit or
+   *  deletion is the "weaken the test instead of fixing the app" move, categorically rejected.
+   *  (New tests may be added; existing ones may not change in any way.) */
+  propTestHashes: Record<string, string>;
 }
 
 /** Tools whose findings are security-critical — deleting a file they flagged is tampering, not a fix. */
@@ -75,6 +80,27 @@ const FROM_RE = /\.from\(\s*['"`]([A-Za-z_][\w]*)['"`]/g;
 const GUT_FRACTION = 0.4;
 /** … but only when it had real content to begin with (avoids noise on already-tiny files). */
 const GUT_FLOOR = 30;
+
+/** Content hashes of every property test under tests/properties/ (EPIC #53). */
+function propTestHashes(root: string): Record<string, string> {
+  const dir = join(root, "tests", "properties");
+  const out: Record<string, string> = {};
+  if (!existsSync(dir)) return out;
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith(".test.ts"));
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    try {
+      out[join("tests/properties", n)] = Bun.hash(readFileSync(join(dir, n))).toString();
+    } catch {
+      /* unreadable → treated as absent; the gate's own read check reports it */
+    }
+  }
+  return out;
+}
 
 function migrationFiles(root: string): string[] {
   const dir = join(root, "supabase", "migrations");
@@ -183,6 +209,7 @@ export function captureSurface(root: string, blocking: Finding[]): ProtectedSurf
     tableRefs,
     flaggedSizes,
     suppressions,
+    propTestHashes: propTestHashes(root),
   };
 }
 
@@ -227,6 +254,16 @@ export function tamperReason(before: ProtectedSurface, after: ProtectedSurface):
 
   // audit2 B-1: a check silenced via a suppression directive rather than resolved.
   if (after.suppressions > before.suppressions) return `a suppression directive was ADDED (@ts-ignore / eslint-disable / nosemgrep / 'as any' count ${before.suppressions}→${after.suppressions}) — silencing a check instead of fixing it`;
+
+  // EPIC #53: property tests are generated from the PRD's acceptance criteria and are READ-ONLY
+  // for fixes — the only reason a fix would touch one is to make a failing property stop failing
+  // without fixing the app. Deletion AND any in-place edit are both tampering (a hash compare, so
+  // even a one-character weakening — a loosened bound, a narrowed generator — is caught).
+  for (const [file, hash] of Object.entries(before.propTestHashes)) {
+    const now = after.propTestHashes[file];
+    if (now === undefined) return `a property test was DELETED (${file}) — removing the check for a requirement instead of fixing the app`;
+    if (now !== hash) return `a property test was MODIFIED (${file}) — property tests assert the PRD's acceptance criteria and are read-only for fixes; fix the app behavior instead`;
+  }
 
   return null;
 }

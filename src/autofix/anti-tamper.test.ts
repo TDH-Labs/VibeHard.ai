@@ -52,6 +52,47 @@ describe("anti-tamper detection (pure)", () => {
   });
 });
 
+describe("anti-tamper — property tests are read-only for fixes (EPIC #53)", () => {
+  const propTest = (dir: string, content = "// @requirement F1\nimport fc from 'fast-check';\nfc.assert(x, { seed: 42 });\n"): void => {
+    mkdirSync(join(dir, "tests", "properties"), { recursive: true });
+    writeFileSync(join(dir, "tests/properties/f1.test.ts"), content);
+  };
+
+  test("DELETING a property test is tampering", () => {
+    const dir = ws();
+    propTest(dir);
+    const before = captureSurface(dir, []);
+    rmSync(join(dir, "tests/properties/f1.test.ts"));
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/property test was DELETED/i);
+  });
+
+  test("ANY in-place edit to a property test is tampering — even a one-character weakening", () => {
+    const dir = ws();
+    propTest(dir, "// @requirement F1\nfc.assert(fc.property(fc.integer({min:0,max:100}), p), { seed: 42 });\n");
+    const before = captureSurface(dir, []);
+    // The subtle move: narrow the generator so the failing input is no longer produced.
+    writeFileSync(join(dir, "tests/properties/f1.test.ts"), "// @requirement F1\nfc.assert(fc.property(fc.integer({min:0,max:10}), p), { seed: 42 });\n");
+    expect(tamperReason(before, captureSurface(dir, []))).toMatch(/property test was MODIFIED/i);
+  });
+
+  test("ADDING a new property test is not tampering (coverage may grow, never shrink)", () => {
+    const dir = ws();
+    propTest(dir);
+    const before = captureSurface(dir, []);
+    writeFileSync(join(dir, "tests/properties/f2.test.ts"), "// @requirement F2\nfc.assert(y, { seed: 7 });\n");
+    expect(tamperReason(before, captureSurface(dir, []))).toBeNull();
+  });
+
+  test("fixing APP source while property tests exist is NOT tampering", () => {
+    const dir = ws();
+    propTest(dir);
+    writeFileSync(join(dir, "lib.ts"), "export const f = () => 1;\n");
+    const before = captureSurface(dir, []);
+    writeFileSync(join(dir, "lib.ts"), "export const f = () => 2;\n");
+    expect(tamperReason(before, captureSurface(dir, []))).toBeNull();
+  });
+});
+
 describe("anti-tamper — audit2 B-1 walk-arounds", () => {
   test("deleting .vibehard/datamodel.json (disarms rls-enforce → n/a) is tampering", () => {
     const dir = ws();

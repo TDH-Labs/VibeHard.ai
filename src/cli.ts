@@ -26,7 +26,8 @@ import { artDirectorRefactorer, artDirectorScorer } from "./design/art-director.
 import { llmFunctionalReviewer, summarize } from "./functest/functest.ts";
 import { configForStage, modelForStage, modelPlan, providerOf } from "./config/models.ts";
 import { diagnose, formatDiagnosis } from "./diagnose/diagnose.ts";
-import { seedJournal } from "./journal/journal.ts";
+import { recordNote, seedJournal } from "./journal/journal.ts";
+import { generatePropertyTests } from "./proptest/generate.ts";
 import { fleetBlock } from "./fleet/fleet.ts";
 import { readWorkspaceSteering, steeringBlock } from "./steering/steering.ts";
 import { approveConvention, pendingConventions, runInduction } from "./fleet/induct.ts";
@@ -766,6 +767,20 @@ export async function main(argv: string[]): Promise<number> {
     // Seed the as-built journal (idempotent) — "intended" from planning; the gate→fix loop
     // then appends what actually happened. The fixer reads it to avoid repeating failed fixes.
     seedJournal(target, { name: spec.name, summary: spec.summary, stack: typeof arch.stack === "string" ? arch.stack : JSON.stringify(arch.stack ?? "Next.js + Supabase") });
+
+    // Property tests from the PRD's acceptance criteria (EPIC #53): encode each MVP requirement
+    // as a fast-check property that PASSES now — the proptest gate then blocks any later fix or
+    // change that breaks it, and anti-tamper makes the tests read-only. Idempotent (skips when
+    // files exist); a skipped requirement is journaled — less coverage, never fake coverage.
+    if (process.env.VIBEHARD_PROPTEST !== "0" && !existsSync(join(target, "tests", "properties"))) {
+      console.log("\n── encoding acceptance criteria as property tests … ──");
+      const pt = await generatePropertyTests(target, prd.requirements);
+      for (const w of pt.written) console.log(`  ▸ proptest: ${w}`);
+      for (const s of pt.skipped) {
+        console.log(`  ▸ proptest: ${s.id} skipped — ${s.reason.split("\n")[0]}`);
+        recordNote(target, `proptest: requirement ${s.id} not covered — ${s.reason.split("\n")[0]}`);
+      }
+    }
 
     // 6. back-half: security checks (gates) → auto-fix → hold-for-review (always run — the verifier)
     console.log("\n── running the security checks (gates) + auto-fixing … ──");

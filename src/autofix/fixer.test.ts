@@ -104,6 +104,17 @@ describe("defaultFixer — no-op generation guard", () => {
     expect(sent).toMatch(/as any/i);
   });
 
+  test("every fix prompt declares property tests read-only (EPIC #53)", async () => {
+    // The prompt-side half of the property-test moat; the enforcement half is the anti-tamper
+    // hash check. Same rationale as the other guardrail tests: assert the text reaches the model.
+    const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+    await defaultFixer({ modelFactory: () => model })(workspace(), [blockingVerdict()]);
+    const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(sent).toContain("tests/properties/");
+    expect(sent).toMatch(/READ-ONLY/i);
+    expect(sent).toMatch(/the APP is wrong, never the test/i);
+  });
+
   test("workspace steering reaches the fix prompt — but a security-touching rule never does", async () => {
     // EPIC #54: a fix round must keep the customer's naming conventions (or it silently undoes
     // them), while the steering channel must be unable to carry security instructions. Both
