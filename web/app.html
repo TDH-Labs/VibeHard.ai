@@ -195,6 +195,14 @@ summary.adv:hover{color:var(--text2)}
       <div class="builds" id="builds"><span class="muted" style="font-size:14px">No builds yet.</span></div>
     </div>
 
+    <div class="card" id="steercard">
+      <h2>Your business rules</h2>
+      <p class="muted" style="font-size:14px;margin-top:2px">Standing preferences that apply to everything we build for you — one per line. Naming and wording only: <i>clients are called members</i>, <i>invoices are net-30</i>, <i>keep the tone warm and informal</i>. Rules about security or logins are ignored — that part is never up for adjustment.</p>
+      <textarea id="steer-rules" rows="4" placeholder="clients are called members&#10;invoices are net-30" style="width:100%;margin-top:12px;resize:vertical"></textarea>
+      <div class="row" style="margin-top:10px;gap:10px;align-items:center"><button id="steer-save">Save rules</button><button id="steer-suggest" class="ghost" title="Reads your last build request and proposes rules — nothing applies until you save">Suggest from my last build</button><span id="steer-msg" class="muted" style="font-size:13px"></span></div>
+      <div id="steer-dropped" class="hide" style="margin-top:10px;padding:11px 14px;font-size:13px;line-height:1.6"></div>
+    </div>
+
     <details id="advanced" style="margin-bottom:18px">
       <summary class="adv">Advanced — bring your own AI account &amp; services (optional)</summary>
       <div class="card" id="keycard" style="margin-top:14px">
@@ -508,6 +516,32 @@ async function renderConnections(){
     if(status<400){connBanner("ok","Supabase connected — project "+esc(body.ref)+".");await renderConnections()}
   };
 }
+async function renderSteering(){
+  const {body}=await api("/api/steering");if(!body||body.error)return;
+  $("#steer-rules").value=body.rules||"";
+  $("#steer-save").onclick=async()=>{
+    const btn=$("#steer-save");btn.disabled=true;btn.textContent="Saving…";
+    const {status,body:r}=await api("/api/steering",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({rules:$("#steer-rules").value})});
+    btn.disabled=false;btn.textContent="Save rules";
+    const box=$("#steer-dropped");
+    if(status>=400){$("#steer-msg").textContent=(r&&r.error)||"save failed";return}
+    $("#steer-msg").textContent=r.kept.length?"Saved — applies to your next build.":"Saved (no rules).";
+    $("#steer-rules").value=r.kept.join("\n");
+    if(r.dropped&&r.dropped.length){box.classList.remove("hide");box.style.border="1px solid var(--line)";
+      box.innerHTML="<b>Not saved:</b><br>"+r.dropped.map(d=>"“"+esc(d.rule)+"” — "+esc(d.reason)).join("<br>");}
+    else{box.classList.add("hide")}
+  };
+  $("#steer-suggest").onclick=async()=>{
+    const btn=$("#steer-suggest");btn.disabled=true;btn.textContent="Reading your last build…";
+    const {status,body:r}=await api("/api/steering/suggest",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+    btn.disabled=false;btn.textContent="Suggest from my last build";
+    if(status>=400||!r||!r.candidates){$("#steer-msg").textContent="couldn't suggest right now";return}
+    if(!r.candidates.length){$("#steer-msg").textContent="No new suggestions from your last build.";return}
+    const cur=$("#steer-rules").value.trim();
+    $("#steer-rules").value=(cur?cur+"\n":"")+r.candidates.join("\n");
+    $("#steer-msg").textContent="Added "+r.candidates.length+" suggestion(s) — review, then Save to apply.";
+  };
+}
 async function load(keep){
   const sp=new URLSearchParams(location.search);const cp=sp.get("connect");if(cp&&CONN_MSG[cp]){const[k,t]=CONN_MSG[cp];connBanner(k,t);history.replaceState({},"","/app")}
   const {body}=await api("/api/me");me=body;
@@ -520,7 +554,7 @@ async function load(keep){
   $("#auth").classList.add("hide");$("#dash").classList.remove("hide");
   if(window.__CLERK&&window.Clerk){$("#who").innerHTML=`<span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2)">${me.email} · ${me.plan}</span> <span id="clerk-userbtn"></span>`;try{window.Clerk.mountUserButton(document.getElementById("clerk-userbtn"))}catch{}}
   else{$("#who").innerHTML=`<span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2)">${me.email} · ${me.plan}</span> <a id="logout" style="cursor:pointer">log out</a>`;$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST"});await load()};}
-  renderKey();renderConnections();renderBuilds();renderResume();renderDesignPicker();renderOrch();
+  renderKey();renderConnections();renderBuilds();renderResume();renderDesignPicker();renderOrch();renderSteering();
   // The landing hero ("Engage ignition") stashes the visitor's idea so it survives the signup wall.
   try{const idea=localStorage.getItem("vh.idea");if(idea&&!$("#prompt").value){$("#prompt").value=idea;localStorage.removeItem("vh.idea")}}catch{}
   // The pricing page stashes the clicked plan when a signed-out visitor picks Starter/Pro, the same

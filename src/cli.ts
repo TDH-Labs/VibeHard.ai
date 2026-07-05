@@ -28,6 +28,7 @@ import { configForStage, modelForStage, modelPlan, providerOf } from "./config/m
 import { diagnose, formatDiagnosis } from "./diagnose/diagnose.ts";
 import { seedJournal } from "./journal/journal.ts";
 import { fleetBlock } from "./fleet/fleet.ts";
+import { readWorkspaceSteering, steeringBlock } from "./steering/steering.ts";
 import { approveConvention, pendingConventions, runInduction } from "./fleet/induct.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
@@ -299,7 +300,12 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // Auto-pick the design preset from the app's domain (warm/professional/bold/clean) unless the
   // operator forced one with VIBEHARD_DESIGN — so it looks RIGHT without asking.
   const designPresetKey = process.env.VIBEHARD_DESIGN ?? pickDesignPreset(arch.prd.spec);
-  let systemPrompt = (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock(designPresetKey)) + fleetBlock(arch.stack, "codegen");
+  // Per-tenant steering (EPIC #54): the customer's standing vocabulary/style rules, dropped into
+  // the workspace by the web layer. Filtered + sanitized at render (steeringBlock); never read by gates.
+  let systemPrompt =
+    (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock(designPresetKey)) +
+    fleetBlock(arch.stack, "codegen") +
+    steeringBlock(readWorkspaceSteering(target));
 
   // DETERMINISTIC BACKEND (default ON for Supabase stacks; opt OUT with VIBEHARD_DETERMINISTIC_BACKEND=0):
   // generate migrations/RLS/auth/clients from the structured data model BEFORE codegen — the layer the

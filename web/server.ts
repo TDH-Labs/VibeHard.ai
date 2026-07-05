@@ -31,6 +31,8 @@ import { realBuildTools } from "../src/orchestrator/build-tools.ts";
 import { llmClassifier } from "../src/orchestrator/orchestrator-llm.ts";
 import { validateSupabaseConnection, supabaseKeychainEntries, stripeConnectAuthUrl, exchangeStripeConnectCode, stripeKeychainEntries } from "../src/connectors/index.ts";
 import { isSafeAppName } from "../src/util/safe-path.ts";
+import { normalizeSteering, STEERING_FILE, MAX_STEERING_BYTES } from "../src/steering/steering.ts";
+import { suggestSteering } from "../src/steering/suggest.ts";
 import { createClerkClient } from "@clerk/backend";
 import { clerkConfig, resolveTenantForClerkUser, frontendApiFromPublishableKey } from "../src/auth/clerk.ts";
 
@@ -852,6 +854,41 @@ const server = Bun.serve({
       return json({ ok: true });
     }
 
+    if (path === "/api/steering" && req.method === "GET") {
+      // The tenant's standing business rules (EPIC #54) — plain text, one rule per line, not secret.
+      if (!auth) return json({ error: "sign in first" }, 401);
+      const raw = (await tenantKv.get(auth.user.tenantId, "steering")) ?? "";
+      const { kept, dropped } = normalizeSteering(raw);
+      return json({ rules: kept.join("\n"), dropped });
+    }
+
+    if (path === "/api/steering" && req.method === "POST") {
+      // Save the rules. Normalization is the SAME function the prompt render uses, so what the UI
+      // reports as kept/dropped is exactly what a build will and won't see — no drift possible.
+      if (!auth) return json({ error: "sign in first" }, 401);
+      if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit3 D-2 CSRF
+      const { rules } = (await req.json()) as { rules?: string };
+      if (typeof rules !== "string") return json({ error: "rules (string) required" }, 400);
+      if (rules.length > MAX_STEERING_BYTES * 4) return json({ error: "steering text too large" }, 400);
+      const { kept, dropped } = normalizeSteering(rules);
+      await tenantKv.put(auth.user.tenantId, "steering", kept.join("\n"));
+      return json({ ok: true, kept, dropped });
+    }
+
+    if (path === "/api/steering/suggest" && req.method === "POST") {
+      // Propose candidate rules from the tenant's most recent build prompt (which carries the
+      // folded grill-me answers). LLM proposes → normalizeSteering disposes → user confirms by
+      // saving. Nothing here writes state.
+      if (!auth) return json({ error: "sign in first" }, 401);
+      if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit3 D-2 CSRF
+      const builds = await buildStore.listBuilds(auth.user.tenantId);
+      const latest = builds[0];
+      if (!latest?.prompt) return json({ candidates: [] });
+      const existing = (await tenantKv.get(auth.user.tenantId, "steering")) ?? "";
+      const candidates = await suggestSteering(latest.prompt, existing);
+      return json({ candidates });
+    }
+
     if (path === "/api/connect/supabase" && req.method === "POST") {
       // Validated key-import wizard: PROVE the URL + anon + service keys against the live project,
       // then persist all three to the keychain. A wrong paste fails here, not silently at deploy.
@@ -964,6 +1001,12 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
     throw new Error("workspace path escaped the tenant apps root — refusing (B-4)");
   }
   mkdirSync(workspace, { recursive: true });
+  // Per-tenant steering (EPIC #54): drop the tenant's rules into the workspace for the CLI
+  // subprocess (codegen + fixer read them via readWorkspaceSteering). Stored pre-normalized;
+  // written every build so an edit between builds takes effect on the next one.
+  const steeringRules = await tenantKv.get(tenantId, "steering");
+  mkdirSync(join(workspace, ".vibehard"), { recursive: true });
+  writeFileSync(join(workspace, STEERING_FILE), steeringRules ?? "");
   stopFlags.delete(tenantId);
   await buildStore.setActive(tenantId, { app, prompt, status: "running" });
   // Record in the persistent history (or flip an existing record back to running on resume).

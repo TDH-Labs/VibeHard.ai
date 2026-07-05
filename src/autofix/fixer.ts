@@ -17,6 +17,7 @@ import { configForStage } from "../config/models.ts";
 import { BoltEngine } from "../engine/bolt/engine.ts";
 import { liveBoltDriver, type ModelFactory } from "../engine/bolt/driver.ts";
 import { translateFinding } from "../translate/index.ts";
+import { readWorkspaceSteering, steeringBlock } from "../steering/steering.ts";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
 import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
 import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
@@ -145,6 +146,11 @@ export function buildFixPrompt(workspacePath: string, findings: Finding[], major
     }
     lines.push("");
   }
+  // Per-tenant steering (EPIC #54): keep the customer's naming/wording conventions intact while
+  // fixing, so a fix round doesn't silently undo them. Filtered + sanitized in steeringBlock;
+  // the block itself states that security requirements always win over a preference.
+  const steering = steeringBlock(readWorkspaceSteering(workspacePath));
+  if (steering) lines.push(steering, "");
   // The as-built journal of PRIOR rounds — so you don't repeat a fix that already failed.
   // If a finding recurs here, your last attempt didn't work: change APPROACH, don't retry it.
   const journal = readJournal(workspacePath);
