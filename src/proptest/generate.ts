@@ -65,6 +65,20 @@ const defaultRunTest: NonNullable<PropTestGenOptions["runTest"]> = (projectPath,
 const defaultInstall: NonNullable<PropTestGenOptions["install"]> = (projectPath) =>
   Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: projectPath, stdout: "ignore", stderr: "ignore" }).exitCode ?? 1;
 
+/** Fallback when the app's own manifest can't install (observed live 2026-07-05: codegen's
+ *  pre-fix-loop package.json was broken, so the full install failed and ALL property tests
+ *  were skipped): install ONLY fast-check into tests/properties/node_modules — bun's module
+ *  resolution finds it from the test files (nearest node_modules), and the app's own imports
+ *  never see it. Works regardless of what state the app's dependency tree is in. */
+function installFastCheckIsolated(projectPath: string): { ok: boolean; log: string } {
+  const p = Bun.spawnSync(["npm", "install", "--prefix", "tests/properties", "--no-audit", "--no-fund", "--ignore-scripts", "--no-save", "fast-check@^4.0.0"], {
+    cwd: projectPath,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { ok: (p.exitCode ?? 1) === 0, log: `${p.stdout?.toString() ?? ""}${p.stderr?.toString() ?? ""}` };
+}
+
 /** Gather app source for the model: lib/ (pure logic) first, then the rest, capped. Paths + content. */
 function gatherSource(root: string): string {
   const derived = new Set<string>(DERIVED_DIRS);
@@ -100,21 +114,32 @@ function gatherSource(root: string): string {
   return out.join("\n");
 }
 
-/** Ensure fast-check is a devDependency; refresh the lock so npm ci stays coherent (depbump pattern). */
-function ensureFastCheck(root: string, install: NonNullable<PropTestGenOptions["install"]>): boolean {
+/** Ensure fast-check is importable from test files. Primary path: devDependency + full install
+ *  (keeps the lockfile coherent — depbump pattern). Fallback: an ISOLATED install under
+ *  tests/properties/node_modules, so one broken dependency elsewhere in the app's manifest
+ *  can't zero out property-test coverage. Returns null on success, else the LOUD reason —
+ *  "could not be installed" with no diagnostics cost a live debugging round (2026-07-05). */
+function ensureFastCheck(root: string, install: NonNullable<PropTestGenOptions["install"]>): string | null {
   const pkgPath = join(root, "package.json");
-  if (!existsSync(pkgPath)) return false;
+  if (!existsSync(pkgPath)) return "the app has no package.json";
+  let parseError: string | null = null;
   try {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { devDependencies?: Record<string, string> };
     if (!pkg.devDependencies?.["fast-check"]) {
       pkg.devDependencies = { ...pkg.devDependencies, "fast-check": "^4.0.0" };
       writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     }
-    if (!existsSync(join(root, "node_modules", "fast-check"))) return install(root) === 0;
-    return true;
-  } catch {
-    return false;
+  } catch (e) {
+    parseError = `package.json does not parse (${e instanceof Error ? e.message : String(e)})`;
   }
+  if (!parseError) {
+    if (existsSync(join(root, "node_modules", "fast-check"))) return null;
+    if (install(root) === 0 && existsSync(join(root, "node_modules", "fast-check"))) return null;
+  }
+  // The app's own tree won't install (broken manifest / bad dep version) — isolate.
+  const iso = installFastCheckIsolated(root);
+  if (iso.ok) return null;
+  return `${parseError ?? "the app's npm install failed"}; isolated fast-check install also failed: ${iso.log.slice(-300)}`;
 }
 
 const stripFences = (s: string): string => s.replace(/^```[a-z]*\n?/gm, "").replace(/```\s*$/gm, "").trim();
@@ -136,8 +161,9 @@ export async function generatePropertyTests(target: string, requirements: Requir
   const picked = [...requirements.filter((r) => r.priority === "MVP"), ...requirements.filter((r) => r.priority !== "MVP")].slice(0, max);
   if (!picked.length) return result;
 
-  if (!ensureFastCheck(target, install)) {
-    for (const r of picked) result.skipped.push({ id: r.id, reason: "fast-check could not be installed" });
+  const installProblem = ensureFastCheck(target, install);
+  if (installProblem) {
+    for (const r of picked) result.skipped.push({ id: r.id, reason: `fast-check could not be installed: ${installProblem}` });
     return result;
   }
   const source = gatherSource(target);

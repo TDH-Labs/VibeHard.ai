@@ -1,5 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import { pinDockerfileDigests, type FetchLike } from "./docker-pin.ts";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { clearDigestCache, pinDockerfileDigests, type FetchLike } from "./docker-pin.ts";
+
+beforeEach(() => clearDigestCache()); // the cache is process-lifetime by design — isolate cases
 
 const REAL_DIGEST = "sha256:" + "a".repeat(64);
 const FAKE_DIGEST = "sha256:" + "c".repeat(64);
@@ -59,6 +61,17 @@ describe("pinDockerfileDigests", () => {
     const { content, changed } = await pinDockerfileDigests(dockerfile, fakeRegistry({ unresolvable: new Set(["app"]) }));
     expect(changed).toBe(false);
     expect(content).toBe(dockerfile);
+  });
+
+  test("a FROM with --platform is still pinned (fixer-rewritten Dockerfiles use it)", async () => {
+    const { content, changed } = await pinDockerfileDigests("FROM --platform=linux/amd64 node:20-alpine AS base\n", fakeRegistry());
+    expect(changed).toBe(true);
+    expect(content).toContain(`FROM --platform=linux/amd64 node:20-alpine@${REAL_DIGEST} AS base`);
+  });
+
+  test("unresolvable refs are REPORTED, not silently skipped (cost a live diagnosis 2026-07-05)", async () => {
+    const { unresolved } = await pinDockerfileDigests("FROM myprivateregistry.internal/app:1.0\nFROM alpine:3.19\n", fakeRegistry({ unresolvable: new Set(["app"]) }));
+    expect(unresolved).toEqual(["myprivateregistry.internal/app:1.0"]);
   });
 
   test("a thrown fetch (network down) is swallowed — the line is left as-is, not crashed on", async () => {

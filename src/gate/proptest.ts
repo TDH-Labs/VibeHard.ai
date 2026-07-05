@@ -77,9 +77,11 @@ export function propTestGateRun(projectPath: string, now: string, runner: PropRu
   if (findings.length) return Promise.resolve(verdictOf("proptest", findings, now));
 
   const env = safeToolEnv(projectPath);
-  // fast-check is declared as a devDependency at generation time; a fix round may have left
-  // node_modules stale (same reason verify.ts ensureInstalled exists).
-  if (!existsSync(join(projectPath, "node_modules", "fast-check"))) {
+  // fast-check is declared as a devDependency at generation time (or, when the app's own tree
+  // wouldn't install, isolated under tests/properties/node_modules — bun resolves from the
+  // nearest node_modules to the test file, so either location works); a fix round may have
+  // left node_modules stale (same reason verify.ts ensureInstalled exists).
+  if (!existsSync(join(projectPath, "node_modules", "fast-check")) && !existsSync(join(projectPath, PROPTEST_DIR, "node_modules", "fast-check"))) {
     const install = runner(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], projectPath, env, PROPTEST_TIMEOUT_MS);
     if (install.exitCode !== 0) {
       return Promise.resolve(

@@ -82,13 +82,16 @@ function captureResolutions(ws: string, stack: string | undefined, prev: Finding
  *  currently-published value — including replacing a fabricated one an LLM hand-wrote to
  *  satisfy prod-readiness's unpinned-base-image finding. Runs every round (cheap no-op once
  *  correct) so the gate and the deploy sandbox always see a resolvable FROM. */
-async function normalizeDockerfile(workspacePath: string): Promise<void> {
+async function normalizeDockerfile(workspacePath: string, note?: (m: string) => void): Promise<void> {
   for (const name of ["Dockerfile", "dockerfile"]) {
     const path = join(workspacePath, name);
     if (!existsSync(path)) continue;
     const before = readFileSync(path, "utf8");
-    const { content, changed } = await pinDockerfileDigests(before);
+    const { content, changed, unresolved } = await pinDockerfileDigests(before);
     if (changed) writeFileSync(path, content);
+    // Loud, not silent (2026-07-05): an unresolvable base ref means the prod-readiness pin
+    // finding will persist and the fixer needs to pick a REAL published tag — say which ref.
+    for (const ref of unresolved) note?.(`Dockerfile base image could not be resolved against its registry (${ref}) — the tag may not exist or the registry throttled; the digest pin was skipped this round`);
     return; // only one Dockerfile is expected per app (matches prod-readiness's readFirst)
   }
 }
@@ -201,7 +204,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     // Deterministic normalization before the gate ever looks: a hand-written or fabricated
     // base-image digest gets replaced with the real one here, so neither the gate nor the
     // deploy sandbox ever has to deal with a FROM line that can't resolve.
-    await normalizeDockerfile(workspacePath);
+    await normalizeDockerfile(workspacePath, note);
     // FAST inner loop (cheap verify proxy); a pass is confirmed by the full suite ONCE — the
     // human-engineer pattern: iterate cheap, verify full only at convergence.
     const r = await gateConfirmed(workspacePath);
