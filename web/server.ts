@@ -965,6 +965,24 @@ const server = Bun.serve({
       return await buildStream(auth.user.tenantId, rec.prompt, app, path === "/api/polish" ? "polish" : "ship");
     }
 
+    if (path === "/api/change" || path === "/api/rollback") {
+      // EPIC #52: change = structured delta → scoped regeneration → FULL gate line → re-ship.
+      // rollback = restore the pre-change snapshot → re-ship (the ship re-gates the restored tree).
+      if (!auth) return json({ error: "sign in first" }, 401);
+      if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit3 D-2 CSRF
+      if (running.has(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
+      const app = url.searchParams.get("app")?.trim();
+      if (app && !isSafeAppName(app)) return json({ error: "invalid app id" }, 400); // C1 traversal guard
+      const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
+      if (!rec) return json({ error: "no such build" }, 404);
+      const denied = await guardBuild(auth.user.tenantId, app!);
+      if (denied) return json({ error: denied }, 403);
+      if (path === "/api/rollback") return await buildStream(auth.user.tenantId, rec.prompt, app, "rollback");
+      const request = url.searchParams.get("request")?.trim();
+      if (!request) return json({ error: "describe the change" }, 400);
+      return await buildStream(auth.user.tenantId, request, app, "change");
+    }
+
     // marketing site (the .dc design) — static fallback for "/" and every *.dc.html / asset
     return serveStatic(path);
   },
@@ -986,7 +1004,7 @@ async function guardBuild(tenantId: string, app: string): Promise<string | null>
   }
 }
 
-async function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode: "build" | "ship" | "polish" = "build", design?: string): Promise<Response> {
+async function buildStream(tenantId: string, prompt: string, resumeApp?: string, mode: "build" | "ship" | "polish" | "change" | "rollback" = "build", design?: string): Promise<Response> {
   // C1/B-4 (defense in depth): every caller validates resumeApp, but this is the choke point that
   // mkdirSync's + execs in the workspace, so an unsafe value here can never form a path — fall
   // back to a fresh, always-safe id rather than traverse.
@@ -1106,8 +1124,32 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
           }
         } else if (mode === "polish") {
           await runStep("Polishing the design…", ["polish", workspace]); // reverts itself if it would break; then we re-ship
+        } else if (mode === "change") {
+          // EPIC #52: `prompt` here is the CHANGE REQUEST. The CLI runs delta → scoped regen →
+          // the full gate line + auto-fix; a nonzero exit means blocked/held, same as build.
+          const changeCode = await runStep("Applying your change + re-checking everything…", ["change", prompt, workspace]);
+          if (stopped()) {
+            stopFlags.delete(tenantId);
+            await finish("paused");
+            return send("done", "paused");
+          }
+          if (changeCode !== 0) {
+            await finish("blocked");
+            return send("done", "blocked");
+          }
+        } else if (mode === "rollback") {
+          const rbCode = await runStep("Restoring the previous version…", ["rollback", workspace]);
+          if (rbCode !== 0) {
+            await finish("error");
+            return send("done", "error");
+          }
         }
-        const shipLabel = mode === "build" ? "Provisioning your database + deploying…" : mode === "polish" ? "Deploying the polished design…" : "Re-deploying with your saved keys…";
+        const shipLabel =
+          mode === "build" ? "Provisioning your database + deploying…"
+          : mode === "polish" ? "Deploying the polished design…"
+          : mode === "change" ? "Deploying the updated app…"
+          : mode === "rollback" ? "Re-deploying the restored version…"
+          : "Re-deploying with your saved keys…";
         const shipCode = await runStep(shipLabel, ["ship", workspace]);
         if (stopped()) {
           stopFlags.delete(tenantId);

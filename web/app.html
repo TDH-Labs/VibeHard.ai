@@ -273,12 +273,26 @@ function renderBuilds(){
   $("#builds").innerHTML=me.builds.map((b,i)=>{
     const badge=STATUS_BADGE[b.status]||b.status;
     let action="";
-    if(b.status==="live"&&b.url)action=`<a href="${esc(b.url)}" target="_blank" style="color:var(--amber-t);font-size:13px">open →</a>`;
+    if(b.status==="live"&&b.url)action=`<a href="${esc(b.url)}" target="_blank" style="color:var(--amber-t);font-size:13px">open →</a> <a class="lk" data-act="change" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px;margin-left:10px">request a change →</a>`;
     else if(b.status==="blocked")action=`<a class="lk" data-act="held" data-i="${i}" style="cursor:pointer;color:var(--amber);font-size:13px">see what's flagged →</a>`;
     else if(b.status==="paused"||b.status==="running")action=`<a class="lk" data-act="resume" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px">resume →</a>`;
     return `<div class="b" style="align-items:flex-start"><div style="flex:1"><div style="font-size:13.5px">${esc((b.prompt||b.app).slice(0,64))}</div><div class="muted mono" style="font-size:11.5px;margin-top:2px">${badge}</div><div class="held-slot" data-i="${i}"></div></div>${action}</div>`;
   }).join("");
-  document.querySelectorAll("#builds .lk").forEach(el=>el.onclick=()=>{const b=me.builds[+el.dataset.i];if(el.dataset.act==="resume")startBuild(b.prompt,b.app);else renderHeld(b.app,el.closest(".b").querySelector('.held-slot[data-i="'+el.dataset.i+'"]'))});
+  document.querySelectorAll("#builds .lk").forEach(el=>el.onclick=()=>{const b=me.builds[+el.dataset.i];const slot=el.closest(".b").querySelector('.held-slot[data-i="'+el.dataset.i+'"]');
+    if(el.dataset.act==="resume")startBuild(b.prompt,b.app);
+    else if(el.dataset.act==="change")renderChangeBox(b.app,slot);
+    else renderHeld(b.app,slot)});
+}
+function renderChangeBox(app,el){
+  if(!el)return;
+  const ex=el.querySelector(".change-box");if(ex){ex.remove();return}
+  const wrap=document.createElement("div");wrap.className="change-box";wrap.style.cssText="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)";
+  wrap.innerHTML='<div class="muted" style="font-size:12.5px;margin-bottom:8px">Describe the change in your own words — we re-run every security check before anything ships. You can always roll back.</div>'
+    +'<textarea class="change-req" rows="2" placeholder="e.g. also ask for the dog\'s breed when joining the waitlist" style="width:100%;resize:vertical"></textarea>'
+    +'<div class="row" style="margin-top:8px;gap:10px"><button class="change-go">Apply the change</button><a class="change-rollback" style="cursor:pointer;color:var(--muted);font-size:13px;align-self:center">roll back to the previous version</a></div>';
+  el.appendChild(wrap);
+  wrap.querySelector(".change-go").onclick=()=>{const req=wrap.querySelector(".change-req").value.trim();if(!req)return;wrap.remove();startBuild(req,app,"change")};
+  wrap.querySelector(".change-rollback").onclick=()=>{if(!confirm("Restore the previous version and re-deploy it?"))return;wrap.remove();startBuild(null,app,"rollback")};
 }
 async function renderFunctest(app,el){
   if(!el||!app)return;
@@ -392,7 +406,11 @@ function startBuild(prompt,resumeApp,mode){
   const t0=Date.now();$("#elapsed").textContent="0:00";clearInterval(buildTimer);buildTimer=setInterval(()=>{$("#elapsed").textContent=fmtT(Math.floor((Date.now()-t0)/1000))},1000);
   let lastUrl=null;
   const line=(t,cls)=>{const d=document.createElement("div");if(cls)d.className=cls;d.textContent=t;con.appendChild(d);con.scrollTop=con.scrollHeight};
-  const u=mode==="ship"?("/api/redeploy?app="+encodeURIComponent(resumeApp)):mode==="polish"?("/api/polish?app="+encodeURIComponent(resumeApp)):("/api/build?prompt="+encodeURIComponent(prompt)+(resumeApp?"&app="+encodeURIComponent(resumeApp):"")+"&design="+encodeURIComponent(selectedDesign));
+  const u=mode==="ship"?("/api/redeploy?app="+encodeURIComponent(resumeApp))
+    :mode==="polish"?("/api/polish?app="+encodeURIComponent(resumeApp))
+    :mode==="change"?("/api/change?app="+encodeURIComponent(resumeApp)+"&request="+encodeURIComponent(prompt))
+    :mode==="rollback"?("/api/rollback?app="+encodeURIComponent(resumeApp))
+    :("/api/build?prompt="+encodeURIComponent(prompt)+(resumeApp?"&app="+encodeURIComponent(resumeApp):"")+"&design="+encodeURIComponent(selectedDesign));
   const es=new EventSource(u);curES=es;
   es.addEventListener("step",e=>{const t=JSON.parse(e.data);if(/Provisioning|deploy/i.test(t))setStage("deploy");line(t,"")});
   es.addEventListener("log",e=>{const t=JSON.parse(e.data);const k=detectStage(t);if(k)setStage(k);onGateLine(t);const m=t.match(/https?:\/\/[^\s]+/);if(m&&/LIVE|fly\.dev|vercel\.app/.test(t))lastUrl=m[0];line(t,/🛑|BLOCK|error|✕/.test(t)?"bad":"")});

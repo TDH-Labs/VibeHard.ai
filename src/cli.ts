@@ -28,6 +28,10 @@ import { configForStage, modelForStage, modelPlan, providerOf } from "./config/m
 import { diagnose, formatDiagnosis } from "./diagnose/diagnose.ts";
 import { recordNote, seedJournal } from "./journal/journal.ts";
 import { generatePropertyTests } from "./proptest/generate.ts";
+import { llmChangeDelta, validateDelta, persistChange } from "./change/delta.ts";
+import { blastRadius } from "./change/blast.ts";
+import { applyDeltaToSpec, applyDeltaToPrd, buildChangeBrief, dropPropertyTests, staleRequirementIds } from "./change/apply.ts";
+import { rollbackToVersion, snapshotVersion } from "./change/snapshot.ts";
 import { fleetBlock } from "./fleet/fleet.ts";
 import { readWorkspaceSteering, steeringBlock } from "./steering/steering.ts";
 import { approveConvention, pendingConventions, runInduction } from "./fleet/induct.ts";
@@ -785,6 +789,97 @@ export async function main(argv: string[]): Promise<number> {
     // 6. back-half: security checks (gates) → auto-fix → hold-for-review (always run — the verifier)
     console.log("\n── running the security checks (gates) + auto-fixing … ──");
     return runAutoFixAndReport(target);
+  }
+
+  if (cmd === "change") {
+    // EPIC #52: a change request against an EXISTING app. LLM proposes the structured delta,
+    // deterministic validation disposes; the blast radius comes from the front-half's own
+    // traceability chain; only the affected surface regenerates — the FULL gate line still runs.
+    const [, requestText, dir] = argv;
+    if (!requestText || !dir) {
+      console.error('usage: vibehard change "<request>" <dir>');
+      return 2;
+    }
+    const target = resolve(dir);
+    const spec = loadStage<Spec>(target, "spec.json");
+    const prd = loadStage<Prd>(target, "prd.json");
+    const srs = loadStage<Srs>(target, "srs.json");
+    const arch = loadStage<Architecture>(target, "architecture.json");
+    if (!spec || !prd || !arch) {
+      console.error("this directory has no completed VibeHard build (missing .vibehard artifacts) — changes need the original plan to diff against");
+      return 2;
+    }
+    console.log(`── understanding the change … ──`);
+    const delta = await llmChangeDelta(requestText, spec, new Date().toISOString());
+    const problems = validateDelta(delta, spec);
+    if (problems.length) {
+      console.log(`🛑 couldn't turn that request into a safe change:`);
+      for (const p of problems) console.log(`   - ${p}`);
+      console.log(`   Try describing the change against the app's existing features (see PRD.md).`);
+      return 1;
+    }
+    console.log(`  ▸ ${delta.summary}`);
+    for (const a of delta.add) console.log(`    + ${a.feature}`);
+    for (const m of delta.modify) console.log(`    ~ ${m.feature} → ${m.change}`);
+    for (const r of delta.remove) console.log(`    - ${r}`);
+    const auditRel = persistChange(target, delta);
+    const blast = blastRadius(delta, prd, srs, arch);
+    console.log(`  ▸ scope: ${blast.workstreams.length ? blast.workstreams.join(", ") : "new surface only"} (${blast.files.length} file(s))`);
+
+    const version = snapshotVersion(target);
+    console.log(`  ▸ snapshot: version ${version} saved (rollback with: vibehard rollback ${dir})`);
+
+    // Deterministic artifact updates — the delta is now part of the app's durable plan.
+    const newSpec = applyDeltaToSpec(spec, delta);
+    persistSpec(target, newSpec);
+    const newPrd = applyDeltaToPrd(prd, delta);
+    persistPrd(target, newPrd);
+    // A modified/removed feature's property test asserts the OLD definition of correct — drop
+    // by requirement id HERE (legitimately, pre-autofix); regeneration below re-covers the new
+    // definition. The fixer still can't touch any of them (anti-tamper).
+    const stale = staleRequirementIds(prd, delta);
+    for (const dropped of dropPropertyTests(target, stale)) console.log(`  ▸ proptest: dropped ${dropped} (its requirement changed)`);
+
+    console.log(`\n── applying the change with ${providerOf()}/${modelForStage("fix")} … ──`);
+    const changeSystemPrompt =
+      selectSystemPrompt(arch.stack) + designBlock(process.env.VIBEHARD_DESIGN ?? pickDesignPreset(newSpec)) + fleetBlock(arch.stack, "codegen") + steeringBlock(readWorkspaceSteering(target));
+    if (!(await streamGeneration(target, buildChangeBrief(target, delta, blast), providerOf(), modelForStage("fix"), changeSystemPrompt, "change"))) return 1;
+    recordNote(target, `change request applied (${auditRel}): ${delta.summary}`);
+
+    if (process.env.VIBEHARD_PROPTEST !== "0") {
+      const touched = new Set([...delta.add.map((a) => a.feature), ...delta.modify.map((m) => m.feature)]);
+      const touchedReqs = newPrd.requirements.filter((r) => touched.has(r.feature));
+      if (touchedReqs.length) {
+        console.log(`\n── re-encoding the changed acceptance criteria as property tests … ──`);
+        const pt = await generatePropertyTests(target, touchedReqs);
+        for (const w of pt.written) console.log(`  ▸ proptest: ${w}`);
+        for (const s of pt.skipped) recordNote(target, `proptest: requirement ${s.id} not covered after change — ${s.reason.split("\n")[0]}`);
+      }
+    }
+
+    // The full gate line — scope narrowed what was REGENERATED, never what's VERIFIED.
+    console.log("\n── running the security checks (gates) + auto-fixing … ──");
+    return runAutoFixAndReport(target);
+  }
+
+  if (cmd === "rollback") {
+    // EPIC #52: restore the pre-change snapshot (source + front-half artifacts). The web layer
+    // ships afterwards, which re-runs the full deploy gate on the restored tree — fail-safe.
+    const [, dir] = argv;
+    if (!dir) {
+      console.error("usage: vibehard rollback <dir> [version]");
+      return 2;
+    }
+    const target = resolve(dir);
+    const requested = argv[2] ? Number(argv[2]) : undefined;
+    const restored = rollbackToVersion(target, requested);
+    if (restored === null) {
+      console.error("nothing to roll back to — no saved versions in this workspace");
+      return 1;
+    }
+    recordNote(target, `rolled back to version ${restored}`);
+    console.log(`✅ rolled back to version ${restored} — re-ship to deploy it`);
+    return 0;
   }
 
   if (cmd === "generate") {
