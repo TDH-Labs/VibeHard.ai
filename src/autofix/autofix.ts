@@ -295,21 +295,36 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     note(`no human available — continuing up to ${extra} more attempt(s) to self-resolve`);
     for (let i = 0; i < extra; i++) {
       attempts++;
+      const extraBlocking = final.verdicts.flatMap((v) => v.findings).filter(isBlocking);
       const blocked = final.verdicts.filter((v) => v.status === "block").map((v) => `${v.gate}(${v.blocking})`).join(", ");
       note(`extra attempt ${i + 1}/${extra} (no human): blocked by ${blocked} — applying fixes`);
+      // Found live 2026-07-05: these extension rounds applied fixes with NO anti-tamper check —
+      // a fixer could shrink protected surface (drop a table, neuter a property test) here and a
+      // green re-gate would be ACCEPTED. The extension must be exactly as strict as the main
+      // loop: capture the surface, reject a shrinking fix, escalate against the REAL verdicts.
+      const beforeExtraSurface = captureSurface(workspacePath, extraBlocking);
       try {
         await applyFixWithRetry(fixer, workspacePath, final.verdicts, note);
       } catch (e) {
         note(`fixer errored twice: ${e instanceof Error ? e.message : String(e)} — stopping extra attempts`);
         break;
       }
+      const extraTamper = tamperReason(beforeExtraSurface, captureSurface(workspacePath, extraBlocking));
+      if (extraTamper) {
+        note(`fix REJECTED as tampering — ${extraTamper}`);
+        stopReason = `${stopReason}; an extension-round fix was rejected as tampering (${extraTamper})`;
+        break; // escalate with `final` — the real, pre-tamper verdicts
+      }
+      // Same deterministic normalization the main loop applies before every gate look (the
+      // extension skipping it left fixer-rewritten Dockerfiles unpinned through final verdicts).
+      await normalizeDockerfile(workspacePath, note);
       final = await gateConfirmed(workspacePath);
       if (final.passed) {
         note(`gate green after ${attempts} fix attempt(s) (no-human extension)`);
         return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
       }
     }
-    stopReason = `${stopReason}; ${extra} extra no-human attempt(s) also failed`;
+    if (!stopReason.includes("tampering")) stopReason = `${stopReason}; ${extra} extra no-human attempt(s) also failed`;
   }
 
   note(`escalating residual findings — ${stopReason}`);

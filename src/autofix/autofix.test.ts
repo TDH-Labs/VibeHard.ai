@@ -213,6 +213,32 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /extra attempt 5\/5/.test(l))).toBe(true);
   });
 
+  test("an EXTENSION-round fix that shrinks protected surface is rejected as tampering (found live 2026-07-05)", async () => {
+    // The no-human extension used to apply fixes with NO anti-tamper check — a fixer could
+    // delete a property test there and a green re-gate would be ACCEPTED. This pins the fix:
+    // benign fix in the main loop, then the extension-round fix deletes tests/properties/f1 —
+    // the round must be rejected, the loop must hold, and the gate must never see the tampered
+    // tree as a candidate pass.
+    const dir = wsWithFeatures(0);
+    mkdirSync(join(dir, "tests", "properties"), { recursive: true });
+    writeFileSync(join(dir, "tests/properties/f1.test.ts"), "// @requirement F1\nfc.assert(x, { seed: 42 });\n");
+    let calls = 0;
+    let gatedAfterTamper = false;
+    const fixer: Fixer = async () => {
+      calls++;
+      if (calls >= 2) rmSync(join(dir, "tests/properties/f1.test.ts"), { force: true }); // the extension-round move
+    };
+    const gate: GateRunner = async () => {
+      if (calls >= 2) gatedAfterTamper = true; // any gate look at the tampered tree would be it
+      return BLOCK;
+    };
+    const r = await autoFix(dir, { gate, fixer, budget: 1, humanAvailable: async () => false, extraBudgetNoHuman: 3, now: ts });
+    expect(r.fixed).toBe(false);
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /REJECTED as tampering/.test(l) && /property test was DELETED/.test(l))).toBe(true);
+    expect(gatedAfterTamper).toBe(false); // rejected BEFORE re-gating — a gamed green is unreachable
+  });
+
   test("a human IS available → holds immediately, no extra loops", async () => {
     const r = await autoFix("/ws", {
       gate: scriptedGate([BLOCK]),
