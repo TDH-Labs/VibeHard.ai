@@ -750,7 +750,12 @@ const server = Bun.serve({
       const { prompt } = (await req.json().catch(() => ({}))) as { prompt?: string };
       const idea = (prompt ?? "").trim();
       if (!idea) return json({ error: "describe the app first" }, 400);
-      if (idea.length > 600) return json({ error: "keep it under 600 characters — one plain sentence is enough" }, 400);
+      // 2026-07-06: was 600 — far too tight for a real description (more detail from the
+      // customer only helps the drafted spec), and a hard reject with no client-side warning
+      // meant a visitor could write a paragraph and just get bounced. 4000 is generous for an
+      // anonymous, unauthenticated, zero-signup preview call while still bounding worst-case
+      // cost; the rate limits below (3/hour/IP, 300/day) are the real abuse control, not length.
+      if (idea.length > 4000) return json({ error: "keep it under 4000 characters for the free preview — plenty of room, we just cap it here" }, 400);
       const ip = req.headers.get("fly-client-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
       const now = Date.now();
       const hits = (specPreviewHits.get(ip) ?? []).filter((t) => now - t < 3_600_000);
