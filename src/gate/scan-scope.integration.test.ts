@@ -3,7 +3,8 @@
  * Proves the false-positive bug from the dogfood run is fixed: findings planted in
  * a derived/build dir (.next/) are ignored, while authored source is still scanned,
  * and an all-derived project trips scan-failed (fail-closed). Guarded behind
- * VIBEHARD_INTEGRATION (Docker).
+ * VIBEHARD_INTEGRATION (needs `semgrep` + `gitleaks` on PATH — native binaries as of
+ * 2026-07-06, not Docker; see SEMGREP_VERSION/GITLEAKS_VERSION in sast.ts/secrets.ts).
  *
  *   VIBEHARD_INTEGRATION=1 bun test scan-scope.integration
  */

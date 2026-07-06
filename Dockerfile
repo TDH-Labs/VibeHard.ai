@@ -19,7 +19,7 @@ WORKDIR /app
 # Node.js (bundles npm + npx) — NodeSource's setup script for a modern LTS on Debian; the base
 # image's own OS release (Debian 13 "trixie", confirmed via `fly ssh console`) has no nodejs
 # package current enough for what generated apps (Next.js 14/15) expect.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 python3-pip python3-setuptools \
   && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -28,6 +28,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # own Fly runners default to `flyBin ?? ["fly"]`.
 COPY --from=flyctl /flyctl /usr/local/bin/flyctl
 RUN ln -s /usr/local/bin/flyctl /usr/local/bin/fly
+
+# Security scanner gates (sast/secrets/depvuln) — NATIVE binaries, not Docker. Found live
+# 2026-07-06: this base image never had `docker` (and never will — running Docker-in-Docker
+# inside a Fly Firecracker microVM needs privileges this container doesn't have), so every
+# build's sast/secrets/depvuln gate crash-blocked forever with "Executable not found in
+# $PATH: docker" — a full-platform outage, since every build hits these gates. These three
+# scanners only READ source as data (never execute the app's code), so running them on-host
+# is exactly as safe as any other static text scan — see src/substrate/fly-sandbox.ts's own
+# header, which already documents that boundary. Versions match sast.ts/secrets.ts/depvuln.ts's
+# SEMGREP_VERSION/GITLEAKS_VERSION/TRIVY_VERSION constants — keep these in sync.
+RUN pip3 install --no-cache-dir --break-system-packages "semgrep==1.96.0"
+RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz" \
+  | tar xz -C /usr/local/bin gitleaks
+RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v0.72.0/trivy_0.72.0_Linux-64bit.tar.gz" \
+  | tar xz -C /usr/local/bin trivy
 
 # Install deps first (better layer caching): only re-runs when package.json/bun.lock change.
 COPY package.json bun.lock ./

@@ -12,7 +12,24 @@
  * `scan-failed`, never PASS.
  */
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
+
+/** A scanner invoked NATIVELY (no container) reports paths absolute on the host — unlike the
+ *  old docker-wrapped invocation, which reported them relative to a container mount point
+ *  (`/src/...`) that Finding.file was never actually rewritten out of (found 2026-07-06: this
+ *  meant anti-tamper's `join(root, f.file)` on a sast/secrets finding always produced a
+ *  nonexistent path, so those findings never populated `flaggedFiles` — a latent protection
+ *  gap, fixed as a consequence of this rewrite). Normalize to root-relative here, once, so
+ *  every downstream consumer (display, anti-tamper, translate) gets what every other gate's
+ *  findings already use. A path outside `root` (shouldn't happen — the scanner was only
+ *  pointed at `root`) is left absolute rather than mangled.
+ */
+export function relativizeFinding(root: string, absoluteFile: string): string {
+  if (!absoluteFile || !isAbsolute(absoluteFile)) return absoluteFile;
+  const rel = relative(root, absoluteFile);
+  if (rel.startsWith("..")) return absoluteFile; // outside root — leave absolute rather than mangle
+  return rel === "" ? "." : rel; // a whole-project (scan-failed) finding names the root itself
+}
 
 /** Derived/build output — never authored source; excluded from every code scan. */
 export const DERIVED_DIRS = [

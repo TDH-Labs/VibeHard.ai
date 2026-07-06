@@ -4,11 +4,16 @@
  * Any leaked secret is blocking regardless of severity (see types.isBlocking).
  */
 import { join, resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
-import { hasAuthoredSource } from "./scan-scope.ts";
+import { hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
 
-const GITLEAKS_IMAGE = "zricethezav/gitleaks:v8.18.4";
+/** The exact gitleaks version the production image installs natively (Dockerfile) — see the
+ *  same 2026-07-06 note in sast.ts (SEMGREP_VERSION): docker was never available on the
+ *  platform container, so this gate crash-blocked every build; native binary replaces it. */
+export const GITLEAKS_VERSION = "v8.18.4";
 
 /** Pure: gitleaks JSON (an array of leaks) → Finding[]. No I/O. */
 export function parseGitleaks(raw: unknown): Finding[] {
@@ -26,13 +31,13 @@ export function parseGitleaks(raw: unknown): Finding[] {
   });
 }
 
-/** Run gitleaks in a pinned container against `projectPath` and return a verdict. */
+/** Run gitleaks NATIVELY (no container — see GITLEAKS_VERSION) against `projectPath` and
+ *  return a verdict. Reads source as data only (never executes it), so on-host is safe —
+ *  same boundary sast/verify document. */
 export async function runSecrets(
   projectPath: string,
   ranAt: string = new Date().toISOString(),
 ): Promise<GateVerdict> {
-  // Absolute source required — a relative bind mount becomes an empty named
-  // volume (scans nothing → false PASS). Resolve before handing it to Docker.
   const absPath = resolve(projectPath);
   // §11 fail-closed: no authored source (only derived/build output, or empty) →
   // with the path allowlist active, gitleaks would scan nothing → false PASS.
@@ -44,20 +49,31 @@ export async function runSecrets(
     );
   }
   const rulesDir = join(import.meta.dir, "rules");
-  const proc = Bun.spawnSync([
-    "docker", "run", "--rm",
-    "-v", `${absPath}:/src:ro`,
-    "-v", `${rulesDir}:/rules:ro`,
-    GITLEAKS_IMAGE, "detect", "--source=/src", "--no-git",
-    "--config=/rules/gitleaks.toml", // keep default rules; allowlist derived dirs (§11)
-    "--report-format", "json", "--report-path", "/dev/stdout",
-  ]);
-  const findings = interpretGitleaks(
-    proc.stdout?.toString() ?? "",
-    proc.exitCode ?? -1,
-    proc.stderr?.toString() ?? "",
-    absPath,
-  );
+  // gitleaks can't write its report to `/dev/stdout` outside a container (found 2026-07-06:
+  // "open /dev/stdout: permission denied" — that trick only worked via Docker's own stdio
+  // wiring). A real temp file is the portable equivalent; read it back, always clean it up.
+  const reportDir = mkdtempSync(join(tmpdir(), "vibehard-gitleaks-"));
+  const reportPath = join(reportDir, "report.json");
+  let stdout = "";
+  let stderr = "";
+  let exitCode = -1;
+  try {
+    const proc = Bun.spawnSync([
+      "gitleaks", "detect", `--source=${absPath}`, "--no-git",
+      `--config=${join(rulesDir, "gitleaks.toml")}`, // keep default rules; allowlist derived dirs (§11)
+      "--report-format", "json", "--report-path", reportPath,
+    ]);
+    exitCode = proc.exitCode ?? -1;
+    stderr = proc.stderr?.toString() ?? "";
+    try {
+      stdout = readFileSync(reportPath, "utf8");
+    } catch {
+      stdout = ""; // gitleaks errored before writing a report — interpretGitleaks fails closed on this
+    }
+  } finally {
+    rmSync(reportDir, { recursive: true, force: true });
+  }
+  const findings = interpretGitleaks(stdout, exitCode, stderr, absPath).map((f) => ({ ...f, file: relativizeFinding(absPath, f.file) }));
   return verdictOf("secrets", findings, ranAt);
 }
 

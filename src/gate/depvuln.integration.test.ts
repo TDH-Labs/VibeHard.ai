@@ -1,7 +1,7 @@
 /**
- * dep-vuln gate — end to end with REAL trivy (pinned container). Guarded behind
- * VIBEHARD_INTEGRATION (needs Docker + trivy's vuln DB; first run downloads the DB
- * into the vibehard-trivy-cache volume, then it's cached). Run with:
+ * dep-vuln gate — end to end with REAL trivy. Guarded behind VIBEHARD_INTEGRATION (needs
+ * `trivy` on PATH — a native binary as of 2026-07-06, not Docker; see TRIVY_VERSION in
+ * depvuln.ts. First run downloads the vuln DB into TRIVY_CACHE_DIR, then it's cached). Run:
  *
  *   VIBEHARD_INTEGRATION=1 bun test depvuln.integration
  */

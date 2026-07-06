@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DERIVED_DIRS, hasAuthoredSource } from "./scan-scope.ts";
+import { DERIVED_DIRS, hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
 
 const tmps: string[] = [];
 afterEach(async () => {
@@ -41,5 +41,30 @@ describe("hasAuthoredSource (§11 fail-closed guard)", () => {
 
   test("authored source nested alongside derived dirs is still found", async () => {
     expect(hasAuthoredSource(await scratch({ "node_modules/x/i.js": "y", ".next/c.js": "z", "src/main.ts": "ok" }))).toBe(true);
+  });
+});
+
+describe("relativizeFinding (2026-07-06 — native scanners report host-absolute paths)", () => {
+  // Before this fix, a docker-wrapped scanner reported container-relative paths
+  // (/src/server.js) that Finding.file stored VERBATIM — anti-tamper's `join(root, f.file)`
+  // on those was already broken (it doesn't exist under root either), so sast/secrets
+  // findings never populated `flaggedFiles`. Native invocation reports real host-absolute
+  // paths; this normalizes them to the same root-relative convention every other gate uses.
+  test("a file under root becomes root-relative", () => {
+    expect(relativizeFinding("/app", "/app/lib/server.js")).toBe("lib/server.js");
+    expect(relativizeFinding("/app", "/app/server.js")).toBe("server.js");
+  });
+
+  test("the root itself (a whole-project scan-failed finding) becomes '.'", () => {
+    expect(relativizeFinding("/app", "/app")).toBe(".");
+  });
+
+  test("a path outside root is left absolute rather than mangled with '..'", () => {
+    expect(relativizeFinding("/app", "/elsewhere/x.js")).toBe("/elsewhere/x.js");
+  });
+
+  test("an already-relative or empty path passes through unchanged", () => {
+    expect(relativizeFinding("/app", "server.js")).toBe("server.js");
+    expect(relativizeFinding("/app", "")).toBe("");
   });
 });

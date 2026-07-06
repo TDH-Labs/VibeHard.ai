@@ -10,6 +10,7 @@
  */
 import { resolve, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
 
@@ -33,9 +34,17 @@ export function scanGapFindings(projectPath: string): Finding[] {
   return [{ tool: "depvuln", ruleId: "depscan-incomplete", severity: "medium", file: "package.json", message: `dependency scan INCOMPLETE: ${deps} dependencies are declared but there is no lockfile, so transitive (install-time) CVEs were not assessed. Run an install to generate a lockfile, then re-gate.` }];
 }
 
-const TRIVY_IMAGE = "aquasec/trivy:0.58.1";
-/** Persist trivy's vuln DB across runs so it's downloaded once, not every scan. */
-const TRIVY_CACHE_VOLUME = "vibehard-trivy-cache";
+/** The exact trivy version the production image installs natively (Dockerfile) — see the
+ *  same 2026-07-06 note in sast.ts (SEMGREP_VERSION): docker was never available on the
+ *  platform container, so this gate crash-blocked every build; native binary replaces it.
+ *  Bumped from the old docker-image pin (0.58.1) — that patch tag has no published GitHub
+ *  release binary (git tag exists, no release assets; likely a docker-only point release),
+ *  so there is nothing to install natively at that exact version. 0.72.0 is current, has
+ *  real Linux binaries, and is what this fix was validated against locally end-to-end. */
+export const TRIVY_VERSION = "0.72.0";
+/** Persist trivy's vuln DB across runs on this host so it's downloaded once, not every scan
+ *  (still wiped on a redeploy — no volume — same characteristic the docker named volume had). */
+const TRIVY_CACHE_DIR = join(homedir(), ".cache", "vibehard-trivy");
 
 /** trivy severity → our scale (CRITICAL/HIGH block; MEDIUM/LOW are reported, not blocking). */
 export function mapTrivySeverity(s: string | undefined): Severity {
@@ -110,19 +119,17 @@ export function interpretTrivy(stdout: string, exitCode: number, stderr: string,
   return parseTrivy(json); // Results ?? [] → a clean no-deps scan yields no findings (PASS)
 }
 
-/** Run trivy in a pinned container against `projectPath` and return a verdict. */
+/** Run trivy NATIVELY (no container — see TRIVY_VERSION) against `projectPath` and return a
+ *  verdict. Reads dependency manifests as data only (never executes anything), so on-host is
+ *  safe — same boundary sast/secrets/verify document. */
 export async function runDepVuln(
   projectPath: string,
   ranAt: string = new Date().toISOString(),
 ): Promise<GateVerdict> {
-  // Docker bind mounts require an absolute source — a relative path becomes an empty
-  // named volume that scans nothing → false PASS (the §11 class, same as sast/secrets).
   const absPath = resolve(projectPath);
   const proc = Bun.spawnSync([
-    "docker", "run", "--rm",
-    "-v", `${absPath}:/src:ro`,
-    "-v", `${TRIVY_CACHE_VOLUME}:/root/.cache/trivy`,
-    TRIVY_IMAGE, "fs", "--quiet", "--format", "json", "--scanners", "vuln", "/src",
+    "trivy", "fs", "--quiet", "--format", "json", "--scanners", "vuln",
+    "--cache-dir", TRIVY_CACHE_DIR, absPath,
   ]);
   const findings = [
     ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),

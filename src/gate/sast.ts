@@ -6,9 +6,13 @@
 import { join, resolve } from "node:path";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
-import { DERIVED_DIRS, hasAuthoredSource } from "./scan-scope.ts";
+import { DERIVED_DIRS, hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
 
-const SEMGREP_IMAGE = "semgrep/semgrep:1.96.0";
+/** The exact semgrep version the production image installs natively (Dockerfile) — this
+ *  constant is documentation, not an invocation parameter; there is no container to pin it
+ *  into anymore (found 2026-07-06: the platform container never had `docker`, so this gate
+ *  crash-blocked every build; native binary replaces the docker wrapper, same tool/version). */
+export const SEMGREP_VERSION = "1.96.0";
 
 /** semgrep severity → our scale (preserves the proof: ERROR blocks). */
 export function mapSeverity(s: string | undefined): Severity {
@@ -43,14 +47,15 @@ export function parseSemgrep(raw: unknown): Finding[] {
   });
 }
 
-/** Run semgrep in a pinned container against `projectPath` and return a verdict. */
+/** Run semgrep NATIVELY (no container — see SEMGREP_VERSION) against `projectPath` and
+ *  return a verdict. Semgrep only READS source as data here; it never executes the app's
+ *  code, so running it on-host (rather than sandboxed) carries no more risk than any other
+ *  static text scan (src/substrate/fly-sandbox.ts's own header documents this boundary). */
 export async function runSast(
   projectPath: string,
   ranAt: string = new Date().toISOString(),
 ): Promise<GateVerdict> {
   const rulesDir = join(import.meta.dir, "rules");
-  // Docker bind mounts require an absolute source — a relative path is silently
-  // treated as a named (empty) volume, which would scan nothing and FALSE-PASS.
   const absPath = resolve(projectPath);
   // §11 fail-closed: if there's no authored source (only derived/build output, or
   // empty), excluding the derived set leaves semgrep nothing to scan → false PASS.
@@ -65,19 +70,16 @@ export async function runSast(
   // in .next/dist/… floods us with false positives).
   const excludes = DERIVED_DIRS.flatMap((d) => ["--exclude", d]);
   const proc = Bun.spawnSync([
-    "docker", "run", "--rm",
-    "-v", `${absPath}:/src:ro`,
-    "-v", `${rulesDir}:/rules:ro`,
-    SEMGREP_IMAGE, "semgrep", "scan", "--quiet", "--json",
-    "--config", "/rules/sqli.yaml", "--config", "p/default",
-    ...excludes, "/src",
+    "semgrep", "scan", "--quiet", "--json",
+    "--config", join(rulesDir, "sqli.yaml"), "--config", "p/default",
+    ...excludes, absPath,
   ]);
   const findings = interpretSemgrep(
     proc.stdout?.toString() ?? "",
     proc.exitCode ?? -1,
     proc.stderr?.toString() ?? "",
     absPath,
-  );
+  ).map((f) => ({ ...f, file: relativizeFinding(absPath, f.file) }));
   return verdictOf("sast", findings, ranAt);
 }
 
