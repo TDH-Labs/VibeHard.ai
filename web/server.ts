@@ -502,6 +502,22 @@ const running = new Map<string, Bun.Subprocess>();
 const stopFlags = new Set<string>();
 const tenantDir = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/[^a-zA-Z0-9_-]/g, "_"));
 
+/** Whether a build is already running for `tenantId` — checked before every route that would
+ *  spawn one. `running` alone is NOT enough: it's an in-process Map, and this server runs on
+ *  MULTIPLE Fly machines behind one load balancer (min_machines_running = 2, see fly.toml) —
+ *  each machine only knows about builds IT personally spawned. A request that lands on a
+ *  DIFFERENT machine than the one already running a build for that tenant sailed straight
+ *  past the "already running" 409 and started a genuinely concurrent second build (found live
+ *  2026-07-07: a customer's second "Build it" click "started the whole process over" — the
+ *  first build was very likely still running, just on the other machine). buildStore is
+ *  Postgres-backed (EPIC #33) — the one thing both machines actually agree on — so it's the
+ *  real guard; `running` stays for what it can uniquely do (holding the actual Bun.Subprocess
+ *  handle so /api/build/stop can signal it on ITS OWN machine). */
+async function isBuildRunning(tenantId: string): Promise<boolean> {
+  if (running.has(tenantId)) return true;
+  return (await buildStore.getActive(tenantId))?.status === "running";
+}
+
 // ── orchestrator: the conversational owner of a build (the chat panel's backend) ───────────
 type InboxMsg = { at: number; kind: OutboundMessage["kind"]; text: string };
 // Durable via tenantKv rows `inbox:<app>` (EPIC #33 final sweep) — plain JSON, not secret.
@@ -942,7 +958,7 @@ const server = Bun.serve({
       // A dropped EventSource AUTO-RECONNECTS to this same GET. Without this guard the reconnect
       // minted a fresh app id, burned quota, and raced the in-flight build to a bogus "blocked"
       // with zero findings (found live 2026-07-04, fresh-eyes walkthrough). One build per tenant.
-      if (running.has(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
+      if (await isBuildRunning(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
       const prompt = url.searchParams.get("prompt")?.trim();
       const resumeApp = url.searchParams.get("app")?.trim() || undefined; // resume an existing workspace
       const design = url.searchParams.get("design")?.trim() || undefined; // #12 chosen design preset
@@ -961,7 +977,7 @@ const server = Bun.serve({
       // redeploy: re-ship with the tenant's now-saved keys (#5). polish: art-director pass + re-ship (#12).
       if (!auth) return json({ error: "sign in first" }, 401);
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit2 C-6 CSRF
-      if (running.has(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409); // same reconnect guard as /api/build
+      if (await isBuildRunning(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409); // same reconnect guard as /api/build
       const app = url.searchParams.get("app")?.trim();
       const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ error: "no such build" }, 404);
@@ -975,7 +991,7 @@ const server = Bun.serve({
       // rollback = restore the pre-change snapshot → re-ship (the ship re-gates the restored tree).
       if (!auth) return json({ error: "sign in first" }, 401);
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit3 D-2 CSRF
-      if (running.has(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
+      if (await isBuildRunning(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
       const app = url.searchParams.get("app")?.trim();
       if (app && !isSafeAppName(app)) return json({ error: "invalid app id" }, 400); // C1 traversal guard
       const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
