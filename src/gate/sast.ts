@@ -69,11 +69,18 @@ export async function runSast(
   // Gates scan AUTHORED SOURCE, never derived output (else minified framework code
   // in .next/dist/… floods us with false positives).
   const excludes = DERIVED_DIRS.flatMap((d) => ["--exclude", d]);
-  const proc = Bun.spawnSync([
-    "semgrep", "scan", "--quiet", "--json",
-    "--config", join(rulesDir, "sqli.yaml"), "--config", "p/default",
-    ...excludes, absPath,
-  ]);
+  // cwd=absPath + target "." — NOT absPath as the target. Found live 2026-07-07 on a real
+  // customer build: a tenant workspace lives at .../.vibehard/tenants/<id>/apps/<app> — the
+  // platform's OWN state root is itself named .vibehard, so passing the ABSOLUTE workspace
+  // path meant `--exclude .vibehard` matched that ANCESTOR directory too (gitignore-style
+  // exclude matches a bare name at any depth in the given path) and excluded the ENTIRE
+  // target — "SAST scanned 0 files", failing closed, blocking the build on nothing. Scanning
+  // "." from cwd=absPath means every candidate path semgrep sees starts INSIDE the workspace;
+  // the ambient .vibehard ancestor never appears, so it can't be (mis)matched.
+  const proc = Bun.spawnSync(
+    ["semgrep", "scan", "--quiet", "--json", "--config", join(rulesDir, "sqli.yaml"), "--config", "p/default", ...excludes, "."],
+    { cwd: absPath },
+  );
   const findings = interpretSemgrep(
     proc.stdout?.toString() ?? "",
     proc.exitCode ?? -1,

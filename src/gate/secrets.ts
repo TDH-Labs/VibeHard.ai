@@ -58,11 +58,20 @@ export async function runSecrets(
   let stderr = "";
   let exitCode = -1;
   try {
-    const proc = Bun.spawnSync([
-      "gitleaks", "detect", `--source=${absPath}`, "--no-git",
-      `--config=${join(rulesDir, "gitleaks.toml")}`, // keep default rules; allowlist derived dirs (§11)
-      "--report-format", "json", "--report-path", reportPath,
-    ]);
+    // cwd=absPath + --source=. — same reasoning as sast.ts's fix (2026-07-07): a tenant
+    // workspace lives under a .vibehard-named ancestor (the platform's own state root), so an
+    // absolute source keeps that name in view for any path-based exclusion to (mis)match.
+    // gitleaks's allowlist regex empirically matches relative to --source already (verified:
+    // secrets passed on the exact workspace that broke sast), so this is defense-in-depth to
+    // keep the two gates' invocation shape identical, not a fix for an observed failure here.
+    const proc = Bun.spawnSync(
+      [
+        "gitleaks", "detect", "--source=.", "--no-git",
+        `--config=${join(rulesDir, "gitleaks.toml")}`, // keep default rules; allowlist derived dirs (§11)
+        "--report-format", "json", "--report-path", reportPath,
+      ],
+      { cwd: absPath },
+    );
     exitCode = proc.exitCode ?? -1;
     stderr = proc.stderr?.toString() ?? "";
     try {

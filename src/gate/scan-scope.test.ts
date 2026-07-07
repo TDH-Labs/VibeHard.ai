@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DERIVED_DIRS, hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
@@ -66,5 +66,20 @@ describe("relativizeFinding (2026-07-06 — native scanners report host-absolute
   test("an already-relative or empty path passes through unchanged", () => {
     expect(relativizeFinding("/app", "server.js")).toBe("server.js");
     expect(relativizeFinding("/app", "")).toBe("");
+  });
+});
+
+describe("gitleaks.toml allowlist stays in sync with DERIVED_DIRS (2026-07-07 regression)", () => {
+  // Found live on a real customer build: gitleaks.toml's hand-written allowlist was missing
+  // .vibehard (present in DERIVED_DIRS) — gitleaks scanned .vibehard/owned.json (a file→sha256
+  // bookkeeping map) and flagged a hex hash as a "Generic API Key", blocking the build on
+  // nothing. TOML can't import the TS constant, so this test is the sync mechanism: drift
+  // fails a test run, not a customer's gate.
+  test("every DERIVED_DIRS entry appears in the gitleaks allowlist path regex", async () => {
+    const toml = await readFile(join(import.meta.dir, "rules", "gitleaks.toml"), "utf8");
+    for (const dir of DERIVED_DIRS) {
+      const escaped = dir.replace(/\./g, "\\.");
+      expect(toml).toContain(escaped);
+    }
   });
 });

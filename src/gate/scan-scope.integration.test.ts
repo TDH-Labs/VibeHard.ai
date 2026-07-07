@@ -53,4 +53,23 @@ run("scan scope — gates inspect source, not derived output", () => {
     const secrets = await runSecrets(dir);
     expect(secrets.findings[0]).toMatchObject({ ruleId: "scan-failed", severity: "critical" });
   }, 120_000);
+
+  // Found live 2026-07-07 on a real customer build: production tenant workspaces live at
+  // ~/.vibehard/tenants/<id>/apps/<app> — nested inside a directory literally named .vibehard
+  // (the platform's own state root, unrelated to the DERIVED_DIRS exclusion of a workspace's
+  // OWN .vibehard/ subdir). Passing that ABSOLUTE path to semgrep with `--exclude .vibehard`
+  // matched the ANCESTOR directory too (gitignore-style: a bare name excludes at any depth)
+  // and excluded the entire target — "SAST scanned 0 files", failing closed, blocking two
+  // real builds on nothing. Fixed by scanning "." with cwd set to the workspace, so no
+  // ancestor segment is ever visible to the exclude matcher.
+  test("a workspace nested under a .vibehard-named ancestor dir is still scanned (not excluded)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibehard-ancestor-it-"));
+    tmps.push(root);
+    const nested = join(root, ".vibehard", "tenants", "t1", "apps", "app1");
+    await Bun.write(join(nested, "server.js"), PLANTED);
+    const sast = await runSast(nested);
+    expect(sast.status).toBe("block"); // real SQLi/secret found — proves it actually scanned
+    expect(sast.findings.length).toBeGreaterThan(0);
+    expect(sast.findings.some((f) => f.ruleId === "scan-failed")).toBe(false); // not a fail-closed no-scan
+  }, 120_000);
 });

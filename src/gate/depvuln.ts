@@ -127,10 +127,14 @@ export async function runDepVuln(
   ranAt: string = new Date().toISOString(),
 ): Promise<GateVerdict> {
   const absPath = resolve(projectPath);
-  const proc = Bun.spawnSync([
-    "trivy", "fs", "--quiet", "--format", "json", "--scanners", "vuln",
-    "--cache-dir", TRIVY_CACHE_DIR, absPath,
-  ]);
+  // cwd=absPath + target "." — same reasoning as sast.ts's fix (2026-07-07): a tenant
+  // workspace lives under a .vibehard-named ancestor (the platform's own state root); trivy's
+  // own Target reporting is already relative to the given target (verified: depvuln passed on
+  // the exact workspace that broke sast), so this is defense-in-depth, not an observed fix.
+  const proc = Bun.spawnSync(
+    ["trivy", "fs", "--quiet", "--format", "json", "--scanners", "vuln", "--cache-dir", TRIVY_CACHE_DIR, "."],
+    { cwd: absPath },
+  );
   const findings = [
     ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),
     ...scanGapFindings(absPath), // make a no-lockfile (incomplete) scan VISIBLE, not a silent pass
