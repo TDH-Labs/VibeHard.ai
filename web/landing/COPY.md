@@ -9,7 +9,7 @@ gets rewritten, not shipped._
 - **`docs/positioning.md`** — the voice. Every line must trace to a choice in that doc; a line
   that can't is freelancing.
 - **`docs/pricing.md`** — unit economics. No pricing claim gets written that this doc doesn't back.
-- **The code itself** — `src/gate/index.ts` is the gate registry (eleven gates + the sentinel).
+- **The code itself** — `src/gate/index.ts` is the gate registry (twelve gates + the sentinel).
   Mechanism claims come from reading the gate, not from memory.
 
 ## Per-page brief (written BEFORE any copy)
@@ -42,7 +42,9 @@ gets rewritten, not shipped._
 
 ## Standing content rules
 
-- **Gate count is eleven + the sentinel.** Never round it, never say "seven" (a stale draft did).
+- **Gate count is twelve + the sentinel.** Never round it, never say "seven" (a stale draft
+  did) or "eleven" (stale since proptest landed, EPIC #53). Count `GATES` in
+  `src/gate/index.ts` before writing the number.
 - **No human-review claims.** The product's answer to a failing gate is the bounded fix loop and
   the HOLD — a held build never ships, the customer sees plain-English findings and can rerun the
   loop or refine the request. Do not write "an engineer has been notified," "routed to a

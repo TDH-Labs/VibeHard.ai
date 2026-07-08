@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VibeHard — It ships checked, or it doesn't ship.</title>
-<meta name="description" content="Describe the app you need in plain language. VibeHard builds it and inspects it with eleven automated gates and a signed sentinel. A build that can't pass is held, with findings you can read.">
+<meta name="description" content="Describe the app you need in plain language. VibeHard builds it and inspects it with twelve automated gates and a signed sentinel. A build that can't pass is held, with findings you can read.">
 <meta property="og:title" content="VibeHard — It ships checked, or it doesn't ship.">
-<meta property="og:description" content="Describe the app you need. VibeHard builds it, inspects it with eleven automated gates and a signed sentinel, and only ships what passes.">
+<meta property="og:description" content="Describe the app you need. VibeHard builds it, inspects it with twelve automated gates and a signed sentinel, and only ships what passes.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://vibehard.ai/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -116,7 +116,7 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
       <div>
         <span class="step-num">02</span>
         <h3>It's built and inspected</h3>
-        <p>Eleven automated gates and the Sentinel check the build; one that fails holds, with findings in plain English.</p>
+        <p>Twelve automated gates and the Sentinel check the build; one that fails holds, with findings in plain English.</p>
       </div>
       <div>
         <span class="step-num">03</span>
@@ -132,9 +132,9 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
 <section id="gates" aria-labelledby="gates-h">
   <div class="wrap">
     <span class="eyebrow">The gates</span>
-    <h2 id="gates-h">Eleven gates. One door out.</h2>
-    <p>Every build runs a fixed inspection line: code scanned for exploitable patterns and committed secrets, dependencies checked against known vulnerabilities, migrations executed on a real database, tenant isolation attacked live, personal data traced through logs and URLs, and every promised feature checked off in code. A gate that fails — or crashes mid-run — blocks the build.</p>
-    <ul class="chips" aria-label="The eleven gates and the sentinel">
+    <h2 id="gates-h">Twelve gates. One door out.</h2>
+    <p>Every build runs a fixed inspection line: code scanned for exploitable patterns and committed secrets, dependencies checked against known vulnerabilities, migrations executed on a real database, tenant isolation attacked live, personal data traced through logs and URLs, the plan's acceptance criteria run as tests, and every promised feature checked off in code. A gate that fails — or crashes mid-run — blocks the build.</p>
+    <ul class="chips" aria-label="The twelve gates and the sentinel">
       <li class="chip">sast</li>
       <li class="chip">secrets</li>
       <li class="chip">depvuln</li>
@@ -144,11 +144,12 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
       <li class="chip">compliance</li>
       <li class="chip">pii</li>
       <li class="chip">prod-readiness</li>
+      <li class="chip">proptest</li>
       <li class="chip">verify</li>
       <li class="chip">completeness</li>
       <li class="chip">sentinel</li>
     </ul>
-    <p id="trust">When all eleven pass, the Sentinel signs the build — the only door to deploy. A held build never ships, and there is no switch to make it.</p>
+    <p id="trust">When all twelve pass, the Sentinel signs the build — the only door to deploy. A held build never ships, and there is no switch to make it.</p>
     <a class="btn btn-ghost arrow" href="/trust.html">Every gate, shown</a>
   </div>
 </section>
@@ -263,7 +264,7 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
         '<span class="k">Tenancy</span> ' + esc(s.tenancy || "—") + "<br>" +
         '<span class="k">Data classification</span> ' + (classes.length ? '<span class="hl">' + classes.map(esc).join(" · ") + "</span>" : "none declared") + "<br>" +
         '<span class="k">Rigor</span> ' + esc(b.rigor || "production") + "<br>" +
-        '<span class="k">Gate plan</span> all 11, fixed order</div>' +
+        '<span class="k">Gate plan</span> all 12, fixed order</div>' +
       (feats ? '<div class="block"><span class="k">Features</span><br>' + feats + "</div>" : "") +
       (ents ? '<div class="block"><span class="k">Data model</span><br>' + ents + "</div>" : "") +
       '<div class="block">' + (b.ready ? "Ready for the gates — continue to run the build." : (b.gaps || 0) + " readiness gap(s) — a short interview closes them after signup.") + "</div>";

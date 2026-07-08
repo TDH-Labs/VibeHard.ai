@@ -64,9 +64,10 @@ any page ships, full end-to-end re-read.
 
 ## 4. Standing facts (verified 2026-07-08 — re-verify before editing claims)
 
-- **Eleven gates + THE SENTINEL**: sast, secrets, depvuln, rls, migrate, rls-enforce,
-  compliance, pii, prod-readiness, verify, completeness (`src/gate/index.ts`), plus the
-  HMAC deploy ratchet. Never rounded.
+- **Twelve gates + THE SENTINEL**: sast, secrets, depvuln, rls, migrate, rls-enforce,
+  compliance, pii, prod-readiness, proptest, verify, completeness (`src/gate/index.ts`),
+  plus the HMAC deploy ratchet. Never rounded. (proptest — PRD acceptance criteria run
+  as property tests — landed with EPIC #53; older copy saying "eleven" is stale.)
 - **Pricing**: $0 / $39 / $199 monthly; quotas 2/5/20 gated builds per day, 1/5/25 projects
   (`src/platform/plans.ts`).
 - **Hero console is real**: POST `/api/spec-preview`, unauthenticated, **4000-char cap**
