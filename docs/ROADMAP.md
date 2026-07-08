@@ -55,6 +55,57 @@ worth more in prod, where the stakes and the recurring revenue both live.
 
 ---
 
+## Phase II: Enterprise Agent Builder (the "Holy Grail" market gap)
+
+**The Market Gap.** No single platform natively combines all three layers required for
+non-technical founders to build AI-first Service-as-Software businesses:
+
+1. **No-Code Builders** (MindStudio, Relevance AI, Aisera) have the SOP Compiler but no
+   BYOC orchestrator — cannot route sensitive data through their servers (kills enterprise
+   legal / healthcare deals).
+
+2. **BYOC Infrastructure** (Nuon, Northflank, Porter) have the orchestrator but require
+   DevOps engineers to hand them compiled Docker images — non-technical founders are locked out.
+
+3. **Agent Frameworks** (LangGraph, CrewAI) have the runtime template but are just code
+   libraries — still requires hiring senior Python developers.
+
+**The Unfair Advantage.** VibeHard is uniquely positioned to bridge all three:
+
+* **Agent Runtime Template** — standardized backend loop (CrewAI / LangGraph) running on
+  Fly.io, configured (not coded) by the SOP Compiler.
+* **SOP Compiler** — conversational UI that turns "what triggers the agent? what does it
+  do? where does output go?" into a workflow config file.
+* **BYOB Orchestrator** — already built. Multi-tenant, data-sovereign, customer-VPC
+  deployment, full safety-gate chain, at scale.
+
+**What gets unlocked.** The first **No-Code Enterprise Agent Builder** — ease-of-use of
+MindStudio with the data-sovereignty and compliance of Northflank / Databricks. Non-technical
+domain experts (e.g., 20-year logistics veterans) can build enterprise-ready, HIPAA/SOX/GDPR
+Service-as-Software companies without raising $2M for a DevOps + engineering team.
+
+**TAM.** Not just therapists + bookkeepers (the current beachhead): every knowledge-work
+vertical is addressable. Medical MSOs, legal services, recruiting, call centers, financial
+advising, tax prep, compliance — potentially 1M+ service professionals globally who have
+domain expertise but no infrastructure to deliver AI-first services at enterprise scale.
+
+**The Build (rough order):**
+1. **Standardized Agent Runtime Template** — pre-built FastAPI + CrewAI/LangGraph loop that
+   loads a workflow config; deploy to Fly.io via the existing orchestrator.
+2. **Integration Hub** — pre-wired connectors (OAuth, MCP servers, token storage) for
+   common integrations (Gmail, Slack, Stripe, etc.); user clicks "Connect," orchestrator
+   handles the OAuth dance and wires tokens into the runtime.
+3. **SOP Compiler** — conversational builder that interviews the user, generates workflow
+   config + database schema, feeds both into provisioning.
+4. **Compliance Scaffolding** — vertical-specific templates (medical → PHI isolation,
+   legal → evidence handling, financial → PCI scope) with gates already tuned.
+
+**Why VibeHard, not a new product.** The safety gates, deterministic spec → PRD →
+architecture pipeline, RLS enforcement, and multi-tenant isolation are already load-bearing.
+This is an adjacent surface on the same engine, not a rebuild.
+
+---
+
 ## Deferred refactor surfaces (current product ships only the explicit whole-app pass)
 
 The current build ships `vibehard refactor <dir>` — an explicit, operator-invoked,
