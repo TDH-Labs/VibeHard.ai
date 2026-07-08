@@ -57,9 +57,15 @@ against this document. Drift gets fixed, not carried._
 - **Motion only where it depicts the mechanism** — the inspection sequence advancing, a
   running gate's spinner. It pauses off-viewport, loops gently, and every animated element
   has a meaningful reduced-motion fallback (the *finished* state, not a freeze mid-run).
-  No entrance animations, no parallax, no grain. Current instances: the homepage
-  inspection line (chips light in registry order, sentinel signs), the trust page verdict
-  board's running-gate spinner.
+  No entrance animations, no parallax, no grain. Current instances: the homepage hero
+  demo (the example sentence types, the build narrates, the finished client portal fades
+  in — labeled "an example build"), the homepage inspection line (chips light in registry
+  order, sentinel signs), the trust page verdict board's running-gate spinner.
+- **Speak the reader's language per page.** The homepage uses the dashboard's human gate
+  labels ("Code security", "Tenant isolation attack"); the mono registry ids
+  (sast, rls-enforce, …) live on the trust page, where the technical reader is.
+- Example-build content (the demo's "Riverside Therapy" portal) is always labeled as an
+  example and depicts product output — never a named customer, quote, or metric.
 - Depth lives on interior pages. The homepage links to it; it does not compress it.
 
 ## 3. Voice

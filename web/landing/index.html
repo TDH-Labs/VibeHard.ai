@@ -17,7 +17,9 @@
 /* homepage-only: hero console + small layout tweaks */
 [hidden] { display: none !important; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.console { max-width: 720px; margin-top: 40px; padding: 0; overflow: hidden; }
+.hero-row { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; margin-top: 40px; }
+@media (max-width: 960px) { .hero-row { grid-template-columns: 1fr; } }
+.console { margin-top: 0; padding: 0; overflow: hidden; }
 .console textarea {
   display: block; width: 100%; min-height: 132px; resize: vertical; border: 0; background: transparent;
   padding: 22px 24px 8px; font: 400 16px/1.6 var(--sans); color: var(--ink);
@@ -28,6 +30,28 @@
 .console .count { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
 .console .status { padding: 0 24px 14px; font-size: 14px; color: var(--ink-2); max-width: none; margin: 0; }
 .free-line { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--ink-3); margin-top: 14px; }
+/* the hero demo — an example build playing out in a browser frame */
+.demo { padding: 0; overflow: hidden; }
+.d-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.d-dots { display: inline-flex; gap: 5px; }
+.d-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.d-url { font-family: var(--mono); font-size: 11px; color: var(--ink-3); background: var(--bg); border-radius: 999px; padding: 3px 12px; }
+.d-body { min-height: 248px; position: relative; }
+.d-type { padding: 22px 24px; font-family: var(--mono); font-size: 13px; line-height: 1.8; color: var(--ink-2); }
+.d-build { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 248px; }
+.d-build .dot { width: 14px; height: 14px; border: 2px solid var(--amber); border-right-color: transparent; border-radius: 50%; animation: dspin 1s linear infinite; }
+@keyframes dspin { to { transform: rotate(360deg); } }
+.d-build .dstep { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.d-app { animation: dfade .5s ease; }
+@keyframes dfade { from { opacity: 0; } to { opacity: 1; } }
+.d-top { padding: 11px 16px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 600; }
+.d-cols { display: flex; }
+.d-side { width: 108px; border-right: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 9px; font-size: 11.5px; color: var(--ink-2); }
+.d-side .on { color: var(--amber-text); font-weight: 600; }
+.d-main { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.d-row { border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; font-size: 11.5px; color: var(--ink-2); }
+.d-row b { color: var(--ink); font-weight: 600; }
+.d-badge { align-self: flex-start; font-family: var(--mono); font-size: 10.5px; background: var(--amber-soft); color: var(--amber-text); border-radius: 999px; padding: 4px 11px; margin-top: 2px; }
 /* the drafted spec — machine output, so mono */
 .sheet {
   padding: 22px 24px; border-bottom: 1px solid var(--line); max-height: 420px; overflow: auto;
@@ -89,21 +113,53 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
     <h1 id="hero-h">Your app ships checked, or it doesn't ship.</h1>
     <p class="lede">You describe it in plain language. VibeHard builds it and inspects it before it goes live.</p>
 
-    <div class="card raised console" role="group" aria-label="Draft a real spec from your idea">
-      <label class="sr" for="idea">Describe the app you want</label>
-      <textarea id="idea" maxlength="4000" rows="4" spellcheck="false" placeholder="Describe the app you want, the way you'd say it out loud."></textarea>
-      <div class="sheet" id="sheet" hidden aria-label="Your drafted spec"></div>
-      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
-      <div class="row" id="row-idle">
-        <button class="btn btn-primary" id="draft" type="button">Draft my spec</button>
-        <span class="count" id="count" aria-hidden="true">0 / 4000</span>
+    <div class="hero-row">
+      <div>
+        <div class="card raised console" role="group" aria-label="Draft a real spec from your idea">
+          <label class="sr" for="idea">Describe the app you want</label>
+          <textarea id="idea" maxlength="4000" rows="4" spellcheck="false" placeholder="Describe the app you want, the way you'd say it out loud."></textarea>
+          <div class="sheet" id="sheet" hidden aria-label="Your drafted spec"></div>
+          <p class="status" id="status" role="status" aria-live="polite" hidden></p>
+          <div class="row" id="row-idle">
+            <button class="btn btn-primary" id="draft" type="button">Draft my spec</button>
+            <span class="count" id="count" aria-hidden="true">0 / 4000</span>
+          </div>
+          <div class="row" id="row-sheet" hidden>
+            <button class="linkish" id="edit" type="button">Edit the idea</button>
+            <a class="btn btn-primary arrow" id="continue" href="/app" style="margin-left:auto">Continue to build</a>
+          </div>
+        </div>
+        <p class="free-line">Free · no account · one real spec drafted from your idea</p>
       </div>
-      <div class="row" id="row-sheet" hidden>
-        <button class="linkish" id="edit" type="button">Edit the idea</button>
-        <a class="btn btn-primary arrow" id="continue" href="/app" style="margin-left:auto">Continue to build</a>
+      <div id="demo-col" role="img" aria-label="Demo of an example build: a described intake-and-notes app becomes a live client portal where each client sees only their own file">
+        <div class="card raised demo" aria-hidden="true">
+          <div class="d-bar">
+            <span class="d-dots"><i></i><i></i><i></i></span>
+            <span class="d-url">yourpractice.vibehard.app</span>
+          </div>
+          <div class="d-body">
+            <div class="d-type" id="dtype"></div>
+            <div class="d-build" id="dbuild" hidden>
+              <span class="dot"></span>
+              <span class="dstep" id="dstep">drafting the spec…</span>
+            </div>
+            <div class="d-app" id="dapp" hidden>
+              <div class="d-top">Riverside Therapy — client portal</div>
+              <div class="d-cols">
+                <div class="d-side"><span class="on">Dashboard</span><span>Intake</span><span>Sessions</span><span>Notes</span></div>
+                <div class="d-main">
+                  <div class="d-row"><b>9:00</b> — Intake · new client</div>
+                  <div class="d-row"><b>10:30</b> — Session notes</div>
+                  <div class="d-row"><b>1:00</b> — Follow-up</div>
+                  <span class="d-badge">each client sees only their own file</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="free-line">what you get — an example build, start to live</p>
       </div>
     </div>
-    <p class="free-line">Free · no account · one real spec drafted from your idea</p>
   </div>
 </section>
 
@@ -140,19 +196,19 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
     <h2 id="gates-h">Twelve gates. One door out.</h2>
     <p>Every build runs a fixed inspection line: code scanned for exploitable patterns and committed secrets, dependencies checked against known vulnerabilities, migrations executed on a real database, tenant isolation attacked live, personal data traced through logs and URLs, the plan's acceptance criteria run as tests, and every promised feature checked off in code. A gate that fails — or crashes mid-run — blocks the build.</p>
     <ul class="chips" aria-label="The twelve gates and the sentinel">
-      <li class="chip">sast</li>
-      <li class="chip">secrets</li>
-      <li class="chip">depvuln</li>
-      <li class="chip">rls</li>
-      <li class="chip">migrate</li>
-      <li class="chip">rls-enforce</li>
-      <li class="chip">compliance</li>
-      <li class="chip">pii</li>
-      <li class="chip">prod-readiness</li>
-      <li class="chip">proptest</li>
-      <li class="chip">verify</li>
-      <li class="chip">completeness</li>
-      <li class="chip">sentinel</li>
+      <li class="chip">Code security</li>
+      <li class="chip">Secret scan</li>
+      <li class="chip">Dependency CVEs</li>
+      <li class="chip">Data isolation (RLS)</li>
+      <li class="chip">Database migrations</li>
+      <li class="chip">Tenant isolation attack</li>
+      <li class="chip">Compliance posture</li>
+      <li class="chip">Personal-data leaks</li>
+      <li class="chip">Production readiness</li>
+      <li class="chip">Acceptance tests</li>
+      <li class="chip">Build &amp; boot check</li>
+      <li class="chip">Feature completeness</li>
+      <li class="chip">the Sentinel</li>
     </ul>
     <p class="gatestatus" id="gatestatus" aria-hidden="true">inspection line — idle</p>
     <p id="trust">When all twelve pass, the Sentinel signs the build — the only door to deploy. A held build never ships, and there is no switch to make it.</p>
@@ -348,6 +404,57 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
       else if (!e.isIntersecting && running) { running = false; clearTimeout(timer); reset(); }
     });
   }, { threshold: 0.35 }).observe(gates);
+  // start immediately if already on screen — don't depend on the observer's first callback
+  var g0 = gates.getBoundingClientRect();
+  if (!running && g0.top < innerHeight && g0.bottom > 0) { running = true; timer = setTimeout(step, 500); }
+})();
+
+/* The hero demo: the example sentence types itself, the build narrates, the finished
+   client portal fades in. Loops while on screen; reduced motion shows the finished app. */
+(function () {
+  var t = document.getElementById("dtype"), b = document.getElementById("dbuild"),
+      a = document.getElementById("dapp"), stepEl = document.getElementById("dstep"),
+      col = document.getElementById("demo-col");
+  if (!t || !b || !a || !col) return;
+  var SENT = "An intake form and session notes, where each client only ever sees their own file.";
+  var STEPS = ["drafting the spec…", "writing the code…", "running the twelve gates…", "attacking tenant isolation — 0 rows ✓", "sentinel signed — deploying"];
+  function show(el) { [t, b, a].forEach(function (x) { x.hidden = x !== el; }); }
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) { show(a); return; }
+  var timer = null, running = false;
+  /* progress is computed from elapsed time, not tick counts, so throttled tabs
+     jump forward instead of crawling */
+  function typeStage(done) {
+    show(t); t.textContent = "";
+    var t0 = Date.now();
+    (function tick() {
+      if (!running) return;
+      var n = Math.min(SENT.length, Math.floor((Date.now() - t0) / 26));
+      t.textContent = SENT.slice(0, n) + (n < SENT.length ? "▌" : "");
+      if (n < SENT.length) { timer = setTimeout(tick, 26); }
+      else { timer = setTimeout(done, 700); }
+    })();
+  }
+  function buildStage(done) {
+    show(b);
+    var t0 = Date.now();
+    (function next() {
+      if (!running) return;
+      var i = Math.floor((Date.now() - t0) / 850);
+      if (i < STEPS.length) { stepEl.textContent = STEPS[i]; timer = setTimeout(next, 200); }
+      else { done(); }
+    })();
+  }
+  function appStage(done) { show(a); timer = setTimeout(function () { if (running) done(); }, 4500); }
+  function loop() { typeStage(function () { buildStage(function () { appStage(loop); }); }); }
+  new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (e.isIntersecting && !running) { running = true; loop(); }
+      else if (!e.isIntersecting && running) { running = false; clearTimeout(timer); }
+    });
+  }, { threshold: 0.3 }).observe(col);
+  // start immediately if already on screen — the hero demo must not wait for observer timing
+  var c0 = col.getBoundingClientRect();
+  if (!running && c0.top < innerHeight && c0.bottom > 0) { running = true; loop(); }
 })();
 </script>
 </body>
