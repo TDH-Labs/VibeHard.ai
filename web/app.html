@@ -6,97 +6,91 @@
 <title>VibeHard — build</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
 <style>
-/* ── tokens (web/landing/DESIGN.md §1) ───────────────────────────────────── */
+/* ── Gallery system (web/landing/DESIGN.md v2). Tokens come from /site.css; this block
+     carries app-only component styles plus legacy-name aliases so JS-built inline styles
+     (which still reference the old dark-system names) resolve into Gallery tokens. ── */
 :root{
-  --k:#000000; --carbon:#0D0D0E; --raised:#141416;
-  --line:#2D2D2D; --line-dim:#1C1C1E;
-  --amber:#FFB000; --amber-t:#FFD98A; --amber-dim:#7A5200;
-  --red:#FF4D42;
-  --text:#E8E6E1; --text2:#A8A49C; --muted:#A8A49C; --dim:#6E6B64;
-  /* legacy aliases — anything still referencing the old names resolves into the new system */
-  --bg:#000000; --bg2:#0D0D0E; --bg3:#141416; --surface:#0D0D0E;
-  --teal:#FFB000; --teal-ink:#000000; --line2:#2D2D2D;
+  /* legacy aliases → Gallery tokens (do not remove: referenced from JS strings) */
+  --k:var(--bg); --carbon:var(--bg); --raised:var(--bg);
+  --line-dim:var(--line);
+  --amber-t:var(--amber-text); --amber-dim:var(--amber-text);
+  --red:var(--block-red);
+  --text:var(--ink); --text2:var(--ink-2); --muted:var(--ink-2); --dim:var(--ink-3);
 }
-*{box-sizing:border-box;margin:0;padding:0;border-radius:0}
-body{background:var(--k);color:var(--text);font-family:'Archivo',sans-serif;font-stretch:100%;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-::selection{background:var(--amber);color:#000}
-body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
-  background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);
-  background-size:72px 72px;opacity:.45}
-body::after{content:"";position:fixed;inset:-100px;pointer-events:none;z-index:2000;opacity:.05;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
-  animation:grain .9s steps(3) infinite}
-@keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-40px,25px)}66%{transform:translate(30px,-35px)}100%{transform:translate(0,0)}}
-@media(prefers-reduced-motion:reduce){body::after{animation:none}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--amber);color:var(--ink)}
 @keyframes vh-spin{to{transform:rotate(360deg)}}
-@keyframes vh-rise{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}
-@media(prefers-reduced-motion:reduce){.card{animation:none!important}}
-a{color:var(--amber-t);text-decoration:none}
-:focus-visible{outline:1px solid var(--amber);outline-offset:3px}
-.disp{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.94}
-h1{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.96;font-size:clamp(32px,4.6vw,52px)}
-h2{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:8px}
-.mono{font-family:'JetBrains Mono',monospace}
-.lbl{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
-.led{display:inline-block;width:8px;height:8px;background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8);animation:led 2.2s steps(2) infinite;vertical-align:middle}
-@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
-@media(prefers-reduced-motion:reduce){.led{animation:none}}
-.muted{color:var(--muted)}
-nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
-.navin{max-width:1140px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:64px}
-.brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--text)}
-.brand .cube{width:14px;height:14px;background:var(--amber);flex:none}
-.brand span:last-child{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:18px;letter-spacing:.01em;text-transform:uppercase}
+a{color:var(--amber-text);text-decoration:none}
+b,strong{font-weight:600}
+/* element rules below re-assert the app's zero-margin layout over site.css's page defaults */
+p{margin:0;max-width:none}
+h1{font-family:var(--serif);font-weight:400;text-transform:none;letter-spacing:-0.01em;line-height:1.08;font-size:clamp(2.1rem,4.5vw,3rem);margin:0}
+h2{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0 0 8px}
+h3{margin:0}
+.mono{font-family:var(--mono)}
+.lbl{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+.led{display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--amber);vertical-align:middle}
+.muted{color:var(--ink-2)}
+nav{position:sticky;top:0;z-index:100;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.navin{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.brand .cube{width:10px;height:10px;border-radius:3px;background:var(--amber);flex:none}
+.brand span:last-child{font-family:var(--serif);font-size:1.35rem;letter-spacing:0;text-transform:none}
 .navlinks{display:flex;align-items:center;gap:22px}
-.navlinks a{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--text2);text-decoration:none}
-.navlinks a:hover{color:var(--amber-t)}
-.wrap{max-width:680px;margin:0 auto;padding:0 32px 80px;position:relative;z-index:1}
-.card{background:var(--carbon);border:1px solid var(--line);padding:26px;margin-bottom:18px;animation:vh-rise .4s linear both}
-label{display:block;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:14px 0 7px}
-input,textarea{width:100%;background:var(--k);border:1px solid var(--line);color:var(--text);font:inherit;font-size:15px;padding:13px 15px}
-input:focus,textarea:focus{outline:none;border-color:var(--amber)}
-textarea{resize:vertical;min-height:90px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7}
-button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--amber);padding:13px 22px;cursor:pointer;text-decoration:none;transition:background 80ms linear}
-button:hover,.btn:hover{background:var(--amber-t)}
-button:disabled{opacity:.5;cursor:default}
-button.ghost,.btn.ghost{background:transparent;color:var(--text2);border:1px solid var(--line)}
-button.ghost:hover,.btn.ghost:hover{background:transparent;border-color:var(--amber);color:var(--amber-t)}
+.navlinks a{font-family:var(--sans);font-size:15px;letter-spacing:0;text-transform:none;color:var(--ink-2);text-decoration:none}
+.navlinks a:hover{color:var(--ink)}
+.wrap{max-width:680px;margin:0 auto;padding:0 24px 80px;position:relative;z-index:1}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-m);padding:26px;margin-bottom:18px}
+label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 7px}
+input,textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-s);color:var(--ink);font:inherit;font-size:15px;padding:12px 14px}
+input::placeholder,textarea::placeholder{color:var(--ink-3)}
+input:focus,textarea:focus{border-color:var(--ink-3)}
+textarea{resize:vertical;min-height:90px;font-family:var(--sans);font-size:15px;line-height:1.6}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--amber);color:var(--ink);font-family:var(--sans);font-size:14px;font-weight:600;letter-spacing:0;text-transform:none;border:1px solid transparent;border-radius:var(--r-s);padding:11px 18px;cursor:pointer;text-decoration:none;transition:transform .12s ease,box-shadow .12s ease}
+button:hover,.btn:hover{transform:translateY(-1px);box-shadow:var(--shadow);color:var(--ink)}
+button:disabled{opacity:.5;cursor:default;transform:none;box-shadow:none}
+button.ghost,.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button.ghost:hover,.btn.ghost:hover{background:transparent;border-color:var(--ink-3);color:var(--ink);transform:none;box-shadow:none}
 .oauth{display:flex;flex-direction:column;gap:10px}
-.oauth a{display:flex;align-items:center;justify-content:center;gap:11px;background:var(--raised);border:1px solid var(--line);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;padding:12px 18px;text-decoration:none}
-.oauth a:hover{border-color:var(--amber)}
-.divider{display:flex;align-items:center;gap:14px;margin:20px 0;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
-.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line-dim)}
+.oauth a{display:flex;align-items:center;justify-content:center;gap:11px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-s);color:var(--ink);font-family:var(--sans);font-size:14px;font-weight:500;letter-spacing:0;text-transform:none;padding:11px 16px;text-decoration:none}
+.oauth a:hover{border-color:var(--ink-3)}
+.divider{display:flex;align-items:center;gap:14px;margin:20px 0;color:var(--ink-3);font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.err{color:var(--red);font-size:14px;margin-top:10px;min-height:18px}
+.err{color:var(--block-red);font-size:14px;margin-top:10px;min-height:18px}
 .stages{display:flex;flex-direction:column;gap:1px}
-.stage{display:flex;align-items:center;gap:12px;padding:8px 0;font-size:14.5px;color:var(--dim);transition:color .25s}
-.stage .ico{width:20px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--dim)}
-.stage.active{color:var(--text);font-weight:600}
-.stage.active .ico,.stage.done .ico{color:var(--amber)}
-.stage.done{color:var(--text2)}
-.sp{width:14px;height:14px;border:2px solid var(--amber);border-right-color:transparent;border-radius:50%;animation:vh-spin .8s linear infinite;display:inline-block}
-.elapsed{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber)}
-.pill{display:inline-flex;align-items:center;gap:7px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);background:rgba(255,176,0,.08);border:1px solid rgba(255,176,0,.35);padding:5px 12px}
-.console{background:var(--k);border:1px solid var(--line);padding:15px 17px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.75;max-height:360px;overflow:auto;white-space:pre-wrap;color:var(--text2);display:none;margin-top:15px}
-.console .step{color:var(--amber);font-weight:700;margin-top:10px;display:flex;align-items:center;gap:8px}
-.console .step::before{content:"";width:9px;height:9px;border:2px solid var(--amber);border-right-color:transparent;border-radius:50%;display:inline-block;animation:vh-spin .8s linear infinite}
+.stage{display:flex;align-items:center;gap:12px;padding:8px 0;font-size:14.5px;color:var(--ink-3);transition:color .25s}
+.stage .ico{width:20px;flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--ink-3)}
+.stage.active{color:var(--ink);font-weight:600}
+.stage.active .ico,.stage.done .ico{color:var(--amber-text)}
+.stage.done{color:var(--ink-2)}
+.sp{width:14px;height:14px;border:2px solid var(--amber-text);border-right-color:transparent;border-radius:50%;animation:vh-spin .8s linear infinite;display:inline-block}
+.elapsed{font-family:var(--mono);font-size:13px;color:var(--amber-text)}
+.pill{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber-text);background:var(--amber-soft);border:0;border-radius:999px;padding:5px 12px}
+.console{background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:15px 17px;font-family:var(--mono);font-size:12px;line-height:1.75;max-height:360px;overflow:auto;white-space:pre-wrap;color:var(--ink-2);display:none;margin-top:15px}
+.console .step{color:var(--amber-text);font-weight:500;margin-top:10px;display:flex;align-items:center;gap:8px}
+.console .step::before{content:"";width:9px;height:9px;border:2px solid var(--amber-text);border-right-color:transparent;border-radius:50%;display:inline-block;animation:vh-spin .8s linear infinite}
 .console .step.done::before{animation:none;border:none;content:"✓"}
-.console .bad{color:var(--red)}
-.result{display:none;margin-top:15px;padding:18px 20px}
-.result.live{background:rgba(255,176,0,.07);border:1px solid var(--amber)}
-.result.held{background:rgba(255,176,0,.05);border:1px solid var(--amber-dim)}
-.result h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:15px;letter-spacing:.01em;margin-bottom:5px}
+.console .bad{color:var(--block-red)}
+.result{display:none;margin-top:15px;padding:18px 20px;border-radius:var(--r-s)}
+.result.live{background:var(--amber-soft);border:1px solid var(--amber)}
+.result.held{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--amber)}
+.result h3{font-family:var(--sans);font-weight:600;text-transform:none;font-size:15px;letter-spacing:0;margin:0 0 5px}
 .hide{display:none}
-.builds .b{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid var(--line-dim);font-size:14px}
+.builds .b{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid var(--line);font-size:14px}
 .tabs{display:flex;gap:20px;margin-bottom:6px}
-.tabs a{color:var(--muted);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;padding-bottom:6px;border-bottom:2px solid transparent}
-.tabs a.on{color:var(--text);font-weight:700;border-bottom-color:var(--amber)}
-.banner{background:rgba(255,176,0,.07);border:1px solid rgba(255,176,0,.35);color:var(--amber-t);padding:11px 15px;font-size:13px;margin-bottom:18px}
-summary.adv{cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);padding:6px 2px;user-select:none}
-summary.adv:hover{color:var(--text2)}
+.tabs a{color:var(--ink-2);text-decoration:none;font-family:var(--sans);font-size:14px;font-weight:500;letter-spacing:0;text-transform:none;cursor:pointer;padding-bottom:6px;border-bottom:2px solid transparent}
+.tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--amber)}
+.banner{background:var(--amber-soft);border:1px solid var(--line);border-radius:var(--r-s);color:var(--ink);padding:11px 15px;font-size:13px;margin-bottom:18px}
+summary.adv{cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);padding:6px 2px;user-select:none}
+summary.adv:hover{color:var(--ink)}
 .content{position:relative;z-index:1}
+/* rounded corners for panels whose other styles are set inline (from markup or JS) */
+#questions,#resume-banner,#steer-dropped,#connbanner,#connlist>div,.held-findings>div,#orchlog>div{border-radius:var(--r-s)}
 </style>
 </head>
 <body>
@@ -107,7 +101,7 @@ summary.adv:hover{color:var(--text2)}
       <span class="cube" aria-hidden="true"></span>
       <span>VibeHard</span>
     </a>
-    <div class="navlinks" id="who"><a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust</a></div>
+    <div class="navlinks" id="who"><a href="/#gates">Gates</a><a href="/#trust">Trust</a></div>
   </div>
 </nav>
 
@@ -117,14 +111,14 @@ summary.adv:hover{color:var(--text2)}
   <div id="auth" class="hide">
     <div style="text-align:center;margin:44px 0 28px">
       <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; SIGN IN</p>
-      <h1 style="margin-top:16px">Start <span style="color:var(--amber)">a build.</span></h1>
-      <p class="muted" style="font-size:16px;margin-top:12px;max-width:440px;margin-left:auto;margin-right:auto">Describe the app you need and watch the line run — spec, code, eleven gates, live.</p>
+      <h1 style="margin-top:16px">Start <span style="font-style:italic">a build.</span></h1>
+      <p class="muted" style="font-size:16px;margin-top:12px;max-width:440px;margin-left:auto;margin-right:auto">Describe the app you need and watch the line run — spec, code, twelve gates, live.</p>
     </div>
     <div class="card" id="card-auth" style="max-width:420px;margin:0 auto">
       <div id="banner" class="banner hide"></div>
       <div class="oauth">
         <a href="/auth/google"><svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.02-3.7H.96v2.34A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.98 10.72a5.4 5.4 0 0 1 0-3.44V4.94H.96a9 9 0 0 0 0 8.12l3.02-2.34z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58A9 9 0 0 0 9 0 9 9 0 0 0 .96 4.94l3.02 2.34C4.68 5.16 6.66 3.58 9 3.58z"/></svg>Continue with Google</a>
-        <a href="/auth/github"><svg width="18" height="18" viewBox="0 0 16 16" fill="#E8E6E1"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Continue with GitHub</a>
+        <a href="/auth/github"><svg width="18" height="18" viewBox="0 0 16 16" fill="#25211C"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>Continue with GitHub</a>
       </div>
       <div class="divider">or with email</div>
       <div class="tabs"><a id="tab-login" class="on">Log in</a><a id="tab-signup">Sign up</a></div>
@@ -160,13 +154,13 @@ summary.adv:hover{color:var(--text2)}
   <div id="dash" class="hide">
     <div style="margin:38px 0 26px">
       <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; BUILD FLOOR</p>
-      <h1 style="margin-top:16px">Describe it <span style="color:var(--amber)">once.</span></h1>
-      <p class="muted" style="font-size:16px;margin-top:12px;max-width:560px">The app your business needs, the way you'd say it out loud. We write the spec, build it, run all eleven gates, and put it live — with its own private database. Nothing to configure.</p>
+      <h1 style="margin-top:16px">Describe it <span style="font-style:italic">once.</span></h1>
+      <p class="muted" style="font-size:16px;margin-top:12px;max-width:560px">The app your business needs, the way you'd say it out loud. We write the spec, build it, run all twelve gates, and put it live — with its own private database. Nothing to configure.</p>
     </div>
 
     <div class="card">
       <h2>Intake // build order</h2>
-      <div id="resume-banner" class="hide" style="background:rgba(255,176,0,.07);border:1px solid rgba(255,176,0,.35);padding:12px 15px;margin:10px 0 0;font-size:14px;line-height:1.5"></div>
+      <div id="resume-banner" class="hide" style="background:var(--amber-soft);border:1px solid var(--line);padding:12px 15px;margin:10px 0 0;font-size:14px;line-height:1.5"></div>
       <textarea id="prompt" placeholder="A client portal where each client signs in and sees only their own files and invoices…"></textarea>
       <div style="margin-top:14px"><div class="lbl" style="font-size:10.5px;margin-bottom:8px">Look &amp; feel</div><div id="design" class="row" style="flex-wrap:wrap;gap:8px"></div></div>
       <div class="row" style="margin-top:14px"><button id="buildbtn">Build it ▸</button><button id="stopbtn" class="hide ghost">⏸ Stop</button><span class="muted" id="buildhint" style="font-size:13px"></span></div>
@@ -267,14 +261,14 @@ function keyForm(){
   $("#keystate").innerHTML='<input id="keyin" placeholder="sk-ant-…" style="margin-top:12px"><div class="row" style="margin-top:11px"><button id="savekey">Save key</button><span class="err" id="keyerr" style="margin:0"></span></div>';
   $("#savekey").onclick=async()=>{const key=$("#keyin").value.trim();const {status,body}=await api("/api/key",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key})});if(status>=400){$("#keyerr").textContent=body.error;return}await load()};
 }
-const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber)">⏸ held by the gates</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber)">deploy snag</span>',error:'<span class="bad" style="color:var(--red)">error</span>'};
+const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber-text)">⏸ held by the gates</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber-text)">deploy snag</span>',error:'<span class="bad" style="color:var(--red)">error</span>'};
 function renderBuilds(){
   if(!me.builds||!me.builds.length){$("#builds").innerHTML='<span class="muted" style="font-size:14px">No builds yet.</span>';return}
   $("#builds").innerHTML=me.builds.map((b,i)=>{
     const badge=STATUS_BADGE[b.status]||b.status;
     let action="";
     if(b.status==="live"&&b.url)action=`<a href="${esc(b.url)}" target="_blank" style="color:var(--amber-t);font-size:13px">open →</a> <a class="lk" data-act="change" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px;margin-left:10px">request a change →</a>`;
-    else if(b.status==="blocked")action=`<a class="lk" data-act="held" data-i="${i}" style="cursor:pointer;color:var(--amber);font-size:13px">see what's flagged →</a>`;
+    else if(b.status==="blocked")action=`<a class="lk" data-act="held" data-i="${i}" style="cursor:pointer;color:var(--amber-text);font-size:13px">see what's flagged →</a>`;
     else if(b.status==="paused"||b.status==="running")action=`<a class="lk" data-act="resume" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px">resume →</a>`;
     return `<div class="b" style="align-items:flex-start"><div style="flex:1"><div style="font-size:13.5px">${esc((b.prompt||b.app).slice(0,64))}</div><div class="muted mono" style="font-size:11.5px;margin-top:2px">${badge}</div><div class="held-slot" data-i="${i}"></div></div>${action}</div>`;
   }).join("");
@@ -301,7 +295,7 @@ async function renderFunctest(app,el){
   wrap.innerHTML='<div class="muted" style="font-size:12.5px">Checking it does what you asked…</div>';el.appendChild(wrap);
   const {body}=await api("/api/functest?app="+encodeURIComponent(app));
   if(!body||!body.checks||!body.checks.length){wrap.remove();return}
-  const I={works:'<span style="color:var(--amber)">✓</span>',partial:'<span style="color:var(--amber-t)">◐</span>',missing:'<span style="color:var(--red)">✗</span>'};
+  const I={works:'<span style="color:var(--amber-text)">✓</span>',partial:'<span style="color:var(--amber-text)">◐</span>',missing:'<span style="color:var(--red)">✗</span>'};
   const s=body.summary||{};
   wrap.innerHTML='<div style="font-weight:600;font-size:13.5px;margin-bottom:8px">Does it do what you asked? <span class="muted" style="font-weight:400">'+(s.works||0)+'/'+(s.total||0)+' working'+(s.partial?' · '+s.partial+' partial':'')+(s.missing?' · '+s.missing+' missing':'')+'</span></div>'+body.checks.map(c=>'<div style="margin-bottom:7px;font-size:13px">'+(I[c.status]||'')+' '+esc(c.feature)+'<div class="muted" style="font-size:11.5px;margin-left:18px;line-height:1.45">'+esc(c.note||'')+'</div></div>').join("");
 }
@@ -312,7 +306,7 @@ async function renderCredentials(app,el){
   if(!body||!body.required||!body.required.length)return;
   const have=new Set(body.have||[]);const missing=body.required.filter(c=>!have.has(c.key));
   const wrap=document.createElement("div");wrap.className="creds-panel";wrap.style.cssText="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)";
-  wrap.innerHTML='<div style="font-weight:600;font-size:13.5px;margin-bottom:3px">🔑 Keys this app needs '+(missing.length?'— '+missing.length+' to add':'— all set ✓')+'</div><div class="muted" style="font-size:12px;margin-bottom:10px">Saved to your account, encrypted, and added to your app at deploy — never written into the code.</div>'+body.required.map(c=>{const hk=have.has(c.key);return '<div style="margin-bottom:10px"><div style="font-size:13px">'+(hk?'<span style="color:var(--amber)">✓</span> ':'')+esc(c.label)+'</div><div class="muted" style="font-size:11.5px;margin:2px 0 '+(hk?'0':'5px')+'">'+esc(c.help)+'</div>'+(hk?'':'<div class="row"><input data-k="'+esc(c.key)+'" placeholder="paste your key" style="flex:1"><button class="creds-save" data-k="'+esc(c.key)+'">Save</button></div>')+'</div>';}).join("");
+  wrap.innerHTML='<div style="font-weight:600;font-size:13.5px;margin-bottom:3px">🔑 Keys this app needs '+(missing.length?'— '+missing.length+' to add':'— all set ✓')+'</div><div class="muted" style="font-size:12px;margin-bottom:10px">Saved to your account, encrypted, and added to your app at deploy — never written into the code.</div>'+body.required.map(c=>{const hk=have.has(c.key);return '<div style="margin-bottom:10px"><div style="font-size:13px">'+(hk?'<span style="color:var(--amber-text)">✓</span> ':'')+esc(c.label)+'</div><div class="muted" style="font-size:11.5px;margin:2px 0 '+(hk?'0':'5px')+'">'+esc(c.help)+'</div>'+(hk?'':'<div class="row"><input data-k="'+esc(c.key)+'" placeholder="paste your key" style="flex:1"><button class="creds-save" data-k="'+esc(c.key)+'">Save</button></div>')+'</div>';}).join("");
   // Once any key is saved, offer a one-click re-deploy so the new keys reach the live app.
   if(have.size){const rb=document.createElement("button");rb.textContent="Redeploy with my keys ▸";rb.style.marginTop="6px";rb.onclick=()=>{wrap.remove();startBuild(null,app,"ship")};wrap.appendChild(rb);}
   el.appendChild(wrap);
@@ -348,7 +342,7 @@ function renderStages(){$("#stages").innerHTML=STAGES.map(s=>`<div class="stage"
 function paintStages(activeIdx){STAGES.forEach((s,j)=>{const el=stageEl(s.key);if(!el)return;const ico=el.querySelector(".ico");el.classList.remove("active","done");if(j<activeIdx){el.classList.add("done");ico.textContent="✓"}else if(j===activeIdx){el.classList.add("active");ico.innerHTML='<span class="sp"></span>'}else{ico.textContent="○"}})}
 function finishStages(lastIdx){STAGES.forEach((s,j)=>{const el=stageEl(s.key);if(!el)return;const ico=el.querySelector(".ico");el.classList.remove("active","done");if(j<=lastIdx){el.classList.add("done");ico.textContent="✓"}else{ico.textContent="○"}})}
 function notify(title,body){if(!("Notification" in window)||Notification.permission!=="granted"||!document.hidden)return;try{new Notification("VibeHard — "+title,{body})}catch(e){}}
-function armStuck(label){clearTimeout(stuckTimer);stuckTimer=setTimeout(()=>{$("#stage-desc").innerHTML='<span style="color:var(--amber)">“'+esc(label)+'” is taking a while — it may just be a slow step, or it may be stuck. You can Stop and resume later.</span>';if("Notification" in window&&Notification.permission==="granted"){try{new Notification("VibeHard — still working",{body:'“'+label+'” is taking a while.'})}catch(e){}}},4*60*1000)}
+function armStuck(label){clearTimeout(stuckTimer);stuckTimer=setTimeout(()=>{$("#stage-desc").innerHTML='<span style="color:var(--amber-text)">“'+esc(label)+'” is taking a while — it may just be a slow step, or it may be stuck. You can Stop and resume later.</span>';if("Notification" in window&&Notification.permission==="granted"){try{new Notification("VibeHard — still working",{body:'“'+label+'” is taking a while.'})}catch(e){}}},4*60*1000)}
 function setStage(key){const i=STAGES.findIndex(s=>s.key===key);if(i<0||i<stageIdx)return;stageIdx=i;paintStages(i);const s=STAGES[i];$("#stage-desc").textContent=s.desc;notify("Now: "+s.label,s.desc);armStuck(s.label)}
 function detectStage(t){
   if(/Provisioning|Migrating|fly\.dev|vercel\.app|LIVE →|→ LIVE/i.test(t))return"deploy";
@@ -370,7 +364,7 @@ const GATE_LABELS={sast:"Code security",secrets:"Secret scan","depvuln":"Depende
 const GATE_ORDER=["sast","secrets","depvuln","rls","compliance","pii","prod-readiness","verify"];
 let gateState={};
 function renderGates(){
-  const ic={pass:'<span style="color:var(--amber)">✓</span>',block:'<span style="color:var(--red)">✗</span>',warn:'<span style="color:var(--amber-t)">⚠</span>'};
+  const ic={pass:'<span style="color:var(--amber-text)">✓</span>',block:'<span style="color:var(--red)">✗</span>',warn:'<span style="color:var(--amber-text)">⚠</span>'};
   $("#gatelist").innerHTML=GATE_ORDER.filter(g=>gateState[g]).map(g=>`<div style="font-size:12.5px">${ic[gateState[g]]||"○"} ${GATE_LABELS[g]||g}</div>`).join("");
   if(Object.keys(gateState).length)$("#gatelist").classList.remove("hide");
 }
@@ -388,7 +382,7 @@ const DESIGNS=[{key:"clean",name:"Clean & minimal"},{key:"warm",name:"Warm & fri
 let selectedDesign="clean";
 function renderDesignPicker(){
   const el=$("#design");if(!el)return;
-  el.innerHTML=DESIGNS.map(d=>{const on=d.key===selectedDesign;return '<button class="dchip" data-d="'+d.key+'" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:7px 12px;cursor:pointer;background:'+(on?'var(--amber)':'transparent')+';color:'+(on?'#000':'var(--muted)')+';border:1px solid '+(on?'var(--amber)':'var(--line)')+'">'+d.name+'</button>';}).join("");
+  el.innerHTML=DESIGNS.map(d=>{const on=d.key===selectedDesign;return '<button class="dchip" data-d="'+d.key+'" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:7px 12px;cursor:pointer;background:'+(on?'var(--amber)':'transparent')+';color:'+(on?'var(--ink)':'var(--muted)')+';border:1px solid '+(on?'var(--amber)':'var(--line)')+'">'+d.name+'</button>';}).join("");
   el.querySelectorAll(".dchip").forEach(b=>b.onclick=()=>{selectedDesign=b.getAttribute("data-d");renderDesignPicker()});
 }
 function startBuild(prompt,resumeApp,mode){
@@ -459,7 +453,7 @@ async function askNext(prompt,turns){
     html+='<div id="qopts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">';
     for(const o of opts){
       const rec=(o.label===q.recommended);
-      html+='<button type="button" class="qopt" data-label="'+esc(o.label)+'" style="text-align:left;font-family:\'Archivo\',sans-serif;font-weight:400;letter-spacing:0;text-transform:none;font-size:13px;padding:9px 11px;border:1px solid '+(rec?'var(--amber)':'var(--line)')+';background:transparent;color:var(--text);cursor:pointer">'
+      html+='<button type="button" class="qopt" data-label="'+esc(o.label)+'" style="text-align:left;font-family:\'Inter\',sans-serif;font-weight:400;letter-spacing:0;text-transform:none;font-size:13px;padding:9px 11px;border:1px solid '+(rec?'var(--amber)':'var(--line)')+';background:var(--surface);color:var(--text);cursor:pointer">'
         +'<div style="font-weight:600">'+esc(o.label)+(rec?' <span style="font-weight:400;opacity:.65">· recommended</span>':'')+'</div>'
         +(o.detail?'<div style="font-size:12px;opacity:.68;margin-top:2px">'+esc(o.detail)+'</div>':'')
         +'</button>';
@@ -499,7 +493,7 @@ function renderResume(){
 
 // ── connectors: Supabase (validated key-import) + Stripe (Connect OAuth) ────────
 const CONN_MSG={"stripe-ok":["ok","Stripe connected — your apps can now take payments on your account."],"stripe-ok-test":["ok","Stripe connected in test mode — switch to a live account when you're ready to charge."],"stripe-not-configured":["warn","Stripe Connect isn't set up on this server yet."],"stripe-denied":["warn","You declined the Stripe connection — nothing was saved."],"stripe-state":["warn","That Stripe link expired. Try Connect again."],"stripe-failed":["warn","Couldn't finish the Stripe connection. Try again."],"signin-first":["warn","Sign in first, then connect Stripe."]};
-function connBanner(kind,text){const b=$("#connbanner");if(!kind){b.classList.add("hide");return}b.classList.remove("hide");const ok=kind==="ok";b.style.background=ok?"rgba(255,176,0,.07)":"rgba(255,176,0,.05)";b.style.border="1px solid "+(ok?"rgba(255,176,0,.4)":"rgba(255,176,0,.3)");b.style.color=ok?"var(--text)":"var(--amber-t)";b.textContent=text;}
+function connBanner(kind,text){const b=$("#connbanner");if(!kind){b.classList.add("hide");return}b.classList.remove("hide");const ok=kind==="ok";b.style.background=ok?"var(--amber-soft)":"var(--bg)";b.style.border="1px solid "+(ok?"var(--amber)":"var(--line)");b.style.color=ok?"var(--text)":"var(--amber-t)";b.textContent=text;}
 async function renderConnections(){
   const {body:st}=await api("/api/connect/status");if(!st||st.error)return;
   const sb=st.supabase,stripe=st.stripe;
@@ -530,7 +524,7 @@ async function renderConnections(){
     const {status,body}=await api("/api/connect/supabase",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url,anonKey,serviceKey})});
     sbSave.disabled=false;sbSave.textContent="Validate & connect";
     const checks=(body&&body.checks)||[];
-    $("#sb-checks").innerHTML=checks.map(c=>(c.ok?'<span style="color:var(--amber)">✓</span> ':'<span class="bad" style="color:var(--red)">✕</span> ')+esc(c.detail)).join("<br>");
+    $("#sb-checks").innerHTML=checks.map(c=>(c.ok?'<span style="color:var(--amber-text)">✓</span> ':'<span class="bad" style="color:var(--red)">✕</span> ')+esc(c.detail)).join("<br>");
     if(status<400){connBanner("ok","Supabase connected — project "+esc(body.ref)+".");await renderConnections()}
   };
 }
@@ -563,7 +557,7 @@ async function renderSteering(){
 async function load(keep){
   const sp=new URLSearchParams(location.search);const cp=sp.get("connect");if(cp&&CONN_MSG[cp]){const[k,t]=CONN_MSG[cp];connBanner(k,t);history.replaceState({},"","/app")}
   const {body}=await api("/api/me");me=body;
-  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust</a>';
+  if(!me.authed){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/#gates">Gates</a><a href="/#trust">Trust</a>';
     // Clerk has a LIVE client session but the server rejected it (misconfig: azp/authorizedParties,
     // wrong instance keys, clock skew…). Remounting SignIn here redirect-loops forever — the already-
     // signed-in widget instantly bounces back and we land in this branch again. Fail LOUDLY instead.
@@ -595,8 +589,8 @@ function orchApp(){return me&&me.builds&&me.builds[0]&&me.builds[0].app}
 function orchBubble(who,text,kind){
   const log=$("#orchlog"),d=document.createElement("div");
   const mine=who==="you";
-  const bg=mine?"var(--amber)":(kind==="held"||kind==="error")?"rgba(255,77,66,.10)":(kind==="done")?"rgba(255,176,0,.08)":"var(--raised)";
-  const col=mine?"#000":"var(--text)";
+  const bg=mine?"var(--amber)":(kind==="held"||kind==="error")?"rgba(179,38,30,.08)":(kind==="done")?"var(--amber-soft)":"var(--raised)";
+  const col=mine?"var(--ink)":"var(--text)";
   d.style.cssText=`align-self:${mine?"flex-end":"flex-start"};max-width:84%;background:${bg};color:${col};border:1px solid var(--line);padding:9px 12px;font-size:14px;line-height:1.5;white-space:pre-wrap`;
   d.textContent=text;log.appendChild(d);log.scrollTop=log.scrollHeight;
 }
@@ -641,7 +635,7 @@ async function loadClerk(cfg){const pk=cfg.publishableKey;let fapi=cfg.frontendA
 async function boot(){
   let cfg=null;try{cfg=(await api("/api/auth-config")).body}catch{}
   if(cfg&&cfg.clerk&&cfg.publishableKey){window.__CLERK=cfg;await loadClerk(cfg);return load()}
-  if(resetToken){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/how-it-works.html">How it works</a><a href="/trust.html">Trust</a>';showAuthCard("reset")}
+  if(resetToken){$("#auth").classList.remove("hide");$("#dash").classList.add("hide");$("#who").innerHTML='<a href="/#gates">Gates</a><a href="/#trust">Trust</a>';showAuthCard("reset")}
   else load();
 }
 boot();
