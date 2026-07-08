@@ -57,6 +57,10 @@ worth more in prod, where the stakes and the recurring revenue both live.
 
 ## Phase II: Enterprise Agent Builder (the "Holy Grail" market gap)
 
+> Market sizing, competitive read, and the focus decision live in
+> [`market-analysis.md`](market-analysis.md) (2026-07-08): lead with this Phase II
+> direction, keep VibeHard.ai as the beachhead, do NOT run a standalone orchestrator GTM.
+
 **The Market Gap.** No single platform natively combines all three layers required for
 non-technical founders to build AI-first Service-as-Software businesses:
 
