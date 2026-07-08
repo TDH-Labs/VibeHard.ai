@@ -47,8 +47,13 @@
   display: inline-block; font-family: var(--mono); font-size: 12px; color: var(--amber-text);
   background: var(--amber-soft); border-radius: 999px; padding: 3px 10px; margin-bottom: 14px;
 }
-/* gates */
-.chips { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 32px 0; padding: 0; max-width: 720px; }
+/* gates — the inspection line. Chips idle neutral, light amber as the scan passes,
+   the sentinel signs. Reduced motion gets the finished state (see JS). */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 32px 0 14px; padding: 0; max-width: 720px; }
+.chips .chip { background: var(--surface); color: var(--ink-3); border: 1px solid var(--line); transition: background .35s, color .35s, border-color .35s; }
+.chips .chip.lit { background: var(--amber-soft); color: var(--amber-text); border-color: transparent; }
+.chips .chip.signed { background: var(--amber); color: var(--ink); border-color: transparent; }
+.gatestatus { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin: 0 0 32px; min-height: 1.2em; }
 /* who it's for */
 a.card { display: block; text-decoration: none; }
 a.card:hover { border-color: var(--ink-3); color: var(--ink); }
@@ -149,6 +154,7 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
       <li class="chip">completeness</li>
       <li class="chip">sentinel</li>
     </ul>
+    <p class="gatestatus" id="gatestatus" aria-hidden="true">inspection line — idle</p>
     <p id="trust">When all twelve pass, the Sentinel signs the build — the only door to deploy. A held build never ships, and there is no switch to make it.</p>
     <a class="btn btn-ghost arrow" href="/trust.html">Every gate, shown</a>
   </div>
@@ -304,6 +310,44 @@ a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text)
     idea.hidden = false; rowIdle.hidden = false; setStatus("");
     idea.focus();
   });
+})();
+
+/* The inspection line: chips light in registry order, the sentinel signs, hold, reset.
+   Runs only while the gates section is on screen; reduced motion gets the finished state. */
+(function () {
+  var chips = [].slice.call(document.querySelectorAll(".chips .chip")),
+      status = document.getElementById("gatestatus"),
+      gates = document.getElementById("gates");
+  if (!chips.length || !status || !gates) return;
+  var last = chips.length - 1;
+  function finished() {
+    chips.forEach(function (c, i) { c.classList.add(i === last ? "signed" : "lit"); });
+    status.textContent = "all twelve passed — sentinel signed";
+  }
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) { finished(); return; }
+  var i = -1, timer = null, running = false;
+  function reset() {
+    chips.forEach(function (c) { c.classList.remove("lit", "signed"); });
+    i = -1; status.textContent = "inspection line — idle";
+  }
+  function step() {
+    i++;
+    if (i < last) {
+      chips[i].classList.add("lit");
+      status.textContent = "inspecting: " + chips[i].textContent;
+      timer = setTimeout(step, 650);
+    } else {
+      chips[last].classList.add("signed");
+      status.textContent = "sentinel signed — cleared to deploy";
+      timer = setTimeout(function () { reset(); timer = setTimeout(step, 1200); }, 2800);
+    }
+  }
+  new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (e.isIntersecting && !running) { running = true; timer = setTimeout(step, 500); }
+      else if (!e.isIntersecting && running) { running = false; clearTimeout(timer); reset(); }
+    });
+  }, { threshold: 0.35 }).observe(gates);
 })();
 </script>
 </body>

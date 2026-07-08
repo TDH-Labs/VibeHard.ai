@@ -16,6 +16,11 @@
 <style>
 /* how-it-works only: machine artifact names + the step list */
 code { font-family: var(--mono); font-size: 0.85em; background: var(--amber-soft); color: var(--amber-text); padding: 2px 7px; border-radius: 6px; }
+/* the artifact chain — the whole sequence as one quiet strip */
+.chain { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 44px; max-width: 780px; }
+.chain .c { font-family: var(--mono); font-size: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 5px 13px; color: var(--ink-2); white-space: nowrap; }
+.chain .c.live { background: var(--amber-soft); color: var(--amber-text); border-color: transparent; }
+.chain .arr { color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
 .steps { list-style: none; margin: 0; padding: 0; max-width: 720px; }
 .steps li { display: grid; grid-template-columns: 64px 1fr; gap: 20px; padding: 36px 0; border-top: 1px solid var(--line); }
 .steps li:last-child { border-bottom: 1px solid var(--line); }
@@ -46,6 +51,15 @@ code { font-family: var(--mono); font-size: 0.85em; background: var(--amber-soft
     <span class="eyebrow">How it works</span>
     <h1 id="hero-h">What happens after you type your idea.</h1>
     <p class="lede">Every build takes the same path from your first sentence to a live app. Nothing ships unchecked.</p>
+    <div class="chain" aria-hidden="true">
+      <span class="c">your idea</span><span class="arr">→</span>
+      <span class="c">spec.json</span><span class="arr">→</span>
+      <span class="c">PRD.md · architecture.json</span><span class="arr">→</span>
+      <span class="c">code</span><span class="arr">→</span>
+      <span class="c">twelve gates</span><span class="arr">→</span>
+      <span class="c">sentinel ✓</span><span class="arr">→</span>
+      <span class="c live">your app, live</span>
+    </div>
   </div>
 </section>
 

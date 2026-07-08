@@ -32,6 +32,19 @@
 .receipts { list-style: none; margin: 40px 0 0; padding: 0; font-family: var(--mono); font-size: 13px; line-height: 2.2; color: var(--ink-2); max-width: 640px; }
 .receipts li::before { content: "▸ "; color: var(--amber-text); }
 .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 36px; }
+/* the verdict board — the dashboard's gate checklist, mid-build, real labels */
+.board { max-width: 440px; margin-top: 44px; padding: 0; overflow: hidden; }
+.board .b-head, .board .b-foot { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--ink-3); padding: 13px 20px; letter-spacing: .04em; }
+.board .b-head { border-bottom: 1px solid var(--line); }
+.board .b-foot { border-top: 1px solid var(--line); }
+.board ul { list-style: none; margin: 0; padding: 12px 20px; font-family: var(--mono); font-size: 13px; line-height: 2.15; color: var(--ink-2); }
+.board .ok { color: var(--amber-text); }
+.board .pend { color: var(--ink-3); }
+.board .dot { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--amber); border-right-color: transparent; border-radius: 50%; animation: bspin 1s linear infinite; vertical-align: -1px; margin-right: 2px; }
+@keyframes bspin { to { transform: rotate(360deg); } }
+.b-cap { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 14px; }
+/* the two-tenant attack diagram */
+.attack { display: block; width: 100%; max-width: 640px; height: auto; margin-top: 44px; }
 </style>
 </head>
 <body>
@@ -68,6 +81,26 @@
     <span class="eyebrow">The twelve gates, in order</span>
     <h2 id="gates-h">The model never grades its own work.</h2>
     <p>The model writes the code and has no say in whether it ships. That decision belongs to twelve deterministic checks, run in a fixed order on every build. They fail closed: a gate that fails, or crashes mid-run, ends the run with the same verdict — <span class="blockword">BLOCK</span>. There is no override.</p>
+
+    <div class="card board" role="img" aria-label="The verdict board during a build: nine gates passed, acceptance tests running, two gates waiting, sentinel waiting on three gates">
+      <div class="b-head"><span>client-portal · build 3</span><span>04:12</span></div>
+      <ul aria-hidden="true">
+        <li class="ok">✓ Code security</li>
+        <li class="ok">✓ Secret scan</li>
+        <li class="ok">✓ Dependency CVEs</li>
+        <li class="ok">✓ Data isolation (RLS)</li>
+        <li class="ok">✓ Database migrations</li>
+        <li class="ok">✓ Tenant isolation attack</li>
+        <li class="ok">✓ Compliance posture</li>
+        <li class="ok">✓ Personal-data leaks</li>
+        <li class="ok">✓ Production readiness</li>
+        <li><span class="dot" aria-hidden="true"></span> Acceptance tests — running</li>
+        <li class="pend">○ Build &amp; boot check</li>
+        <li class="pend">○ Feature completeness</li>
+      </ul>
+      <div class="b-foot"><span>sentinel</span><span>waiting on 3 gates</span></div>
+    </div>
+    <p class="b-cap">The verdict board, as the dashboard shows it mid-build.</p>
 
     <div class="gate-list">
       <div class="gate">
@@ -172,6 +205,30 @@
     <h2 id="attack-h">Why it attacks a real database.</h2>
     <p>Access-control code can look correct and still leak — a typo in a condition, a policy that checks the wrong column, a table nobody covered. Reading that code and concluding it is fine is how CVE-2025-48757 happened; the code looked fine to the people who shipped it, too.</p>
     <p>So the <span class="mono">rls-enforce</span> gate runs the attack itself. It stands up a real Postgres database, applies the exact migrations the build produced, and seeds two separate tenants with real rows. Signed in as tenant A, and again as an anonymous session, it attempts to read, update, delete, and insert tenant B's data across every table the spec marked as isolated. If a single row comes back, the build is held. If the attack harness itself errors, the build is held.</p>
+    <svg class="attack" viewBox="0 0 640 250" role="img" aria-label="Diagram of the two-tenant attack: a read from tenant A's session against tenant B's rows returns zero rows, and a read from an anonymous session against tenant B's rows also returns zero rows" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" style="fill:var(--ink-3)"/></marker>
+      </defs>
+      <rect x="14" y="46" width="180" height="120" rx="12" style="fill:var(--surface);stroke:var(--line)"/>
+      <text x="34" y="76" style="font-family:var(--mono);font-size:12px;font-weight:500;fill:var(--ink)">tenant A</text>
+      <line x1="34" y1="98" x2="174" y2="98" style="stroke:var(--line)"/>
+      <line x1="34" y1="120" x2="174" y2="120" style="stroke:var(--line)"/>
+      <line x1="34" y1="142" x2="174" y2="142" style="stroke:var(--line)"/>
+      <rect x="446" y="46" width="180" height="120" rx="12" style="fill:var(--surface);stroke:var(--line)"/>
+      <text x="466" y="76" style="font-family:var(--mono);font-size:12px;font-weight:500;fill:var(--ink)">tenant B</text>
+      <line x1="466" y1="98" x2="606" y2="98" style="stroke:var(--line)"/>
+      <line x1="466" y1="120" x2="606" y2="120" style="stroke:var(--line)"/>
+      <line x1="466" y1="142" x2="606" y2="142" style="stroke:var(--line)"/>
+      <path d="M194 86 H 438" style="stroke:var(--ink-3);fill:none" marker-end="url(#ah)"/>
+      <text x="210" y="74" style="font-family:var(--mono);font-size:11px;fill:var(--ink-2)">as A &#8594; read B's rows</text>
+      <rect x="300" y="96" width="64" height="22" rx="11" style="fill:var(--amber-soft)"/>
+      <text x="312" y="111" style="font-family:var(--mono);font-size:11px;fill:var(--amber-text)">0 rows</text>
+      <text x="150" y="226" style="font-family:var(--mono);font-size:11px;fill:var(--ink-2)">anonymous session &#8594; read B's rows</text>
+      <path d="M400 222 C 460 222 495 205 512 172" style="stroke:var(--ink-3);fill:none" marker-end="url(#ah)"/>
+      <rect x="530" y="196" width="64" height="22" rx="11" style="fill:var(--amber-soft)"/>
+      <text x="542" y="211" style="font-family:var(--mono);font-size:11px;fill:var(--amber-text)">0 rows</text>
+    </svg>
+    <p class="b-cap">Both attempts, on every build. A single returned row holds the release.</p>
   </div>
 </section>
 

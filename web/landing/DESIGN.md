@@ -49,6 +49,17 @@ against this document. Drift gets fixed, not carried._
 - Interactive theater is retired: no live log streams, no scroll-driven blueprints, no
   animated matrices on marketing pages. The one interactive element that stays is the hero
   spec console — it is the product's real free sample, not decoration.
+- **Visuals are product-true or mechanism-true, never decorative.** Two kinds are allowed:
+  a mockup mirroring a real product surface (real gate names, the dashboard's real labels
+  and states — nothing invented), or a diagram of a real mechanism (the two-tenant attack,
+  the artifact chain). One visual per section, same budget as any other element. No stock
+  imagery, no abstract illustration.
+- **Motion only where it depicts the mechanism** — the inspection sequence advancing, a
+  running gate's spinner. It pauses off-viewport, loops gently, and every animated element
+  has a meaningful reduced-motion fallback (the *finished* state, not a freeze mid-run).
+  No entrance animations, no parallax, no grain. Current instances: the homepage
+  inspection line (chips light in registry order, sentinel signs), the trust page verdict
+  board's running-gate spinner.
 - Depth lives on interior pages. The homepage links to it; it does not compress it.
 
 ## 3. Voice
