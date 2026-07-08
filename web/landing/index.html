@@ -3,812 +3,305 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VibeHard — Describe it once. It ships right, or it doesn't ship.</title>
-<meta name="description" content="You describe the software. A factory builds it, and eleven deterministic gates decide whether it's safe, runnable, and complete before it deploys.">
-<meta property="og:title" content="VibeHard — It ships right, or it doesn't ship.">
-<meta property="og:description" content="AI writes the software. Eleven deterministic gates decide if it leaves the building. The deploy refuses to run without their signed verdict.">
+<title>VibeHard — It ships checked, or it doesn't ship.</title>
+<meta name="description" content="Describe the app you need in plain language. VibeHard builds it and inspects it with eleven automated gates and a signed sentinel. A build that can't pass is held, with findings you can read.">
+<meta property="og:title" content="VibeHard — It ships checked, or it doesn't ship.">
+<meta property="og:description" content="Describe the app you need. VibeHard builds it, inspects it with eleven automated gates and a signed sentinel, and only ships what passes.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://vibehard.ai/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
 <style>
-/* ── tokens (DESIGN.md §1) ─────────────────────────────────────────────── */
-:root{
-  --k:#000000; --carbon:#0D0D0E; --raised:#141416;
-  --line:#2D2D2D; --line-dim:#1C1C1E;
-  --amber:#FFB000; --amber-t:#FFD98A; --amber-dim:#7A5200;
-  --red:#FF4D42;
-  --text:#E8E6E1; --text2:#A8A49C; --dim:#6E6B64;
-  --glass:rgba(13,13,14,.62);
+/* homepage-only: hero console + small layout tweaks */
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.console { max-width: 720px; margin-top: 40px; padding: 0; overflow: hidden; }
+.console textarea {
+  display: block; width: 100%; min-height: 132px; resize: vertical; border: 0; background: transparent;
+  padding: 22px 24px 8px; font: 400 16px/1.6 var(--sans); color: var(--ink);
 }
-*{box-sizing:border-box;margin:0;padding:0;border-radius:0}
-[hidden]{display:none!important}
-html{scroll-behavior:smooth}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
-body{background:var(--k);color:var(--text);font-family:'Archivo',sans-serif;font-stretch:100%;font-size:16.5px;line-height:1.62;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-::selection{background:var(--amber);color:#000}
-
-/* grain — animated SVG noise, stepped like film weave */
-body::after{content:"";position:fixed;inset:-100px;pointer-events:none;z-index:2000;opacity:.05;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
-  animation:grain .9s steps(3) infinite}
-@keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-40px,25px)}66%{transform:translate(30px,-35px)}100%{transform:translate(0,0)}}
-@media(prefers-reduced-motion:reduce){body::after{animation:none}}
-
-/* type voices */
-.disp{font-family:'Archivo';font-stretch:118%;font-weight:880;text-transform:uppercase;letter-spacing:-.012em;line-height:.94}
-.mono{font-family:'JetBrains Mono',monospace}
-.lbl{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
-.lbl b{color:var(--amber);font-weight:500}
-h1{font-size:clamp(40px,6vw,88px)}
-h2{font-size:clamp(34px,4.6vw,64px)}
-a{color:var(--amber-t);text-decoration:none}
-p{color:var(--text2)}
-:focus-visible{outline:1px solid var(--amber);outline-offset:3px}
-
-/* milled frame: content rails + section seams */
-.rail{max-width:1280px;margin:0 auto;border-left:1px solid var(--line-dim);border-right:1px solid var(--line-dim);position:relative}
-@media(max-width:1320px){.rail{border-left:none;border-right:none}}
-.pad{padding:0 clamp(20px,4vw,56px)}
-section{border-bottom:1px solid var(--line-dim);position:relative}
-
-/* LED */
-.led{display:inline-block;width:8px;height:8px;background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8);animation:led 2.2s steps(2) infinite;vertical-align:middle}
-.led.idle{background:var(--amber-dim);box-shadow:none;animation:none}
-@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
-@media(prefers-reduced-motion:reduce){.led{animation:none}}
-
-/* buttons — mechanical, instant */
-.btn{display:inline-flex;align-items:center;gap:10px;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;border:1px solid var(--amber);padding:15px 26px;cursor:pointer;transition:background 80ms linear;text-decoration:none}
-.btn:hover{background:var(--amber-t)}
-.btn:active{transform:translateY(1px)}
-.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
-.btn.ghost:hover{background:transparent;border-color:var(--amber);color:var(--amber-t)}
-
-/* reveal */
-[data-rv]{opacity:0;transform:translateY(14px);transition:opacity .5s linear,transform .5s linear}
-[data-rv].on{opacity:1;transform:none}
-@media(prefers-reduced-motion:reduce){[data-rv]{opacity:1;transform:none;transition:none}}
-
-/* ── nav ───────────────────────────────────────────────────────────────── */
-nav{position:sticky;top:0;z-index:100;background:rgba(0,0,0,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
-.navin{max-width:1280px;margin:0 auto;display:flex;align-items:center;gap:26px;padding:0 clamp(20px,4vw,56px);height:64px}
-.mark{display:flex;align-items:center;gap:11px;color:var(--text)}
-.mark .cube{width:14px;height:14px;background:var(--amber);flex:none}
-.mark span:last-child{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:18px;letter-spacing:.01em;text-transform:uppercase}
-.navlinks{display:flex;gap:24px;margin-left:auto;align-items:center}
-.navlinks a{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--text2)}
-.navlinks a:hover{color:var(--amber-t)}
-.navlinks a.navcta{margin-left:6px;padding:10px 18px;color:#000}
-.navlinks a.navcta:hover{color:#000}
-@media(max-width:820px){.navlinks a.hidmob{display:none}}
-
-/* ── S1 · IGNITION ─────────────────────────────────────────────────────── */
-.hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
-.hero .gridbg{position:absolute;inset:0;pointer-events:none;
-  background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);
-  background-size:72px 72px;
-  -webkit-mask-image:radial-gradient(ellipse 90% 80% at 50% 30%,#000 30%,transparent 100%);
-  mask-image:radial-gradient(ellipse 90% 80% at 50% 30%,#000 30%,transparent 100%)}
-.hero .plate{position:absolute;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
-.heroin{position:relative;padding-top:clamp(72px,10vh,130px);padding-bottom:clamp(64px,8vh,110px)}
-.hero .sub{max-width:680px;margin:30px 0 0;font-size:17.5px}
-.hero .sub b{color:var(--text);font-weight:600}
-.hero h1 em{font-style:normal;color:var(--amber)}
-
-/* smoked-glass intake console over live machine stream */
-.console{position:relative;margin-top:52px;max-width:860px}
-.stream{position:absolute;inset:0;overflow:hidden;background:var(--carbon);border:1px solid var(--line-dim)}
-.stream pre{position:absolute;left:14px;top:8px;right:14px;font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.9;color:var(--amber-dim);white-space:pre-wrap}
-.stream pre .ok{color:#5c5c52}
-.glass{position:relative;margin:26px 0 0 26px;background:var(--glass);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);border:1px solid var(--line)}
-@media(max-width:640px){.glass{margin:14px 0 0 10px}}
-.glass .bar{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line)}
-.glass .bar .lbl{color:var(--text2)}
-.glass textarea{display:block;width:100%;background:transparent;border:none;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14.5px;line-height:1.75;padding:20px 18px;min-height:118px;resize:vertical}
-.glass textarea::placeholder{color:var(--dim)}
-.glass textarea:focus{outline:none}
-.glass .foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid var(--line);flex-wrap:wrap}
-.glass .hint{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--dim)}
-/* the drafted spec sheet — the free sample, rendered in the glass */
-.sheet{padding:20px 18px 8px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.85;color:var(--text2);max-height:430px;overflow:auto}
-.sheet .sh-tag{font-size:10.5px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase}
-.sheet .sh-name{font-family:'Archivo';font-stretch:114%;font-weight:850;font-size:21px;text-transform:uppercase;color:var(--text);letter-spacing:.01em;margin:6px 0 4px}
-.sheet .sh-sum{font-family:'Archivo';font-size:14.5px;line-height:1.55;color:var(--text2);margin-bottom:14px}
-.sheet .sh-meta{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;border-top:1px solid var(--line-dim);padding-top:12px}
-@media(max-width:560px){.sheet .sh-meta{grid-template-columns:1fr}}
-.sheet .k{color:var(--dim);letter-spacing:.1em}
-.sheet .a{color:var(--amber)}
-.sheet .at{color:var(--amber-t)}
-.sheet .sh-list{border-top:1px solid var(--line-dim);margin-top:12px;padding-top:12px}
-.sheet .ready{margin:14px 0 10px;padding:10px 12px;border:1px solid var(--amber-dim);color:var(--amber-t);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase}
-.linkish{background:none;border:none;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:0}
-.linkish:hover{color:var(--amber-t)}
-.ticks{display:flex;gap:0;margin-top:56px;border:1px solid var(--line);border-left:none;flex-wrap:wrap}
-.ticks .t{flex:1;min-width:220px;border-left:1px solid var(--line);padding:16px 20px;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);display:flex;gap:10px;align-items:center;background:var(--carbon)}
-
-/* ── S2 · THE UNCOMPROMISING SPEC ──────────────────────────────────────── */
-.sechead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:30px}
-.spec2{display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,4vw,72px);padding-bottom:clamp(70px,9vh,120px)}
-@media(max-width:920px){.spec2{grid-template-columns:1fr}}
-.sblock{padding:clamp(44px,7vh,86px) 0;border-top:1px solid var(--line-dim)}
-.sblock:first-of-type{border-top:none}
-.sblock .idx{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--amber);display:block;margin-bottom:14px}
-.sblock h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:clamp(20px,2.2vw,27px);letter-spacing:-.005em;line-height:1.12;margin-bottom:14px}
-.sblock p{font-size:16px;max-width:52ch}
-.sblock p b{color:var(--text);font-weight:600}
-.sblock p+p{margin-top:12px}
-.bpwrap{position:relative}
-.bp{position:sticky;top:96px;background:var(--carbon);border:1px solid var(--line)}
-@media(max-width:920px){.bp{position:static;margin-top:8px}}
-.bp .bar{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line)}
-.bp .bar .lbl{color:var(--text2)}
-.bp pre{padding:18px 18px 22px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.75;color:var(--text2);white-space:pre-wrap;min-height:380px}
-.bp .c{color:var(--dim)} .bp .a{color:var(--amber)} .bp .at{color:var(--amber-t)} .bp .g{color:#8f8b83}
-.bs{display:none}
-.bs.on{display:block;animation:bsin .18s linear}
-@keyframes bsin{from{opacity:0}to{opacity:1}}
-@media(prefers-reduced-motion:reduce){.bs.on{animation:none}}
-@media(max-width:920px){.bs{display:block}}
-.bp .caret{display:inline-block;width:8px;height:15px;background:var(--amber);vertical-align:-2px;animation:led 1s steps(2) infinite}
-
-/* ── S3 · THE GATE MATRIX ──────────────────────────────────────────────── */
-#gates{background:var(--carbon)}
-.matrix{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-left:none;border-top:none;margin-top:46px}
-@media(max-width:1020px){.matrix{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:560px){.matrix{grid-template-columns:1fr}}
-.gcell{appearance:none;background:var(--k);border:none;border-left:1px solid var(--line);border-top:1px solid var(--line);padding:20px 20px 18px;text-align:left;cursor:pointer;color:var(--text);font:inherit;position:relative;min-height:128px;display:flex;flex-direction:column;gap:8px;transition:background 80ms linear}
-.gcell:hover,.gcell[aria-selected="true"]{background:#151310}
-.gcell:hover .gled,.gcell[aria-selected="true"] .gled{background:var(--amber);box-shadow:0 0 8px rgba(255,176,0,.8)}
-.gcell:focus-visible{outline:1px solid var(--amber);outline-offset:-1px}
-.gcell .top{display:flex;align-items:center;gap:9px}
-.gled{width:7px;height:7px;background:var(--amber-dim);flex:none}
-.gcell .num{font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.16em;color:var(--dim)}
-.gcell .name{font-family:'JetBrains Mono',monospace;font-size:14.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
-.gcell .one{font-size:13.5px;color:var(--text2);line-height:1.45}
-.gcell.sentinel{background:#141005;border-left:1px solid var(--amber-dim)}
-.gcell.sentinel .name{color:var(--amber)}
-.gcell.sentinel:hover,.gcell.sentinel[aria-selected="true"]{background:#1d1607}
-/* readout — the instrument panel under the grid */
-.readout{border:1px solid var(--line);border-top:none;background:var(--k)}
-.readout .bar{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line)}
-.readout .body{display:grid;grid-template-columns:2fr 1fr;gap:0}
-@media(max-width:860px){.readout .body{grid-template-columns:1fr}}
-.readout .desc{padding:22px 24px;font-size:15.5px;color:var(--text2);line-height:1.7;border-right:1px solid var(--line-dim)}
-@media(max-width:860px){.readout .desc{border-right:none;border-bottom:1px solid var(--line-dim)}}
-.readout .desc b{color:var(--text)}
-.readout .meta{padding:22px 24px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:2.1;color:var(--dim)}
-.readout .meta b{color:var(--text2);font-weight:500;letter-spacing:.08em}
-.readout .meta .blk{color:var(--red);font-weight:700;letter-spacing:.1em}
-/* the loop band */
-.loop{margin-top:64px;border:1px solid var(--line);background:var(--k)}
-.loop .diagram{display:flex;align-items:stretch;flex-wrap:wrap;border-bottom:1px solid var(--line)}
-.loop .st{flex:1;min-width:150px;padding:18px 20px;border-right:1px solid var(--line-dim);font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);display:flex;align-items:center;gap:10px}
-.loop .st:last-child{border-right:none}
-.loop .st .arr{color:var(--amber);font-weight:700}
-.loop .st.red b{color:var(--red)}
-.loop .cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0}
-@media(max-width:920px){.loop .cols{grid-template-columns:1fr}}
-.loop .cols>div{padding:24px;border-left:1px solid var(--line-dim);font-size:14.5px;color:var(--text2);line-height:1.65}
-.loop .cols>div:first-child{border-left:none}
-@media(max-width:920px){.loop .cols>div{border-left:none;border-top:1px solid var(--line-dim)}.loop .cols>div:first-child{border-top:none}}
-.loop .cols h4{font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);margin-bottom:10px;font-weight:700}
-.loop .cols b{color:var(--text)}
-
-/* ── S4 · THE PROOF ENGINE ─────────────────────────────────────────────── */
-.manifest{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-left:none;margin-top:46px}
-@media(max-width:1020px){.manifest{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:560px){.manifest{grid-template-columns:1fr}}
-.ptile{border-left:1px solid var(--line);padding:22px 22px 20px;background:var(--carbon);min-height:118px;display:flex;flex-direction:column;gap:6px}
-.ptile .v{font-family:'JetBrains Mono',monospace;font-size:clamp(20px,1.8vw,26px);font-weight:700;color:var(--amber);letter-spacing:.02em}
-.ptile .n{font-size:12.5px;color:var(--dim);font-family:'JetBrains Mono',monospace;line-height:1.5}
-.manifest .ptile:nth-child(n+5){border-top:1px solid var(--line)}
-@media(max-width:1020px){.manifest .ptile:nth-child(n+3){border-top:1px solid var(--line)}}
-/* contrast rows */
-.vs{border:1px solid var(--line);margin-top:64px}
-.vs .vshead{display:grid;grid-template-columns:1fr 1fr}
-.vs .vshead>div{padding:14px 22px;font-family:'JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;border-bottom:1px solid var(--line)}
-.vs .vshead>div:first-child{color:var(--dim);border-right:1px solid var(--line)}
-.vs .vshead>div:last-child{color:var(--amber)}
-.vs .row{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line-dim)}
-.vs .row:first-of-type{border-top:none}
-.vs .row>div{padding:17px 22px;font-size:14.5px;line-height:1.55}
-.vs .row>div:first-child{color:var(--dim);border-right:1px solid var(--line)}
-.vs .row>div:last-child{color:var(--text2)}
-.vs .row>div:last-child b{color:var(--text)}
-@media(max-width:700px){.vs .vshead,.vs .row{grid-template-columns:1fr}.vs .vshead>div:first-child,.vs .row>div:first-child{border-right:none;border-bottom:1px dashed var(--line-dim)}}
+.console textarea::placeholder { color: var(--ink-3); }
+.console textarea:focus { outline: none; }
+.console .row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 24px 20px; }
+.console .count { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-left: auto; }
+.console .status { padding: 0 24px 14px; font-size: 14px; color: var(--ink-2); max-width: none; margin: 0; }
+.free-line { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--ink-3); margin-top: 14px; }
+/* the drafted spec — machine output, so mono */
+.sheet {
+  padding: 22px 24px; border-bottom: 1px solid var(--line); max-height: 420px; overflow: auto;
+  font-family: var(--mono); font-size: 13px; line-height: 1.9; color: var(--ink-2);
+}
+.sheet .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.sheet .name { font-size: 15px; font-weight: 500; color: var(--ink); }
+.sheet .hl { color: var(--amber-text); }
+.sheet .block + .block { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.linkish {
+  background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--mono); font-size: 12px;
+  color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--amber); text-underline-offset: 3px;
+}
+.linkish:hover { color: var(--amber-text); }
+/* how it works */
+.step-num {
+  display: inline-block; font-family: var(--mono); font-size: 12px; color: var(--amber-text);
+  background: var(--amber-soft); border-radius: 999px; padding: 3px 10px; margin-bottom: 14px;
+}
+/* gates */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 32px 0; padding: 0; max-width: 720px; }
 /* who it's for */
-.who{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-left:none;margin-top:64px}
-@media(max-width:1020px){.who{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:560px){.who{grid-template-columns:1fr}}
-.who>div{border-left:1px solid var(--line);padding:24px 22px;background:var(--k)}
-.who h4{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
-.who h4 a{color:var(--amber);text-decoration:none;border-bottom:1px solid var(--amber-dim)}
-.who h4 a:hover{color:var(--amber-t);border-color:var(--amber-t)}
-.who p{font-size:14px;line-height:1.6}
-/* trust strip */
-#trust{border:1px solid var(--amber-dim);background:#120e04;margin-top:64px;padding:30px clamp(20px,3vw,40px)}
-#trust .tgrid{display:grid;grid-template-columns:1.3fr 1fr;gap:clamp(22px,3vw,54px)}
-@media(max-width:860px){#trust .tgrid{grid-template-columns:1fr}}
-#trust h3{font-family:'Archivo';font-stretch:114%;font-weight:850;text-transform:uppercase;font-size:clamp(20px,2.2vw,27px);margin-bottom:12px}
-#trust p{font-size:15px}
-#trust ul{list-style:none;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:2.15;color:var(--text2)}
-#trust ul .ok{color:var(--amber)}
-/* pricing */
-#pricing .cards{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-left:none;margin-top:46px}
-@media(max-width:920px){#pricing .cards{grid-template-columns:1fr}}
-.card{border-left:1px solid var(--line);background:var(--carbon);padding:30px 26px;display:flex;flex-direction:column;gap:0;position:relative}
-@media(max-width:920px){.card{border-left:none;border-top:1px solid var(--line)}.card:first-child{border-top:none}}
-.card.star{background:#141005}
-.card .tag{position:absolute;top:0;right:0;background:var(--amber);color:#000;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.14em;padding:5px 10px}
-.card .pname{font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--text2)}
-.card .amt{font-family:'Archivo';font-stretch:118%;font-weight:880;font-size:52px;margin:10px 0 2px}
-.card .amt small{font-size:15px;font-weight:500;color:var(--dim);font-stretch:100%}
-.card ul{list-style:none;margin:18px 0 26px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:2.2;color:var(--text2)}
-.card ul .a{color:var(--amber)}
-.card .btn{margin-top:auto;justify-content:center}
-.card .btn[aria-busy="true"]{opacity:.6;pointer-events:none}
-.planerr{margin-top:10px;font-size:12.5px;color:var(--red)}
-/* final CTA band */
-.finale{background:var(--carbon);text-align:left;position:relative;overflow:hidden}
-.finale .gridbg{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(var(--line-dim) 1px,transparent 1px),linear-gradient(90deg,var(--line-dim) 1px,transparent 1px);background-size:72px 72px;opacity:.7}
-
-/* ── footer ────────────────────────────────────────────────────────────── */
-footer{border-top:1px solid var(--line);background:var(--carbon)}
-.footgrid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:0;border-bottom:1px solid var(--line-dim)}
-.footgrid>div{padding:40px clamp(20px,3vw,44px);border-left:1px solid var(--line-dim)}
-.footgrid>div:first-child{border-left:none}
-@media(max-width:860px){.footgrid{grid-template-columns:1fr 1fr}.footgrid>div{border-top:1px solid var(--line-dim)}}
-@media(max-width:520px){.footgrid{grid-template-columns:1fr}.footgrid>div{border-left:none}}
-footer .col a{display:block;font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);padding:5px 0}
-footer .col a:hover{color:var(--amber-t)}
-.footbar{display:flex;justify-content:space-between;gap:14px;padding:18px clamp(20px,3vw,44px);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);flex-wrap:wrap}
+a.card { display: block; text-decoration: none; }
+a.card:hover { border-color: var(--ink-3); color: var(--ink); }
+a.card .go { font-family: var(--mono); font-size: 13px; color: var(--amber-text); }
+/* pricing teaser */
+.tiers { margin: 40px 0 28px; }
+.tiers .price { font-family: var(--serif); font-size: 2.1rem; line-height: 1; margin: 6px 0 12px; }
+.tiers .price small { font-family: var(--sans); font-size: 0.9rem; color: var(--ink-3); }
+.tiers .quota { font-family: var(--mono); font-size: 12px; line-height: 2; color: var(--ink-2); margin: 0; }
+/* closing band */
+.closing { margin-top: 96px; padding-top: 72px; border-top: 1px solid var(--line); }
 </style>
 </head>
 <body>
 
-<nav aria-label="Main">
-  <div class="navin">
-    <a class="mark" href="/" aria-label="VibeHard home"><span class="cube" aria-hidden="true"></span><span>VibeHard</span></a>
-    <div class="navlinks">
-      <a class="hidmob" href="#spec">Spec</a>
-      <a class="hidmob" href="#gates">Gates</a>
-      <a class="hidmob" href="#proof">Proof</a>
-      <a class="hidmob" href="#pricing">Pricing</a>
-      <a href="/app">Sign in</a>
-      <a class="btn navcta" href="/app">Start a build</a>
-    </div>
-  </div>
-</nav>
+<header class="nav">
+  <nav class="nav-inner" aria-label="Main">
+    <a class="brand" href="/"><span class="dot" aria-hidden="true"></span>VibeHard</a>
+    <a class="navlink hidmob" href="/how-it-works.html">How it works</a>
+    <a class="navlink hidmob" href="/trust.html">Trust</a>
+    <a class="navlink hidmob" href="/pricing.html">Pricing</a>
+    <a class="navlink" href="/app">Sign in</a>
+    <a class="btn btn-primary" href="/app">Start a build</a>
+  </nav>
+</header>
 
-<!-- ══ S1 · THE IGNITION ═══════════════════════════════════════════════ -->
-<section class="hero">
-  <div class="gridbg" aria-hidden="true"></div>
-  <span class="plate" style="top:18px;right:22px" aria-hidden="true">VH-01 · INTAKE DECK</span>
-  <span class="plate" style="bottom:14px;left:22px" aria-hidden="true">LINE ACTIVE · ALL GATES ARMED</span>
-  <div class="rail pad heroin">
-    <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; 01 / IGNITION — <b>GATED SOFTWARE FACTORY</b></p>
-    <h1 class="disp" style="margin-top:26px">Describe it once.<br>It ships right,<br><em>or it doesn't ship.</em></h1>
-    <p class="sub">You have a vision. Now you have an engineering team to build it, prove it safe, and put it live. <b>Type the idea the way you'd say it out loud.</b></p>
+<main>
 
-    <div class="console">
-      <div class="stream" aria-hidden="true"><pre id="stream"></pre></div>
-      <div class="glass">
-        <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Intake // Build order</span><span class="lbl" style="margin-left:auto">VH-INTAKE-01</span></div>
-        <label for="idea" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Describe the software you need</label>
-        <textarea id="idea" placeholder="A client portal where each client signs in and sees only their own files and invoices…" spellcheck="false"></textarea>
-        <div class="sheet" id="sheet" hidden></div>
-        <div class="foot" id="foot-idle">
-          <span class="hint" id="hint">One plain sentence is enough. Your spec sheet drafts right here — free, no account.</span>
-          <button class="btn" id="ignite" type="button">Engage ignition ▸</button>
-        </div>
-        <div class="foot" id="foot-sheet" hidden>
-          <button class="linkish" id="editidea" type="button">◂ edit the idea</button>
-          <span class="hint" style="flex:1;text-align:right;margin-right:6px">Saved to this browser — waiting for you after signup.</span>
-          <a class="btn" id="continue" href="/app">Continue the build ▸</a>
-        </div>
+<!-- 1 · Hero -->
+<section aria-labelledby="hero-h">
+  <div class="wrap">
+    <span class="eyebrow">Gated AI app builder</span>
+    <h1 id="hero-h">Your app ships checked, or it doesn't ship.</h1>
+    <p class="lede">You describe it in plain language. VibeHard builds it and inspects it before it goes live.</p>
+
+    <div class="card raised console" role="group" aria-label="Draft a real spec from your idea">
+      <label class="sr" for="idea">Describe the app you want</label>
+      <textarea id="idea" maxlength="4000" rows="4" spellcheck="false" placeholder="Describe the app you want, the way you'd say it out loud."></textarea>
+      <div class="sheet" id="sheet" hidden aria-label="Your drafted spec"></div>
+      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
+      <div class="row" id="row-idle">
+        <button class="btn btn-primary" id="draft" type="button">Draft my spec</button>
+        <span class="count" id="count" aria-hidden="true">0 / 4000</span>
+      </div>
+      <div class="row" id="row-sheet" hidden>
+        <button class="linkish" id="edit" type="button">Edit the idea</button>
+        <a class="btn btn-primary arrow" id="continue" href="/app" style="margin-left:auto">Continue to build</a>
       </div>
     </div>
+    <p class="free-line">Free · no account · one real spec drafted from your idea</p>
+  </div>
+</section>
 
-    <div class="ticks" role="list">
-      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>11 gates · deterministic verdicts</div>
-      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>Signed deploy sentinel required to ship</div>
-      <div class="t" role="listitem"><span class="led idle" aria-hidden="true"></span>A gate that fails to run counts as blocked</div>
+<!-- 2 · How it works -->
+<section aria-labelledby="how-h">
+  <div class="wrap">
+    <span class="eyebrow">How it works</span>
+    <h2 id="how-h">From a sentence to a live app.</h2>
+    <div class="grid grid-3" style="margin:48px 0">
+      <div>
+        <span class="step-num">01</span>
+        <h3>Describe it</h3>
+        <p>Say what you want the way you'd say it to a person; a short interview fills in what your sentence left out.</p>
+      </div>
+      <div>
+        <span class="step-num">02</span>
+        <h3>It's built and inspected</h3>
+        <p>Eleven automated gates and the Sentinel check the build; one that fails holds, with findings in plain English.</p>
+      </div>
+      <div>
+        <span class="step-num">03</span>
+        <h3>It ships live</h3>
+        <p>A passing build deploys to a live URL you can put in front of clients.</p>
+      </div>
+    </div>
+    <a class="btn btn-ghost arrow" href="/how-it-works.html">See how it works</a>
+  </div>
+</section>
+
+<!-- 3 · The gates -->
+<section id="gates" aria-labelledby="gates-h">
+  <div class="wrap">
+    <span class="eyebrow">The gates</span>
+    <h2 id="gates-h">Eleven gates. One door out.</h2>
+    <p>Every build runs a fixed inspection line: code scanned for exploitable patterns and committed secrets, dependencies checked against known vulnerabilities, migrations executed on a real database, tenant isolation attacked live, personal data traced through logs and URLs, and every promised feature checked off in code. A gate that fails — or crashes mid-run — blocks the build.</p>
+    <ul class="chips" aria-label="The eleven gates and the sentinel">
+      <li class="chip">sast</li>
+      <li class="chip">secrets</li>
+      <li class="chip">depvuln</li>
+      <li class="chip">rls</li>
+      <li class="chip">migrate</li>
+      <li class="chip">rls-enforce</li>
+      <li class="chip">compliance</li>
+      <li class="chip">pii</li>
+      <li class="chip">prod-readiness</li>
+      <li class="chip">verify</li>
+      <li class="chip">completeness</li>
+      <li class="chip">sentinel</li>
+    </ul>
+    <p id="trust">When all eleven pass, the Sentinel signs the build — the only door to deploy. A held build never ships, and there is no switch to make it.</p>
+    <a class="btn btn-ghost arrow" href="/trust.html">Every gate, shown</a>
+  </div>
+</section>
+
+<!-- 4 · Who it's for -->
+<section aria-labelledby="who-h">
+  <div class="wrap">
+    <span class="eyebrow">Who it's for</span>
+    <h2 id="who-h">Built for people who keep other people's records.</h2>
+    <div class="grid grid-2" style="margin-top:48px">
+      <a class="card" href="/therapists.html">
+        <h3>Therapists</h3>
+        <p>Client records stay isolated by row-level security that is enforced in the database and attack-tested before every release.</p>
+        <span class="go">For therapists →</span>
+      </a>
+      <a class="card" href="/bookkeepers.html">
+        <h3>Bookkeepers</h3>
+        <p>Before a build can ship, the database has to refuse a live attempt to read one client's numbers from another client's account.</p>
+        <span class="go">For bookkeepers →</span>
+      </a>
     </div>
   </div>
 </section>
 
-<!-- ══ S2 · THE UNCOMPROMISING SPEC ═════════════════════════════════════ -->
-<section id="spec">
-  <div class="rail pad">
-    <div class="sechead">
-      <p class="lbl">02 / THE UNCOMPROMISING SPEC</p>
-      <p class="lbl" aria-hidden="true">BLUEPRINT DECK · .vibehard/</p>
-    </div>
-    <h2 class="disp" style="margin:26px 0 10px;max-width:840px" data-rv>The chassis is drawn <span style="color:var(--amber)">before the metal.</span></h2>
-    <p style="max-width:640px;font-size:17px" data-rv>Your sentence becomes structure first. Everything built afterward has to bolt to it.</p>
-
-    <div class="spec2" style="margin-top:26px">
-      <div class="specleft">
-        <div class="sblock" data-stage="1" data-rv>
-          <span class="idx">B-01 / INTAKE → SPECIFICATION</span>
-          <h3>The questions come before the code.</h3>
-          <p>Most generators sprint from your words straight to code. VibeHard refuses. First, a short intake interview extracts what your sentence implied but never said: <b>who uses this, what data it holds, which of it is sensitive, and what must never cross between clients.</b></p>
-          <p>The answers are written into <span class="mono" style="color:var(--amber-t)">.vibehard/spec.json</span> — including a formal sensitivity classification (PII, financial, health, credentials) and a rigor level. That file is load-bearing: every verdict later in the line is measured against it.</p>
-        </div>
-        <div class="sblock" data-stage="2" data-rv>
-          <span class="idx">B-02 / PRODUCT REQUIREMENTS</span>
-          <h3>Every feature becomes a contract.</h3>
-          <p>The PRD is a numbered set of obligations. <b>Each feature written here is one the machinery will later be held to</b>, item by item, by a gate whose only job is to answer: does the code actually do this?</p>
-          <p>A build that quietly ships four of your six features doesn't get to call itself finished. The paper remembers.</p>
-        </div>
-        <div class="sblock" data-stage="3" data-rv>
-          <span class="idx">B-03 / ARCHITECTURE</span>
-          <h3>Isolation is drawn into the frame.</h3>
-          <p>The architecture document decides the stack, the data model, and — critically — <b>which tables belong to a single tenant and which are shared.</b> Row-level security posture is settled here, at the drawing stage, where it's structural.</p>
-          <p>Access control added as an afterthought is how app builders end up in breach headlines. Here it's a property of the frame itself.</p>
-        </div>
-        <div class="sblock" data-stage="4" data-rv>
-          <span class="idx">B-04 / WHY THIS ISN'T PAPERWORK</span>
-          <h3>The spec is the standard of proof.</h3>
-          <p>A gate can only refuse a build if there's a written standard to refuse it against. The spec is that standard — <b>which is why it can't be gamed.</b> Declare "no sensitive data" while your schema stores diagnoses and card numbers, and an independent code scan falsifies the claim and blocks the build for lying.</p>
-          <p>From here, the drawings hand off to the machinery. <a href="#gates">The matrix takes over ↓</a></p>
-        </div>
-      </div>
-
-      <div class="bpwrap" aria-label="Blueprint panel — the specification artifacts, populated as you read">
-        <div class="bp">
-          <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Blueprint // live</span><span class="lbl" id="bpstage" style="margin-left:auto">STAGE 1/4</span></div>
-          <pre id="bppre"><div class="bs" data-bs="1"><span class="c">$ cat .vibehard/spec.json</span>
-{
-  <span class="at">"name"</span>: <span class="g">"client-portal"</span>,
-  <span class="at">"users"</span>: [<span class="g">"owner"</span>, <span class="g">"client"</span>],
-  <span class="at">"sensitiveData"</span>: [<span class="a">"pii"</span>, <span class="a">"financial"</span>],
-  <span class="at">"rigor"</span>: <span class="a">"production"</span>,
-  <span class="at">"tenancy"</span>: <span class="g">"isolated-per-client"</span>
-}
-</div><div class="bs" data-bs="2"><span class="c">$ cat .vibehard/prd.md · features → contracts</span>
- F1  client sign-in             <span class="g">[auth]</span>
- F2  per-client file vault      <span class="a">[isolated]</span>
- F3  invoice ledger             <span class="a">[isolated]</span>
- F4  owner dashboard            <span class="g">[role:owner]</span>
- <span class="c">each line above is later enforced,</span>
- <span class="c">feature by feature, by gate 11/11</span>
-</div><div class="bs" data-bs="3"><span class="c">$ cat .vibehard/architecture.json</span>
-{
-  <span class="at">"stack"</span>: <span class="g">"next + supabase"</span>,
-  <span class="at">"entities"</span>: {
-    <span class="at">"clients"</span>:  { <span class="at">"isolation"</span>: <span class="a">"tenant"</span> },
-    <span class="at">"files"</span>:    { <span class="at">"isolation"</span>: <span class="a">"tenant"</span> },
-    <span class="at">"invoices"</span>: { <span class="at">"isolation"</span>: <span class="a">"tenant"</span> }
-  },
-  <span class="at">"rls"</span>: <span class="a">"required at table creation"</span>
-}
-</div><div class="bs" data-bs="4"><span class="c">$ vibehard classify --verify</span>
- declared : pii, financial
- detected : pii, financial   <span class="a">← code scan agrees</span>
- classification: <span class="a">BINDING</span>
- <span class="c">→ handing off to the gate matrix…</span>
-</div><span class="caret" aria-hidden="true"></span></pre>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ S3 · THE GATE MATRIX ═════════════════════════════════════════════ -->
-<section id="gates">
-  <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
-    <div class="sechead">
-      <p class="lbl">03 / THE GATE MATRIX</p>
-      <p class="lbl" aria-hidden="true">INSPECTION FLOOR · FIXED ORDER · FAIL-CLOSED</p>
-    </div>
-    <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>Eleven gates. <span style="color:var(--amber)">Zero appeals.</span></h2>
-    <p style="max-width:660px;font-size:17px" data-rv>Every build the factory produces is treated as contraband until proven otherwise. Eleven independent inspections run in fixed order, each with unilateral authority to stop the line, indifferent to your launch date. A gate that crashes mid-run still counts as a <b style="color:var(--text)">block</b>.</p>
-
-    <div class="matrix" role="listbox" aria-label="The eleven gates and the sentinel — select one to read its readout" id="matrix"></div>
-
-    <div class="readout" aria-label="Gate readout">
-      <div class="bar"><span class="led" aria-hidden="true"></span><span class="lbl" style="letter-spacing:.2em">Readout</span><span class="lbl" id="ro-name" style="margin-left:auto;color:var(--amber)"></span></div>
-      <div class="body">
-        <div class="desc" id="ro-desc" aria-live="polite"></div>
-        <div class="meta" id="ro-meta"></div>
-      </div>
-    </div>
-
-    <div class="loop" data-rv>
-      <div class="diagram" aria-label="The repair loop: gate, block, fix, re-gate, converge or hold">
-        <div class="st">GATE <span class="arr">▸</span></div>
-        <div class="st red"><b>BLOCK</b> <span class="arr">▸</span></div>
-        <div class="st">FIX <span class="arr">▸</span></div>
-        <div class="st">RE-GATE <span class="arr">▸</span></div>
-        <div class="st">CONVERGE <span class="arr">▮</span> OR HOLD</div>
-      </div>
-      <div class="cols">
-        <div>
-          <h4>A block is a work order</h4>
-          Findings come back with file, line, and rule. The fixer rewrites and the line runs again — the fast chain every round, the full chain once at convergence against the real, clean-room artifact. <b>The fixer holds no authority. Only the gate disposes.</b>
-        </div>
-        <div>
-          <h4>The fixer can't cheat</h4>
-          Before the fixer touches anything, the surface it must satisfy is captured. Weaken a policy, delete a check, switch off row-level security to make a finding "go away" — <b>the tamper is detected and the round is voided.</b> The bar stays where the spec set it.
-        </div>
-        <div>
-          <h4>Rounds are bounded</h4>
-          No infinite thrash. If the loop exhausts its rounds, the build is <b>held</b> — packaged with every verdict and finding and routed to a human. <b>It does not ship broken. There is no flag to make it ship broken.</b>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ S4 · THE PROOF ENGINE ════════════════════════════════════════════ -->
-<section id="proof">
-  <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
-    <div class="sechead">
-      <p class="lbl">04 / THE PROOF ENGINE</p>
-      <p class="lbl" aria-hidden="true">DELIVERY BAY · FINAL INSPECTION</p>
-    </div>
-    <h2 class="disp" style="margin:26px 0 10px;max-width:900px" data-rv>The finish <span style="color:var(--amber)">comes standard.</span></h2>
-    <p style="max-width:680px;font-size:17px" data-rv>Your application, running. A verdict board carrying eleven signatures. Every finding the gates raised, and the fix that closed each one. Migrations that have already executed on a real database. A boot record with no asterisks. A sentinel signed against this exact build — <b style="color:var(--text)">the deploy accepts no other.</b> Hand the folder to any developer you trust; they can read precisely what was checked and what it survived. Every build leaves the floor this way.</p>
-
-    <div class="manifest" data-rv role="list" aria-label="The delivery manifest — receipts every release ships with">
-      <div class="ptile" role="listitem"><span class="lbl">Verdict board</span><span class="v">11/11 PASS</span><span class="n">a release with a lower score doesn't exist</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Boot probes</span><span class="v">N/N HEALTHY</span><span class="n">clean-room build · every run must boot</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Tenant isolation</span><span class="v">0 ROWS LEAKED</span><span class="n">proven live against a real database</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Blocking findings</span><span class="v">0 AT RELEASE</span><span class="n">sast · secrets · CVEs · PII — all clear</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Migrations</span><span class="v">EXECUTED CLEAN</span><span class="n">already executed on real Postgres</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Dependencies</span><span class="v">PINNED</span><span class="n">no silent upgrades breaking your business</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Features</span><span class="v">N/N PRESENT</span><span class="n">held to the PRD, item by item</span></div>
-      <div class="ptile" role="listitem"><span class="lbl">Deploy sentinel</span><span class="v">SIGNED ✓</span><span class="n">HMAC-bound to this exact build</span></div>
-    </div>
-    <p class="lbl" style="margin-top:14px">THE DELIVERY MANIFEST — the receipts <b>every release</b> must produce to exist.</p>
-
-    <div class="vs" data-rv aria-label="Consumer generators compared with VibeHard">
-      <div class="vshead"><div>Consumer code generators</div><div>VibeHard</div></div>
-      <div class="row"><div>Ships when the model stops typing.</div><div>Ships after <b>eleven gates sign off</b>, in order, every time.</div></div>
-      <div class="row"><div>Security is a suggestion in a prompt.</div><div>Security is <b>a live attack the database has to refuse</b>, two tenants seeded, every table probed.</div></div>
-      <div class="row"><div>"Done" means the page rendered.</div><div>"Done" means <b>every promised feature exists in code</b>, checked against the contract you approved.</div></div>
-      <div class="row"><div>Breaks quietly three weeks after launch.</div><div><b>Pinned dependencies, executed migrations, repeated boot proof</b> before it ever reaches you.</div></div>
-      <div class="row"><div>You get an app and your own judgment about whether it's safe.</div><div>You get the app, plus <b>the verdicts, the findings, and the signed sentinel</b> behind it.</div></div>
-    </div>
-
-    <div class="who" data-rv>
-      <div><h4>Solo founders</h4><p>Your SaaS idea, built like it already has customers to lose. Multi-tenant isolation proven before user #2 ever signs up.</p></div>
-      <div><h4><a href="/therapists.html">Therapists &amp; clinics ▸</a></h4><p>Client data gets classified as sensitive from the first pass, which is what pulls in the auth requirement, the hard-delete path, and the log scan that catches a note leaking where it shouldn't.</p></div>
-      <div><h4><a href="/bookkeepers.html">Bookkeepers &amp; firms ▸</a></h4><p>Financial records get the financial-data controls, deterministically. Your client portal shouldn't be the riskiest thing in your practice.</p></div>
-      <div><h4>Agencies</h4><p>Hand a client a build with receipts: verdict board, pinned deps, a README that exists. The handoff survives you leaving the room.</p></div>
-    </div>
-
-    <div id="trust" data-rv>
-      <div class="tgrid">
-        <div>
-          <h3>No badges. <span style="color:var(--amber)">Receipts.</span></h3>
-          <p>We will never hang a compliance badge we didn't earn — our own compliance gate is <b style="color:var(--text)">forbidden, by written policy, from claiming certification</b>. What you get instead is stronger: the full verdict board, every finding, and a cryptographically signed release sentinel. If a claim on this page ever drifts from what the machinery does, the machinery wins.</p>
-        </div>
-        <ul>
-          <li><span class="ok">▸</span> fail-closed everywhere — a crashed gate is a BLOCK</li>
-          <li><span class="ok">▸</span> zero LLM authority over any deploy verdict</li>
-          <li><span class="ok">▸</span> anti-tamper: fixes can't weaken the checks</li>
-          <li><span class="ok">▸</span> your data stays yours — per-tenant isolation, proven</li>
-          <li><span class="ok">▸</span> held builds go to a human, never out the door</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ PRICING ══════════════════════════════════════════════════════════ -->
-<section id="pricing">
-  <div class="rail pad" style="padding-bottom:clamp(70px,9vh,120px)">
-    <div class="sechead">
-      <p class="lbl">05 / ACCESS</p>
-      <p class="lbl" aria-hidden="true">EVERY TIER · ALL ELEVEN GATES</p>
-    </div>
-    <h2 class="disp" style="margin:26px 0 10px" data-rv>The gates don't <span style="color:var(--amber)">have tiers.</span></h2>
-    <p style="max-width:640px;font-size:17px" data-rv>Every plan runs the full inspection line — we don't sell a version that skips the brakes. Plans differ in throughput, nothing else. <a href="/pricing.html">How held builds work, and the questions people actually ask →</a></p>
-    <div class="cards" data-rv>
+<!-- 5 · Pricing + closing -->
+<section id="pricing" aria-labelledby="pricing-h">
+  <div class="wrap">
+    <span class="eyebrow">Pricing</span>
+    <h2 id="pricing-h">Every plan runs every gate.</h2>
+    <p>Plans set how many gated builds you get a day and how many projects you can keep; the inspection line is the same on all of them.</p>
+    <div class="grid grid-3 tiers">
       <div class="card">
-        <span class="pname">Free</span>
-        <div class="amt">$0<small> /month</small></div>
-        <ul>
-          <li><span class="a">2</span> gated builds / day</li>
-          <li><span class="a">1</span> project</li>
-          <li>full 11-gate line · no exceptions</li>
-          <li>signed sentinel on every release</li>
-        </ul>
-        <a class="btn ghost" href="/app">Start free</a>
-      </div>
-      <div class="card star">
-        <span class="tag">MOST BUILDS</span>
-        <span class="pname">Starter</span>
-        <div class="amt">$39<small> /month</small></div>
-        <ul>
-          <li><span class="a">5</span> gated builds / day</li>
-          <li><span class="a">5</span> projects</li>
-          <li>full 11-gate line · no exceptions</li>
-          <li>live deploys with custom domains</li>
-        </ul>
-        <a class="btn" href="/app" data-plan="starter">Start on Starter</a>
-        <p class="planerr" data-planerr hidden></p>
+        <span class="eyebrow" style="margin-bottom:0">Free</span>
+        <div class="price">$0<small> /month</small></div>
+        <p class="quota">2 gated builds a day<br>1 project</p>
       </div>
       <div class="card">
-        <span class="pname">Pro</span>
-        <div class="amt">$199<small> /month</small></div>
-        <ul>
-          <li><span class="a">20</span> gated builds / day</li>
-          <li><span class="a">25</span> projects</li>
-          <li>full 11-gate line · no exceptions</li>
-          <li>bring your own model key (advanced)</li>
-        </ul>
-        <a class="btn ghost" href="/app" data-plan="pro">Go Pro</a>
-        <p class="planerr" data-planerr hidden></p>
+        <span class="eyebrow" style="margin-bottom:0">Starter</span>
+        <div class="price">$39<small> /month</small></div>
+        <p class="quota">5 gated builds a day<br>5 projects</p>
       </div>
+      <div class="card">
+        <span class="eyebrow" style="margin-bottom:0">Pro</span>
+        <div class="price">$199<small> /month</small></div>
+        <p class="quota">20 gated builds a day<br>25 projects</p>
+      </div>
+    </div>
+    <a class="btn btn-ghost arrow" href="/pricing.html">Full pricing</a>
+
+    <div class="closing">
+      <h2>One sentence is enough.</h2>
+      <a class="btn btn-primary" href="/app">Start a build</a>
     </div>
   </div>
 </section>
 
-<!-- ══ FINALE ═══════════════════════════════════════════════════════════ -->
-<section class="finale">
-  <div class="gridbg" aria-hidden="true"></div>
-  <div class="rail pad" style="position:relative;padding-top:clamp(64px,9vh,110px);padding-bottom:clamp(64px,9vh,110px)">
-    <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; THE LINE IS ACTIVE</p>
-    <h2 class="disp" style="margin:22px 0 14px;max-width:900px">Your <span style="color:var(--amber)">move.</span></h2>
-    <p style="max-width:560px;font-size:17px;margin-bottom:30px">One sentence. The factory does the rest, receipts included.</p>
-    <a class="btn" href="/app" style="padding:18px 34px">Engage ignition ▸</a>
-  </div>
-</section>
+</main>
 
 <footer>
-  <div class="rail">
-    <div class="footgrid">
-      <div>
-        <a class="mark" href="/"><span class="cube" aria-hidden="true"></span><span>VibeHard</span></a>
-        <p style="margin-top:16px;font-size:14px;max-width:300px">A software factory with an inspection line. The AI builds; eleven gates decide what leaves the floor.</p>
-      </div>
-      <div class="col">
-        <p class="lbl" style="margin-bottom:12px">Sections</p>
-        <a href="#spec">The spec</a><a href="#gates">The gates</a><a href="#proof">The proof</a><a href="#pricing">Pricing</a>
-      </div>
-      <div class="col">
-        <p class="lbl" style="margin-bottom:12px">Product</p>
-        <a href="/how-it-works.html">How it works</a><a href="/pricing.html">Pricing</a><a href="/app">Sign in</a><a href="/app">Start a build</a>
-      </div>
-      <div class="col">
-        <p class="lbl" style="margin-bottom:12px">System</p>
-        <a href="/trust.html">Trust &amp; security</a><a href="/trust.html">What we check</a>
-      </div>
-      <div class="col">
-        <p class="lbl" style="margin-bottom:12px">Legal</p>
-        <a href="/terms.html">Terms</a><a href="/privacy.html">Privacy</a><a href="/dpa.html">DPA</a>
-      </div>
-    </div>
-    <div class="footbar">
-      <span>© 2026 VibeHard</span>
-      <span><span class="led idle" aria-hidden="true"></span>&nbsp;Verdicts are deterministic. No LLM decides a deploy.</span>
-    </div>
+  <div class="foot-inner">
+    <a class="brand" href="/"><span class="dot" aria-hidden="true"></span>VibeHard</a>
+    <nav class="foot-links" aria-label="Footer">
+      <a href="/how-it-works.html">How it works</a>
+      <a href="/trust.html">Trust</a>
+      <a href="/pricing.html">Pricing</a>
+      <a href="/therapists.html">Therapists</a>
+      <a href="/bookkeepers.html">Bookkeepers</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/dpa.html">DPA</a>
+    </nav>
+    <span>© 2026 VibeHard</span>
   </div>
 </footer>
 
 <script>
-/* ── CTA: the free sample (DESIGN.md §1) ────────────────────────────────
-   Anonymous visitors draft a REAL spec sheet right here via /api/spec-preview
-   (rate-limited server-side). Continuing to an actual build requires signup —
-   the idea is stashed in localStorage and waits in the app's build box. */
-(function(){
-  var idea=document.getElementById('idea'),btn=document.getElementById('ignite'),
-      hint=document.getElementById('hint'),sheet=document.getElementById('sheet'),
-      footIdle=document.getElementById('foot-idle'),footSheet=document.getElementById('foot-sheet'),
-      busy=false;
-  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
-  function setHint(t,err){hint.textContent=t;hint.style.color=err?'var(--red)':''}
-  function stash(v){try{localStorage.setItem('vh.idea',v)}catch(e){}}
-  function renderSheet(b){
-    var s=b.spec||{};
-    var classes=(s.sensitiveData||[]).filter(function(c){return c!=='none'});
-    var feats=(s.features||[]).slice(0,8).map(function(f,i){return ' F'+(i+1)+'  '+esc(f)}).join('<br>');
-    var ents=(s.dataEntities||[]).slice(0,6).map(function(e){
-      return ' '+esc(e.name)+' <span class="k">('+(e.fields||[]).length+' fields)</span>'+(e.sensitive?' <span class="a">[sensitive]</span>':'');
-    }).join('<br>');
-    sheet.innerHTML=
-      '<div class="sh-tag">Spec 01 // drafted · yours to keep</div>'+
-      '<div class="sh-name">'+esc(s.name||'untitled')+'</div>'+
-      '<div class="sh-sum">'+esc(s.summary||'')+'</div>'+
-      '<div class="sh-meta">'+
-        '<div><span class="k">USERS</span><br>'+esc(s.users||'—')+'</div>'+
-        '<div><span class="k">SIGN-IN</span><br>'+esc(s.auth||'—')+'</div>'+
-        '<div><span class="k">TENANCY</span><br>'+esc(s.tenancy||'—')+'</div>'+
-        '<div><span class="k">DATA CLASSIFICATION</span><br>'+(classes.length?'<span class="a">'+classes.map(esc).join(' · ')+'</span>':'none declared')+'</div>'+
-        '<div><span class="k">RIGOR</span><br><span class="at">'+esc(b.rigor||'production')+'</span></div>'+
-        '<div><span class="k">GATE PLAN</span><br>all 11 · fixed order</div>'+
-      '</div>'+
-      (feats?'<div class="sh-list"><span class="k">FEATURES → COMPLETENESS CONTRACTS</span><br>'+feats+'</div>':'')+
-      (ents?'<div class="sh-list"><span class="k">DATA MODEL</span><br>'+ents+'</div>':'')+
-      '<div class="ready">'+(b.ready?'▸ Ready for the line — the gates take it from here':'▸ '+(b.gaps||0)+' readiness gap(s) — the intake interview closes them after signup')+'</div>';
-    idea.hidden=true;footIdle.hidden=true;sheet.hidden=false;footSheet.hidden=false;
-    sheet.scrollTop=0;
+/* The free sample: anonymous visitors draft a real spec via /api/spec-preview
+   (rate-limited server-side: 3/hour/IP, 4000-char cap). Continuing to a build
+   requires signup — the idea is stashed in localStorage["vh.idea"] and the app
+   prefills from it after signup. Logic ported unchanged from the previous page. */
+(function () {
+  var idea = document.getElementById("idea"),
+      btn = document.getElementById("draft"),
+      count = document.getElementById("count"),
+      status = document.getElementById("status"),
+      sheet = document.getElementById("sheet"),
+      rowIdle = document.getElementById("row-idle"),
+      rowSheet = document.getElementById("row-sheet"),
+      busy = false;
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function stash(v) { try { localStorage.setItem("vh.idea", v); } catch (e) {} }
+  function setStatus(t) {
+    if (!t) { status.hidden = true; status.textContent = ""; return; }
+    status.hidden = false; status.textContent = t;
   }
-  async function draft(){
-    var v=idea.value.trim();
-    if(!v){idea.focus();return}
-    if(busy)return;
-    busy=true;btn.disabled=true;btn.textContent='DRAFTING…';
-    setHint('The drafting desk is reading your idea — about 30 seconds.');
-    try{
-      var r=await fetch('/api/spec-preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:v})});
-      var b=null;try{b=await r.json()}catch(e){}
-      if(!r.ok||!b||!b.spec){
-        setHint((b&&b.error)||'The drafting desk hiccuped — try again in a minute.',true);
-        if(r.status===429){stash(v);btn.textContent='Sign up to keep building ▸';btn.disabled=false;btn.onclick=function(){location.href='/app'};return}
+  idea.addEventListener("input", function () { count.textContent = idea.value.length + " / 4000"; });
+
+  function renderSheet(b) {
+    var s = b.spec || {};
+    var classes = (s.sensitiveData || []).filter(function (c) { return c !== "none"; });
+    var feats = (s.features || []).slice(0, 8).map(function (f, i) { return "F" + (i + 1) + "  " + esc(f); }).join("<br>");
+    var ents = (s.dataEntities || []).slice(0, 6).map(function (e) {
+      return esc(e.name) + ' <span class="k">(' + (e.fields || []).length + ' fields)</span>' + (e.sensitive ? ' <span class="hl">[sensitive]</span>' : "");
+    }).join("<br>");
+    sheet.innerHTML =
+      '<div class="block"><span class="k">Spec — drafted, yours to keep</span><br>' +
+        '<span class="name">' + esc(s.name || "untitled") + "</span><br>" + esc(s.summary || "") + "</div>" +
+      '<div class="block">' +
+        '<span class="k">Users</span> ' + esc(s.users || "—") + "<br>" +
+        '<span class="k">Sign-in</span> ' + esc(s.auth || "—") + "<br>" +
+        '<span class="k">Tenancy</span> ' + esc(s.tenancy || "—") + "<br>" +
+        '<span class="k">Data classification</span> ' + (classes.length ? '<span class="hl">' + classes.map(esc).join(" · ") + "</span>" : "none declared") + "<br>" +
+        '<span class="k">Rigor</span> ' + esc(b.rigor || "production") + "<br>" +
+        '<span class="k">Gate plan</span> all 11, fixed order</div>' +
+      (feats ? '<div class="block"><span class="k">Features</span><br>' + feats + "</div>" : "") +
+      (ents ? '<div class="block"><span class="k">Data model</span><br>' + ents + "</div>" : "") +
+      '<div class="block">' + (b.ready ? "Ready for the gates — continue to run the build." : (b.gaps || 0) + " readiness gap(s) — a short interview closes them after signup.") + "</div>";
+    idea.hidden = true; rowIdle.hidden = true; setStatus("");
+    sheet.hidden = false; rowSheet.hidden = false;
+    sheet.scrollTop = 0;
+  }
+
+  async function draft() {
+    var v = idea.value.trim();
+    if (!v) { idea.focus(); return; }
+    if (busy) return;
+    busy = true; btn.disabled = true; btn.textContent = "Drafting…";
+    setStatus("Drafting your spec — about thirty seconds.");
+    try {
+      var r = await fetch("/api/spec-preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: v }) });
+      var b = null; try { b = await r.json(); } catch (e) {}
+      if (!r.ok || !b || !b.spec) {
+        setStatus((b && b.error) || "The drafting desk hiccuped — try again in a minute.");
+        if (r.status === 429) { stash(v); btn.textContent = "Sign up to keep going"; btn.disabled = false; btn.onclick = function () { location.href = "/app"; }; return; }
         return;
       }
       stash(v);
       renderSheet(b);
-    }catch(e){
-      stash(v);location.href='/app';return; // no API here (static preview) → straight to the app
-    }finally{
-      if(btn.textContent==='DRAFTING…'){btn.disabled=false;btn.innerHTML='Engage ignition ▸'}
-      busy=false;
+    } catch (e) {
+      stash(v); location.href = "/app"; return; // no API here (static preview) → straight to the app
+    } finally {
+      if (btn.textContent === "Drafting…") { btn.disabled = false; btn.textContent = "Draft my spec"; }
+      busy = false;
     }
   }
-  btn.addEventListener('click',draft);
-  idea.addEventListener('keydown',function(e){if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();draft()}});
-  document.getElementById('editidea').addEventListener('click',function(){
-    sheet.hidden=true;footSheet.hidden=true;idea.hidden=false;footIdle.hidden=false;
-    setHint('One plain sentence is enough. Your spec sheet drafts right here — free, no account.');
+
+  btn.addEventListener("click", draft);
+  idea.addEventListener("keydown", function (e) { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); draft(); } });
+  document.getElementById("edit").addEventListener("click", function () {
+    sheet.hidden = true; rowSheet.hidden = true;
+    idea.hidden = false; rowIdle.hidden = false; setStatus("");
     idea.focus();
-  });
-})();
-
-/* ── machine stream behind the smoked glass ─────────────────────────── */
-(function(){
-  var LINES=[
-    '[intake ] build order accepted — parsing intent',
-    '[spec   ] .vibehard/spec.json written · rigor: production',
-    '[gate 01/11] sast ............ PASS',
-    '[gate 02/11] secrets ......... PASS',
-    '[gate 04/11] rls ............. BLOCK · table "invoices" reachable without policy',
-    '[fix    ] round 1/4 — regenerating access policy',
-    '[gate 04/11] rls ............. PASS',
-    '[gate 06/11] rls-enforce ..... tenant B denied read/write on tenant A — PASS',
-    '[gate 10/11] verify .......... boot 3/3 healthy — PASS',
-    '[sentinel] HMAC signed · deploy authorized'
-  ];
-  var el=document.getElementById('stream'),i=0,buf=[];
-  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function tick(){
-    buf.push(LINES[i%LINES.length]);i++;
-    if(buf.length>9)buf.shift();
-    el.textContent=buf.join('\n');
-  }
-  if(reduced){el.textContent=LINES.slice(0,9).join('\n');return}
-  for(var k=0;k<5;k++)tick();
-  setInterval(tick,1600);
-})();
-
-/* ── S2: blueprint stages track the narrative blocks ────────────────── */
-(function(){
-  var blocks=document.querySelectorAll('.sblock[data-stage]');
-  if(!blocks.length)return;
-  var stages=document.querySelectorAll('.bs'),tag=document.getElementById('bpstage');
-  function activate(n){
-    stages.forEach(function(s){s.classList.toggle('on',+s.dataset.bs<=n)});
-    if(tag)tag.textContent='STAGE '+n+'/4';
-  }
-  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches||window.matchMedia('(max-width: 920px)').matches){activate(4);return}
-  activate(1);
-  var io=new IntersectionObserver(function(es){
-    es.forEach(function(x){if(x.isIntersecting)activate(+x.target.dataset.stage)});
-  },{threshold:.45});
-  blocks.forEach(function(b){io.observe(b)});
-})();
-
-/* ── S3: the gate matrix — data from src/gate/index.ts GATES order ──── */
-(function(){
-  var G=[
-    {n:'01',id:'sast',one:'Exploitable patterns, read line by line.',
-     d:'Static analysis of every line of authored source — injection sinks, dangerous constructs, and a purpose-built SQL-injection rule on top of the standard ruleset. It reads the code the machine wrote the way an attacker would.',
-     m:['MECHANISM|semgrep · pinned container','SCOPE|authored source only','ON FAIL|BLOCK']},
-    {n:'02',id:'secrets',one:'Any committed credential. Zero tolerance.',
-     d:'Hunts the build for committed credentials — API keys, tokens, connection strings, passwords. <b>Any leak blocks, regardless of severity.</b> There is no judgment call in this cell; a secret in code is a breach on a timer.',
-     m:['MECHANISM|gitleaks · pinned container','TOLERANCE|zero','ON FAIL|BLOCK']},
-    {n:'03',id:'depvuln',one:'Known CVEs in every dependency.',
-     d:'Every dependency in the lockfile is checked against the public CVE record. The fail-closed rule is literal: <b>if the scanner itself cannot run, that is a critical block.</b> Unresolved dependency trees are surfaced, never silently skipped.',
-     m:['MECHANISM|trivy · pinned container','SCOPE|full lockfile','ON FAIL|BLOCK · scanner down = BLOCK']},
-    {n:'04',id:'rls',one:'No table ships without a real policy.',
-     d:'Modeled on the breach that made app generators infamous: 170+ builder-made apps leaking client data through tables with no row-level security (CVE-2025-48757). Every table a migration creates must carry RLS and a policy that isn’t a rubber stamp; every table the app actually queries must be covered. <b>No policy found means block.</b>',
-     m:['MECHANISM|static policy + coverage analysis','MODELED ON|CVE-2025-48757','ON FAIL|BLOCK']},
-    {n:'05',id:'migrate',one:'Every migration runs here first.',
-     d:'Every other check reads your database migrations as text. This one <b>runs them</b> — against a real embedded Postgres, in about a second, no LLM anywhere. Syntax that would only explode on deploy day explodes here instead, localized to the exact file and the exact database error.',
-     m:['MECHANISM|embedded Postgres (pglite) · real DDL apply','RUNTIME|~1s · deterministic','ON FAIL|BLOCK']},
-    {n:'06',id:'rls-enforce',one:'Two tenants seeded. The attack is attempted.',
-     d:'The keystone. It stands up a live database, applies your migrations, and seeds <b>two tenants</b>. Then, as tenant A and as an anonymous session, it attempts to read, update, delete, and insert tenant B’s rows across every isolated table. One leaked row blocks. Nobody has to trust that the policy reads correctly — <b>the database gets attacked, and either it holds or it doesn’t.</b>',
-     m:['MECHANISM|live two-tenant probe · embedded Postgres','ASSERTS|read/write/delete/insert all denied','ON FAIL|BLOCK · harness error = BLOCK']},
-    {n:'07',id:'compliance',one:'Sensitive data demands its controls.',
-     d:'Reads the binding sensitivity classification from the spec and demands the controls that class of data requires — authentication in front of it, a real hard-delete path — with the org-level judgment items routed to a human instead of hand-waved. <b>The classification can’t be talked out of:</b> declare “no sensitive data” while the schema stores diagnoses, and an independent code scan falsifies the claim and blocks.',
-     m:['MECHANISM|seven-control assessment · classification-driven','FALSIFIER|independent code scan','ON FAIL|BLOCK']},
-    {n:'08',id:'pii',one:'Personal data stays out of logs and URLs.',
-     d:'Two deterministic leak paths, both career-enders for a small firm: personal data written into logs (logs get shipped to third parties), and personal data in URLs (URLs get recorded by every server in between). Precision matters: <b><span class="mono">console.log("email sent")</span> passes. <span class="mono">console.log(user.email)</span> blocks.</b>',
-     m:['MECHANISM|property-access scan · deterministic','PATHS|logs · URLs / query strings','ON FAIL|BLOCK']},
-    {n:'09',id:'prod-readiness',one:'Unpinned, undocumented, root: blocked.',
-     d:'The boring failures that kill real handoffs: dependency ranges left unpinned so a silent upgrade breaks a shipped app, a missing README, containers running as root, base images not pinned by digest, TypeScript strict mode off. <b>Blocks at production rigor; warns at prototype</b> — the standard scales with what you told the spec.',
-     m:['MECHANISM|install-free file checks','RIGOR|adaptive · from the spec','ON FAIL|BLOCK at production']},
-    {n:'10',id:'verify',one:'Built and booted. Every run healthy.',
-     d:'Proof of life. The app is copied to a clean room, built for real, and booted — <b>multiple times, and every single run must come up healthy.</b> One green run proves nothing. An empty build that “succeeded” without producing artifacts is also a block.',
-     m:['MECHANISM|clean-room build + repeated boot probes','STANDARD|N/N healthy · every run','ON FAIL|BLOCK']},
-    {n:'11',id:'completeness',one:'Promised features, checked off in code.',
-     d:'An app can pass every security gate and still be missing half of what you asked for. Feature by feature, the code is held against the PRD’s contract list — and <b>a promised feature that is entirely missing blocks the release.</b> The next fix round generates it. If the reviewer itself goes down, that’s a block too: unverifiable is unshippable.',
-     m:['MECHANISM|per-feature review vs PRD contract','REVIEWER DOWN|fails closed = BLOCK','ON FAIL|BLOCK']},
-    {n:'12',id:'the sentinel',s:1,one:'The deploy checks for one signature.',
-     d:'The matrix’s only exit. Once every gate passes, with at least one doing substantive work (a board of eleven “not applicable” verdicts doesn’t count), a cryptographically signed sentinel gets written and bound to that exact build in that exact directory. <b>The deploy won’t run without it</b>, a copy of it elsewhere won’t validate, and it gets deleted the moment a later run fails.',
-     m:['MECHANISM|HMAC-signed · path-bound · single writer','VACUOUS PASS|refused (all-n/a ≠ pass)','WITHOUT IT|NO DEPLOY']}
-  ];
-  var mx=document.getElementById('matrix');if(!mx)return;
-  var roN=document.getElementById('ro-name'),roD=document.getElementById('ro-desc'),roM=document.getElementById('ro-meta');
-  G.forEach(function(g,i){
-    var b=document.createElement('button');
-    b.className='gcell'+(g.s?' sentinel':'');b.type='button';b.setAttribute('role','option');b.setAttribute('aria-selected','false');b.dataset.i=i;
-    b.innerHTML='<span class="top"><span class="gled" aria-hidden="true"></span><span class="num">'+(g.s?'EXIT':'GATE '+g.n+'/11')+'</span></span><span class="name">'+g.id+'</span><span class="one">'+g.one+'</span>';
-    mx.appendChild(b);
-  });
-  var cells=mx.querySelectorAll('.gcell'),cur=-1;
-  function show(i){
-    if(i===cur)return;cur=i;var g=G[i];
-    cells.forEach(function(c,k){c.setAttribute('aria-selected',k===i?'true':'false')});
-    roN.textContent=(g.s?'EXIT — ':'GATE '+g.n+'/11 — ')+g.id.toUpperCase();
-    roD.innerHTML=g.d;
-    roM.innerHTML=g.m.map(function(r){var p=r.split('|');var v=p[1];var cls=/BLOCK|NO DEPLOY/.test(v)?' class="blk"':'';return '<b>'+p[0]+'</b> · <span'+cls+'>'+v+'</span>'}).join('<br>');
-  }
-  cells.forEach(function(c){
-    c.addEventListener('mouseenter',function(){show(+c.dataset.i)});
-    c.addEventListener('focus',function(){show(+c.dataset.i)});
-    c.addEventListener('click',function(){show(+c.dataset.i)});
-  });
-  mx.addEventListener('keydown',function(e){
-    var cols=window.innerWidth>1020?4:(window.innerWidth>560?2:1);
-    var k=e.key,d=0;
-    if(k==='ArrowRight')d=1;else if(k==='ArrowLeft')d=-1;else if(k==='ArrowDown')d=cols;else if(k==='ArrowUp')d=-cols;else return;
-    e.preventDefault();
-    var next=Math.max(0,Math.min(cells.length-1,cur+d));
-    cells[next].focus();
-  });
-  show(5); // default readout: rls-enforce, the keystone
-})();
-
-/* ── scroll reveal (used by S2–S4) ──────────────────────────────────── */
-(function(){
-  var els=document.querySelectorAll('[data-rv]');
-  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){els.forEach(function(e){e.classList.add('on')});return}
-  var io=new IntersectionObserver(function(es){es.forEach(function(x){if(x.isIntersecting){x.target.classList.add('on');io.unobserve(x.target)}})},{threshold:.18});
-  els.forEach(function(e){io.observe(e)});
-})();
-</script>
-<script>
-(function(){
-  var els=document.querySelectorAll('[data-plan]');
-  els.forEach(function(el){
-    el.addEventListener('click',async function(ev){
-      ev.preventDefault();
-      var plan=el.getAttribute('data-plan');
-      var errEl=el.parentElement.querySelector('[data-planerr]');
-      function showErr(msg){if(errEl){errEl.textContent=msg;errEl.hidden=false}}
-      if(errEl)errEl.hidden=true;
-      el.setAttribute('aria-busy','true');
-      try{
-        var me=await fetch('/api/me').then(function(r){return r.json()});
-        if(!me.authed){try{localStorage.setItem('vh.plan',plan)}catch(e){}location.href='/app';return}
-        if(me.plan===plan){showErr("You're already on this plan.");el.removeAttribute('aria-busy');return}
-        var plans=await fetch('/api/billing/plans').then(function(r){return r.json()});
-        if(!plans.configured){showErr("Billing isn't set up yet — check back soon.");el.removeAttribute('aria-busy');return}
-        var priceId=plans.plans&&plans.plans[plan];
-        if(!priceId){showErr("That plan isn't available right now.");el.removeAttribute('aria-busy');return}
-        var co=await fetch('/api/billing/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId:priceId})});
-        var body=await co.json();
-        if(co.ok&&body.url){location.href=body.url}
-        else{showErr(body.error||'Checkout failed — try again.');el.removeAttribute('aria-busy')}
-      }catch(e){showErr('Something went wrong — try again.');el.removeAttribute('aria-busy')}
-    });
   });
 })();
 </script>
