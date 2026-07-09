@@ -144,3 +144,68 @@ where a non-technical user types a prompt and watches build → gate → ship, w
 HIDDEN (enforced FOR them, not shown TO them — §1/§16) and holds/escalations surfaced in
 plain language. Today VibeHard is a CLI the target user can't operate; this UI is what
 stands between the proven engine and a real customer.
+
+---
+
+## Build target: hosted app vs. downloadable tool (found via dogfooding, 2026-07-08)
+
+**The gap.** VibeHard only knows one output shape today: gate → deploy to a live URL with
+its own database. A dogfooding request for a local-only TUI tool (Ollama-driven, single
+user, no server) hit every gate tuned for that one shape and got misread as unshippable:
+`verify` wants a bootable server ("no server to launch"); `compliance`/`pii` want a login
+in front of anything sensitive-shaped, keyed off *data shape* not *is this multi-user* —
+so a single-user tool with an API key in `.env` trips the same finding as an actual
+CVE-2025-48757-style multi-tenant leak. Nothing in the platform can currently zip a
+workspace or accept an upload either — confirmed empty (`grep` for download/upload/zip
+across `web/` and `src/` turns up nothing product-facing).
+
+**The real fix isn't "add a download button."** It's a build-target choice at intake
+(`hosted-app` vs. `downloadable-tool`) that changes which gates even apply:
+1. **Intake asks build target up front**, alongside the existing sensitivity questions.
+2. **`verify` gets a downloadable-tool profile** — "does it run when invoked" (the declared
+   entry point exits 0 / produces expected output), not "does it boot an HTTP server."
+3. **`compliance`/`pii` key off actual multi-tenancy**, not data shape alone — a
+   single-user local tool with secrets in `.env` isn't the RLS-leak pattern; the finding
+   should ask "is more than one person's data ever in this workspace," not just "does this
+   look like PHI/PII."
+4. **A new terminal step for downloadable targets**: zip the gate-approved workspace,
+   strip `.git`/`.env`/anything `src/credentials` would treat as a secret, serve it as a
+   download gated behind the same sentinel signature as a deploy — no download without a
+   passing gate line, same invariant as `stampSentinel`.
+
+**Sequencing note.** Don't build the zip/download step before the workspace-storage bug
+below is fixed — no point exporting a workspace that might silently be the stale copy from
+the other machine.
+
+---
+
+## Tenant workspace storage isn't durable or machine-consistent (found via dogfooding, 2026-07-08)
+
+**The bug.** `fly.toml` has no `[mounts]` — each Fly machine has its own local disk, and
+Fly round-robins requests across the fleet. A tenant's build directory
+(`/root/.vibehard/tenants/<id>/apps/<app>/`) only exists on whichever machine ran the last
+step that touched it. Confirmed live: after a dogfooding retry, machine A held the full
+source tree (PRD/SRS/`.vibehard/spec.json`/`app/`/`src/`, stamped 00:43) while machine B
+held a different, smaller file set (`package.json`/`Dockerfile`/`fly.toml`/`server.js`,
+stamped 00:59) for the SAME app. `status`, `retry`, and every subsequent orchestrator
+message can land on either machine with no session affinity — so a fix round can silently
+run against a stale or partial copy, or a status check can report on the wrong machine
+entirely.
+
+This is a superset of the already-tracked #55 (workspaces wiped on deploy) — it's not just
+deploy-time loss, it's routine cross-request inconsistency any time the fleet has more than
+one machine, deploy or not.
+
+**Fix directions (needs a scoped decision, not a quick patch):**
+- A shared Fly Volume (or NFS-alike) mounted identically on every machine — simplest
+  mental model, but Fly Volumes are typically single-machine-attached, not natively
+  multi-writer; would need per-machine volumes + explicit sync, or a single-writer
+  constraint on build machines.
+- Move the tenant workspace to object storage (S3-alike) as the source of truth; each
+  build step pulls-before/pushes-after instead of assuming local disk persists.
+- Sticky routing: pin a tenant's build session to one machine (Fly's `fly-replay` /
+  instance targeting) so at least a single build's request sequence stays consistent, even
+  if it doesn't solve cross-deploy durability.
+
+Ties directly to EPIC #32 (Build sandbox / per-build isolation, in progress) — the sandbox
+work should settle this as part of defining where a build's workspace actually lives.
