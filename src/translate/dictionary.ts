@@ -140,6 +140,11 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "The app handles sensitive data but doesn't require users to sign in to reach it. It must sit behind authentication before it can ship.",
   },
+  "unauthenticated-local-tool": {
+    title: "No login — but this tool never leaves your machine",
+    detail:
+      "Sensitive data has no login protecting it. Normally that blocks the build, but this one is declared single-user and downloadable — it never gets a hosted web address, so there's no endpoint anyone else could reach. If this ever becomes a hosted app, or you share it with someone else, add a login first.",
+  },
   "no-deletion-path": {
     title: "No way to permanently delete sensitive records",
     detail:

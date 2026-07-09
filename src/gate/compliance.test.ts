@@ -12,6 +12,10 @@ function input(over: Partial<ComplianceInput> = {}): ComplianceInput {
     storesData: true,
     hasDeletePath: true,
     suspiciousLogging: [],
+    // multi-tenant + hosted-app: neither condition of the single-user-local exception holds,
+    // so every EXISTING test below stays a pure regression check unless it explicitly overrides.
+    tenancy: "multi-tenant",
+    deployTarget: "hosted-app",
     ...over,
   };
 }
@@ -61,6 +65,24 @@ describe("assessCompliance — §21 seven controls (verifiable BLOCK, judgment a
     const f = assessCompliance(input({ authenticated: false })).find((x) => x.ruleId === "unauthenticated-sensitive-data");
     expect(f?.severity).toBe("critical");
     expect(verdictOf("compliance", assessCompliance(input({ authenticated: false })), "t").status).toBe("block");
+  });
+
+  test("Control 3 exception (2026-07-09) — single-user AND downloadable-tool downgrades to advisory, distinct ruleId", () => {
+    const fs = assessCompliance(input({ authenticated: false, tenancy: "single-user", deployTarget: "downloadable-tool" }));
+    const f = fs.find((x) => x.ruleId === "unauthenticated-local-tool");
+    expect(f?.severity).toBe("medium");
+    expect(fs.map((x) => x.ruleId)).not.toContain("unauthenticated-sensitive-data"); // ONE finding, not both
+    expect(verdictOf("compliance", fs, "t").status).toBe("pass"); // advisory — does not block
+  });
+
+  test("Control 3 exception requires BOTH conditions — single-user alone (still hosted) stays CRITICAL block", () => {
+    const f = assessCompliance(input({ authenticated: false, tenancy: "single-user", deployTarget: "hosted-app" })).find((x) => x.ruleId === "unauthenticated-sensitive-data");
+    expect(f?.severity).toBe("critical"); // a live URL is still reachable regardless of declared user count
+  });
+
+  test("Control 3 exception requires BOTH conditions — downloadable-tool alone (still multi-tenant) stays CRITICAL block", () => {
+    const f = assessCompliance(input({ authenticated: false, tenancy: "multi-tenant", deployTarget: "downloadable-tool" })).find((x) => x.ruleId === "unauthenticated-sensitive-data");
+    expect(f?.severity).toBe("critical");
   });
 
   test("Control 2 — sensitive data stored with no hard-delete path → blocks", () => {
@@ -140,6 +162,45 @@ describe("runCompliance — D-1 (SECURITY_AUDIT_4): the classification is falsif
     const v = await runCompliance(d, "t");
     expect(v.findings.map((f) => f.ruleId)).not.toContain("classification-mismatch");
     expect(v.status).toBe("pass"); // auth + delete path present → advisories only
+  });
+});
+
+describe("Control 3 exception (2026-07-09) — end to end through a real persisted spec.json", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const app = (spec: object): string => {
+    const d = mkdtempSync(join(tmpdir(), "dd-compl-local-"));
+    dirs.push(d);
+    mkdirSync(join(d, ".vibehard"), { recursive: true });
+    writeFileSync(join(d, ".vibehard", "spec.json"), JSON.stringify(spec));
+    return d;
+  };
+
+  test("a real single-user + downloadable-tool spec, no auth → advisory, gate PASSES", async () => {
+    // storesData: false — isolates Control 3 from Control 2 (no-deletion-path), which would
+    // independently block on its own and confuse what this test is actually proving.
+    const d = app({ name: "x", sensitiveData: ["pii"], auth: "none", storesData: false, tenancy: "single-user", deployTarget: "downloadable-tool" });
+    const v = await runCompliance(d, "t");
+    expect(v.status).toBe("pass");
+    expect(v.findings.map((f) => f.ruleId)).toContain("unauthenticated-local-tool");
+  });
+
+  test("fail-closed: a spec with NO deployTarget field at all still BLOCKS (missing → hosted-app, the strict default)", async () => {
+    // Same spec as above, minus deployTarget — proves an adversarial/malformed intake response
+    // that simply omits the field can't accidentally earn the downgrade.
+    const d = app({ name: "x", sensitiveData: ["pii"], auth: "none", storesData: true, tenancy: "single-user" });
+    const v = await runCompliance(d, "t");
+    expect(v.status).toBe("block");
+    expect(v.findings.map((f) => f.ruleId)).toContain("unauthenticated-sensitive-data");
+  });
+
+  test("fail-closed: an invalid deployTarget value still BLOCKS (garbage → hosted-app, not downloadable-tool)", async () => {
+    const d = app({ name: "x", sensitiveData: ["pii"], auth: "none", storesData: true, tenancy: "single-user", deployTarget: "self-hosted-on-prem" });
+    const v = await runCompliance(d, "t");
+    expect(v.status).toBe("block");
+    expect(v.findings.map((f) => f.ruleId)).toContain("unauthenticated-sensitive-data");
   });
 });
 

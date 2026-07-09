@@ -147,7 +147,15 @@ stands between the proven engine and a real customer.
 
 ---
 
-## Build target: hosted app vs. downloadable tool (found via dogfooding, 2026-07-08)
+## Build target: hosted app vs. downloadable tool (found via dogfooding, 2026-07-08) — FIXED 2026-07-09
+
+**Update 2026-07-09 — all four points below shipped** (`dd6e1e7`, `[next]`): `Spec.deployTarget`
+threaded through intake → codegen brief → `verify`'s new "cli" LaunchPlan (run-once, judge on
+exit code) → `/api/export` (zips the gate-approved workspace, gated behind the same sentinel
+`deployGate` writes). Point 3's rewrite landed as designed, after real deliberation on where the
+line should sit — see "Compliance/pii" below for the reasoning and the final rule. Point 4's
+sequencing note held: this shipped after the workspace-storage fix, not before.
+
 
 **The gap.** VibeHard only knows one output shape today: gate → deploy to a live URL with
 its own database. A dogfooding request for a local-only TUI tool (Ollama-driven, single
@@ -176,6 +184,34 @@ across `web/` and `src/` turns up nothing product-facing).
 **Sequencing note.** Don't build the zip/download step before the workspace-storage bug
 below is fixed — no point exporting a workspace that might silently be the stale copy from
 the other machine.
+
+---
+
+## Compliance/pii: single-user + downloadable-tool auth severity (decided + shipped 2026-07-09)
+
+**The question.** `compliance`'s `unauthenticated-sensitive-data` (critical, blocking) fires on
+any sensitive-shaped data with no login — correct for the CVE-2025-48757 threat model (an
+unauthenticated PUBLIC endpoint), wrong for a tool that never gets a URL at all. `pii.ts` turned
+out NOT to be part of this — its two findings (`pii-in-logs`, `pii-in-url`) are about leakage
+mechanisms, orthogonal to authentication; only `compliance.ts` needed to change.
+
+**The options weighed**, against three real segments (tool builders selling to their own paying
+users; a turnkey-internal-tool-that-later-opens-to-paid-users trajectory; non-technical founders
+building a Service-as-Software business — the Phase II bet): downgrade on `tenancy=single-user`
+alone was rejected — a single-user *hosted* app still has a live URL anyone who finds it can
+reach, and "turnkey internal → later external" is exactly the trajectory where a rule keyed on
+declared user count (not reachability) could let a real leak ship on a later redeploy without
+ever re-triggering the check. None of the three segments actually needed the broader relief —
+all are hosted/multi-tenant by nature — so the narrow rule cost nothing.
+
+**The rule that shipped**: BOTH `tenancy === "single-user"` AND `deployTarget ===
+"downloadable-tool"` must hold — the code must genuinely never get a live URL. Either alone
+stays critical/blocking. Protected against gaming by the existing fail-closed defaults:
+`deployTarget` defaults to `"hosted-app"` on anything missing/malformed, which alone disqualifies
+the exception — an adversarial or malformed intake response can't accidentally earn the
+downgrade. Downgraded to `medium` (advisory) on a distinct ruleId (`unauthenticated-local-tool`,
+not a severity-conditional message on the existing one) — still surfaced, still visible, just
+doesn't hold the build. `src/gate/compliance.ts`, tests in `compliance.test.ts`.
 
 ---
 

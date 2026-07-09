@@ -22,11 +22,13 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { notApplicable, verdictOf } from "../types.ts";
-import type { SensitiveClass } from "../spec/index.ts";
+import type { DeployTarget, SensitiveClass, Tenancy } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 import { classificationMismatch, detectSensitiveSignals, inferredClasses } from "./sensitive-signals.ts";
 
 const SENSITIVE_CLASSES: readonly SensitiveClass[] = ["pii", "phi", "financial", "credentials"];
+const TENANCIES: readonly Tenancy[] = ["single-user", "single-tenant", "multi-tenant"];
+const DEPLOY_TARGETS: readonly DeployTarget[] = ["hosted-app", "downloadable-tool"];
 
 /** The facts the assessment needs — extracted from the spec + a code scan. */
 export interface ComplianceInput {
@@ -35,6 +37,12 @@ export interface ComplianceInput {
   storesData: boolean;
   hasDeletePath: boolean; // a hard-delete mechanism exists (not soft-delete only)
   suspiciousLogging: string[]; // file:line where sensitive fields may be logged
+  /** How many distinct owners share the app's data. Together with deployTarget, decides
+   *  whether "no login" leaves an endpoint anyone but the declared single user could reach. */
+  tenancy: Tenancy;
+  /** Whether the build ever gets a live URL at all. A single-user tool that's ALSO
+   *  downloadable (never hosted) has no unauthenticated endpoint for anyone else to reach. */
+  deployTarget: DeployTarget;
 }
 
 const finding = (ruleId: string, severity: Finding["severity"], message: string): Finding => ({
@@ -54,8 +62,21 @@ export function assessCompliance(input: ComplianceInput): Finding[] {
   const classes = input.sensitiveClasses.join(", ");
 
   // Control 3 — access control (BLOCK): sensitive data must sit behind authentication.
+  // EXCEPTION (2026-07-09): a declared single-user tool that's ALSO downloadable — never gets a
+  // hosted URL — doesn't carry the CVE-2025-48757 threat model: there's no unauthenticated
+  // endpoint for anyone but the declared single user to reach. BOTH conditions must hold; a
+  // single-user HOSTED app (still a live URL, just one declared user) stays critical/blocking,
+  // since reachability — not declared user count — is what makes an open endpoint dangerous.
+  // Downgraded to advisory, not removed: the finding still surfaces, it just doesn't hold the
+  // build, and a distinct ruleId (not a severity-conditional message on the same one) keeps the
+  // dictionary's static per-ruleId explanation honest for each case.
   if (!input.authenticated) {
-    out.push(finding("unauthenticated-sensitive-data", "critical", `Sensitive data (${classes}) is exposed with no authentication — it must sit behind a login before this can ship.`));
+    const localOnly = input.tenancy === "single-user" && input.deployTarget === "downloadable-tool";
+    out.push(
+      localOnly
+        ? finding("unauthenticated-local-tool", "medium", `Sensitive data (${classes}) has no login. This build is declared single-user and downloadable — it never gets a hosted web address, so there's no endpoint anyone else could reach. If this ever becomes a hosted app, or you share it with someone else, add a login first.`)
+        : finding("unauthenticated-sensitive-data", "critical", `Sensitive data (${classes}) is exposed with no authentication — it must sit behind a login before this can ship.`),
+    );
   }
 
   // Control 2 — retention + deletion (BLOCK): a hard-delete path is required.
@@ -93,12 +114,17 @@ interface PersistedSpec {
   dataEntities?: Array<{ sensitive?: boolean }>;
   auth?: string;
   storesData?: boolean;
+  tenancy?: unknown;
+  deployTarget?: unknown;
 }
 
 /** Read the classification the front-half persisted to .vibehard/spec.json. Null when
  *  the app never went through the front-half (then the gate no-ops — it can't assess
- *  compliance without a classification). */
-function readClassification(projectPath: string): Pick<ComplianceInput, "sensitiveClasses" | "authenticated" | "storesData"> | null {
+ *  compliance without a classification). Unknown/missing tenancy/deployTarget default the
+ *  same conservative way coerceSpec does elsewhere — critically, deployTarget defaults to
+ *  "hosted-app", which alone disqualifies the single-user-local exception above, so a
+ *  malformed or adversarial spec can never accidentally downgrade the auth check. */
+function readClassification(projectPath: string): Pick<ComplianceInput, "sensitiveClasses" | "authenticated" | "storesData" | "tenancy" | "deployTarget"> | null {
   const p = join(projectPath, ".vibehard", "spec.json");
   if (!existsSync(p)) return null;
   try {
@@ -112,6 +138,8 @@ function readClassification(projectPath: string): Pick<ComplianceInput, "sensiti
       sensitiveClasses,
       authenticated: (s.auth ?? "none") !== "none",
       storesData: s.storesData ?? (s.dataEntities?.length ?? 0) > 0,
+      tenancy: TENANCIES.includes(s.tenancy as Tenancy) ? (s.tenancy as Tenancy) : "single-user",
+      deployTarget: DEPLOY_TARGETS.includes(s.deployTarget as DeployTarget) ? (s.deployTarget as DeployTarget) : "hosted-app",
     };
   } catch {
     return null;
@@ -186,6 +214,8 @@ export async function runCompliance(projectPath: string, ranAt: string = new Dat
       storesData: cls?.storesData ?? true,
       hasDeletePath: detectDeletePath(projectPath),
       suspiciousLogging: detectSensitiveLogging(projectPath),
+      tenancy: cls?.tenancy ?? "single-user",
+      deployTarget: cls?.deployTarget ?? "hosted-app",
     };
     return verdictOf("compliance", [classificationMismatch("compliance", signals), ...assessCompliance(input)], ranAt);
   }
