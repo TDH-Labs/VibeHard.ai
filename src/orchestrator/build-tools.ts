@@ -12,10 +12,16 @@ import { diagnose, formatDiagnosis } from "../diagnose/diagnose.ts";
 import { deployGate } from "../gate/index.ts";
 
 const CLI = join(import.meta.dir, "..", "cli.ts");
+const HEARTBEAT_MS = 5 * 60 * 1000;
+const MAX_HEARTBEATS = 6; // ~30 minutes of periodic pings, then we stop nagging (still watching for exit/error)
 
 export interface BuildToolsOptions {
   /** invoked when a spawned retry finishes (so the web layer can push a proactive message). */
   onRetryDone?: (ok: boolean, dir: string) => void;
+  /** invoked every few minutes while a retry is still running, so a long fix loop never leaves
+   *  the user in total silence (a spawn failure alone used to hang forever — no error handler,
+   *  no signal until `exit`, which never fires on a launch failure). Never implies failure. */
+  onRetryHeartbeat?: (dir: string, minutesElapsed: number) => void;
 }
 
 export function realBuildTools(dir: string, opts: BuildToolsOptions = {}): BuildTools {
@@ -34,10 +40,29 @@ export function realBuildTools(dir: string, opts: BuildToolsOptions = {}): Build
     },
 
     async retry() {
-      // spawn the real loop detached; report progress via onRetryDone, not by blocking the chat
+      // spawn the real loop detached; report progress via onRetryDone, not by blocking the chat.
+      // A spawn failure (bad PATH, OOM, etc.) fires "error" but NEVER "exit" — without an error
+      // handler that left the orchestrator's promise to "message you when it lands" permanently
+      // unkept. The heartbeat covers the other silent failure mode: a child that neither exits
+      // nor errors (hung / orphaned) leaves the user with zero signal for the life of the build.
       const child = spawn("bun", [CLI, "fix", dir], { detached: true, stdio: "ignore" });
       child.unref();
-      if (opts.onRetryDone) child.on("exit", (code) => opts.onRetryDone!(code === 0, dir));
+      let settled = false;
+      let heartbeats = 0;
+      const timer = opts.onRetryHeartbeat
+        ? setInterval(() => {
+            if (settled || ++heartbeats > MAX_HEARTBEATS) return;
+            opts.onRetryHeartbeat!(dir, heartbeats * (HEARTBEAT_MS / 60_000));
+          }, HEARTBEAT_MS)
+        : null;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearInterval(timer);
+        opts.onRetryDone?.(ok, dir);
+      };
+      child.on("exit", (code) => finish(code === 0));
+      child.on("error", () => finish(false));
       return "On it — re-running the gate → fix → re-gate loop. I'll message you when it lands.";
     },
 

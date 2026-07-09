@@ -160,6 +160,11 @@ export const EXACT: Record<string, Entry> = {
     detail:
       "Based on the kind of data this app handles, certain organizational control areas typically apply. These are programs your organization runs (audits, policies); the build helps toward the technical parts, but it does not by itself satisfy them.",
   },
+  "classification-mismatch": {
+    title: "What you described doesn't match what the code actually stores",
+    detail:
+      "You told us this app doesn't handle sensitive data, but the code we generated stores fields that look like real personal, health, or financial records. We don't let a description override what's actually there, so a person needs to either correct the description or confirm the sensitive fields should come out.",
+  },
   // ── our production-readiness gate (§19) ──────────────────────────────────
   "unpinned-dependency": {
     title: "A dependency can silently upgrade and break the app",
@@ -269,6 +274,11 @@ export const EXACT: Record<string, Entry> = {
     title: "A private cryptographic key is committed in the code",
     detail:
       "A private key is stored directly in the source. If the code is shared or deployed, that key is exposed and must be treated as compromised — moved out of the code and rotated.",
+  },
+  "spawn-shell-true": {
+    title: "A command runs through the system shell, where input could hijack it",
+    detail:
+      "The code launches a system command with the shell turned on, so any input woven into that command is interpreted as more commands, not just data — letting an attacker run their own. Run the command directly (without a shell) and pass arguments as a list, or strictly validate anything that reaches it.",
   },
 };
 

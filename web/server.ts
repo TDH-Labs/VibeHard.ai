@@ -23,7 +23,7 @@ import { isBlocking } from "../src/types.ts";
 import { byoModelFactory } from "../src/engine/bolt/driver.ts";
 import { applyBillingDecision, decideBillingEvent, parseStripeEvent, verifyStripeSignature } from "../src/platform/billing-webhook.ts";
 import { LocalEscalationSink } from "../src/escalation/index.ts";
-import { translateFinding } from "../src/translate/index.ts";
+import { translateFindings, llmTranslator } from "../src/translate/index.ts";
 import { requiredCredentialsForApp } from "../src/credentials/index.ts";
 import { llmFunctionalReviewer, summarize } from "../src/functest/functest.ts";
 import { Orchestrator, type Channel, type OutboundMessage } from "../src/orchestrator/orchestrator.ts";
@@ -547,6 +547,8 @@ async function getOrchestrator(tenantId: string, app: string): Promise<Orchestra
     const tools = realBuildTools(workspace, {
       onRetryDone: (ok) =>
         channel.send(ok ? { kind: "done", text: '✅ The build landed clean — all gates pass. Say "ship" when you want to deploy.' } : { kind: "error", text: '🛑 It stopped again. Say "why" and I\'ll tell you the blocker.' }),
+      onRetryHeartbeat: (_dir, minutes) =>
+        channel.send({ kind: "info", text: `Still working — the fix loop has been running about ${minutes} minute(s). I'll message you the moment it lands.` }),
     });
     o = new Orchestrator(tools, channel, llmClassifier({ modelFactory }));
     orchestrators.set(key, o);
@@ -815,8 +817,14 @@ const server = Bun.serve({
       const sink = new LocalEscalationSink(process.env.VIBEHARD_QUEUE_DIR ?? join(homedir(), ".vibehard", "queue"));
       const ticket = await sink.get(rec.ticket);
       if (!ticket) return json({ state: null, findings: [] });
-      const findings = ticket.packet.items.map((it) => {
-        const e = translateFinding(it.finding);
+      // the dictionary handles the common cases synchronously; anything it can't place (source
+      // === "generic") gets one bounded LLM pass so "held" is never a wall of "a reviewer can
+      // confirm" — the tenant's own key if they have one, else the platform's.
+      const byo = await loadKey(auth.user.tenantId);
+      const modelFactory = byo ? byoModelFactory(byo.startsWith("sk-ant-") ? { anthropicKey: byo } : { openaiKey: byo }) : undefined;
+      const explanations = await translateFindings(ticket.packet.items.map((it) => it.finding), llmTranslator({ modelFactory }));
+      const findings = ticket.packet.items.map((it, i) => {
+        const e = explanations[i]!;
         return { area: it.specialty, title: e.title, detail: e.detail, severity: it.finding.severity, file: it.finding.file };
       });
       return json({ state: ticket.state, claimedBy: ticket.claimedBy, ticket: ticket.id, findings });
