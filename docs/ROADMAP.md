@@ -187,6 +187,49 @@ the other machine.
 
 ---
 
+## Parallel workstreams overwrite shared config files (found via dogfooding, 2026-07-09) — NOT FIXED
+
+**The bug.** Codegen runs multiple workstreams CONCURRENTLY within a tier
+(`runTiers`/`src/util/pool.ts`, confirmed ≤4 at once), and each workstream's generated files get
+materialized via a plain full-file overwrite (`Bun.write(abs, seg.content)`,
+`src/engine/bolt/engine.ts`) with no merging and no locking. Confirmed live: a real build had
+TWO separate workstreams (`data-access` and `tui-framework`) each independently `create:
+package.json` at the same path in the same run. Whichever finishes last wins outright — the
+other's declared dependencies, scripts, and `main`/`bin` entry point are silently discarded, not
+merged. This is NOT specific to the downloadable-tool work — it's a structural gap in the
+parallel-codegen orchestration that predates it and would hit any multi-workstream build (hosted
+or downloadable) where more than one workstream needs to touch `package.json` (or
+`package-lock.json`, `tsconfig.json` — same pattern, same risk).
+
+**Confirmed downstream damage in one real run:** the FINAL `package.json` had
+`"main": "dist/index.js"` (implying a `tsc` build step must run first) even though the
+`project-selector-tui` workstream's own log explicitly said it built a plain-JS entry
+(`src/index.js`) specifically to satisfy the downloadable-tool entry-point contract — a LATER
+workstream's overwrite silently reverted that. Separately, `verify` held on an `EINTEGRITY` npm
+checksum mismatch (`clean-verify-failed`) — plausible fallout from `npm ci` validating a lockfile
+against a `package.json` that no longer matches what was actually intended, though the exact
+causal chain from "concurrent overwrite" to "this specific hash mismatch" wasn't traced further.
+
+**Fix directions (not scoped or built yet):**
+1. Assign ownership of shared config files (`package.json`, `package-lock.json`,
+   `tsconfig.json`) to exactly ONE workstream (or a dedicated setup step before the parallel
+   tier), never left to every workstream to independently declare.
+2. Or: merge rather than overwrite — read the existing file (if any workstream in the SAME tier
+   already wrote it), union dependencies/scripts, keep the most specific `main`/`bin`.
+3. Or: make `file-collision` detection (already exists in `reviewArchitecture` for files two
+   WORKSTREAMS both claim in their `covers`/`files` list at the ARCHITECTURE level) also catch
+   this at the actual FILE-WRITE level during codegen, not just at the planning level — the
+   architecture might legitimately not predict every file a workstream's own codegen decides to
+   touch.
+
+Also noted in passing, not investigated: one held finding's `message` field
+(`verify:build-failed`) contained literal Docker/Depot console text (`"Building image with
+Depot..."`) that has no business appearing in an `npm run build` failure — `cleanEnvVerify`
+(the actual code that ran) is confirmed plain `npm`/`tsc`, no Docker anywhere. Something is
+contaminating a finding's message with unrelated captured output. Not chased down.
+
+---
+
 ## Compliance/pii: single-user + downloadable-tool auth severity (decided + shipped 2026-07-09)
 
 **The question.** `compliance`'s `unauthenticated-sensitive-data` (critical, blocking) fires on

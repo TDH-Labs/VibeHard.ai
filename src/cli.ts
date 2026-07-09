@@ -5,7 +5,8 @@
  */
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { formatWithOptions } from "node:util";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
 import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
 import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
@@ -63,6 +64,54 @@ import { requiredCredentialsForApp } from "./credentials/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
 
 export const VERSION = "0.0.0";
+
+/**
+ * Tee this process's console output to a durable, PREDICTABLE per-workspace log file
+ * (<target>/.vibehard/build.log) — so any real build's full output is always at a known
+ * path, no ad-hoc `tee` target to remember or reconstruct after the fact. Every real build
+ * a user runs already streams live to their browser via the web server's SSE pump; this is
+ * the durable-artifact half of that, and it's what "just tail this one path" needs to exist
+ * for an operator debugging a stall (found live 2026-07-09 — every check that night meant
+ * re-deriving which ad-hoc filename a specific SSH session happened to redirect to).
+ *
+ * Patches console.log/console.error directly, NOT process.stdout.write/process.stderr.write
+ * — verified live that Bun's console.log does not call through process.stdout.write at all
+ * (a write-level tee silently never fires), so intercepting at the console-method level is
+ * the only reliable point for what this file actually calls (only console.log/console.error
+ * appear anywhere in cli.ts — confirmed).
+ *
+ * Best-effort: a failure to open the log file NEVER blocks the actual build — console output
+ * still reaches the real caller (the web server's spawned-child pump, or a human's terminal)
+ * either way; this only ever ADDS a second destination.
+ */
+export function teeToLogFile(target: string): void {
+  try {
+    const logPath = join(target, ".vibehard", "build.log");
+    mkdirSync(join(target, ".vibehard"), { recursive: true });
+    // A fresh command run starts a fresh log — a RESUMED build (cached stages) still wants
+    // this run's own output, not an ever-growing file across every unrelated invocation.
+    writeFileSync(logPath, `── ${new Date().toISOString()} — ${process.argv.slice(2).join(" ")} ──\n`);
+    const origLog = console.log.bind(console);
+    const origError = console.error.bind(console);
+    const append = (args: unknown[]): void => {
+      try {
+        appendFileSync(logPath, `${formatWithOptions({ colors: false }, ...args)}\n`);
+      } catch {
+        /* best-effort — never let a full disk or a permissions error touch the real build */
+      }
+    };
+    console.log = (...args: unknown[]) => {
+      append(args);
+      origLog(...args);
+    };
+    console.error = (...args: unknown[]) => {
+      append(args);
+      origError(...args);
+    };
+  } catch {
+    /* best-effort — a workspace we can't write .vibehard/ into has bigger problems than logging */
+  }
+}
 
 const SEV_DOT: Record<Severity, string> = { critical: "🔴", high: "🔴", medium: "🟠", low: "🟡" };
 
@@ -644,6 +693,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(dir);
+    teeToLogFile(target);
     const provider = providerOf();
     const onStep = (m: string) => console.log(`  … ${m}`);
     // Per-stage, right-fit models (codegen + fix get the strong code model; planning a reasoning
@@ -808,6 +858,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(dir);
+    teeToLogFile(target);
     const spec = loadStage<Spec>(target, "spec.json");
     const prd = loadStage<Prd>(target, "prd.json");
     const srs = loadStage<Srs>(target, "srs.json");
@@ -884,6 +935,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(dir);
+    teeToLogFile(target);
     const requested = argv[2] ? Number(argv[2]) : undefined;
     const restored = rollbackToVersion(target, requested);
     if (restored === null) {
@@ -903,6 +955,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     // Generate live, then auto-gate the freshly generated code (PROJECT_BRIEF.md §8 "Option A").
     const target = resolve(dir);
+    teeToLogFile(target);
     // Provider/model selection: explicit override wins; else opencode when its key is
     // present, otherwise anthropic. Logged so the choice is never silent.
     const provider = providerOf();
@@ -921,6 +974,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(arg);
+    teeToLogFile(target);
     console.log(`auto-fixing ${target} (gate → fix → re-gate, bounded) …`);
     return runAutoFixAndReport(target);
   }
@@ -972,6 +1026,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(dir);
+    teeToLogFile(target);
     const provider = providerOf();
     const model = modelForStage("codegen");
     // Reuse the built app's codegen system prompt (stack-correct bolt protocol); the "only change
@@ -1023,6 +1078,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(arg);
+    teeToLogFile(target);
     // refactor-phase runs ONLY on a passing build — improving quality presupposes a
     // correct + secure starting point (§22). Confirm green before touching it.
     const pre = await runGate(target);
@@ -1069,6 +1125,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const target = resolve(arg);
+    teeToLogFile(target);
     // Polish a PASSING build only — restyling presupposes a correct, shippable starting point (§22).
     const pre = await runGate(target);
     if (!pre.passed) {
@@ -1335,6 +1392,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const dir = resolve(arg);
+    teeToLogFile(dir);
     // 1. gate FIRST — never deploy unverified code (writes the HARD_VERIFY_PASS sentinel on pass)
     console.log("── gating before deploy ──");
     const gate = await deployGate(dir);
