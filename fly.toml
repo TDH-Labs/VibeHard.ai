@@ -21,7 +21,22 @@ primary_region = "iad"
   # machine stays up — until builds run fully off-box and machine lifecycle stops mattering.
   auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 2
+  min_machines_running = 1
+  # SINGLE machine, deliberately (2026-07-09): tenant workspaces (~/.vibehard/tenants) live on
+  # this machine's local disk via the volume below. A volume attaches to exactly one machine, so
+  # running >1 replicas without shared/object storage means requests round-robin across machines
+  # with DIFFERENT copies of the same workspace — confirmed live (one machine held a build's full
+  # source tree, the other held a different partial one for the same app). Do not raise this count
+  # without first moving workspace storage off local disk (object storage / DB-backed — see
+  # docs/ROADMAP.md "Tenant workspace storage isn't durable or machine-consistent").
+
+[[mounts]]
+  # Durable tenant workspace storage (2026-07-09, same-day fix for a real data-loss incident: a
+  # deploy wiped an in-progress dogfooding build because ~/.vibehard/tenants lived on ephemeral
+  # machine disk with nothing mounted). This volume survives deploys/restarts; single machine
+  # above means single-attach is exactly what's needed, not a limitation.
+  source = "vibehard_data"
+  destination = "/root/.vibehard"
 
 [[http_service.checks]]
   grace_period = "10s"
