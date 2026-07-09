@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
-import { coerceSpec, decideRigor, type Rigor } from "../spec/index.ts";
+import { coerceSpec, decideRigor, type DeployTarget, type Rigor } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 import { parseBuildErrors } from "./build-errors.ts";
 import type { HostProvider } from "../substrate/types.ts";
@@ -192,6 +192,7 @@ export function findEntry(projectPath: string): string | null {
 export type LaunchPlan =
   | { kind: "container" } //                a Dockerfile → build + run the image (the real deploy artifact)
   | { kind: "node"; entry: string }
+  | { kind: "cli"; entry: string } //        deployTarget: "downloadable-tool" — run once to completion, no boot probe
   | { kind: "python"; cmd: string[] }
   | { kind: "build"; script: string }
   | null;
@@ -238,7 +239,7 @@ export function detectLaunch(projectPath: string): LaunchPlan {
   // node/python so a containerized app of ANY language is verified the same correct way.
   if (existsSync(join(projectPath, "Dockerfile"))) return { kind: "container" };
   const entry = findEntry(projectPath);
-  if (entry) return { kind: "node", entry };
+  if (entry) return readDeployTarget(projectPath) === "downloadable-tool" ? { kind: "cli", entry } : { kind: "node", entry };
   if (existsSync(join(projectPath, "requirements.txt")) || existsSync(join(projectPath, "pyproject.toml"))) {
     const pe = pythonEntry(projectPath);
     if (pe) return { kind: "python", cmd: pythonStartCommand(pe, readPyDeps(projectPath)) };
@@ -474,6 +475,19 @@ function readRigor(projectPath: string): Rigor | null {
   }
 }
 
+/** Read the deploy target the front-half persisted (.vibehard/spec.json). Null → unknown/missing
+ *  (coerceSpec's own default is "hosted-app" — the stricter path — but we return null here, same
+ *  as readRigor, so the caller's own "missing → hosted-app behavior" fallback stays explicit). */
+function readDeployTarget(projectPath: string): DeployTarget | null {
+  const p = join(projectPath, ".vibehard", "spec.json");
+  if (!existsSync(p)) return null;
+  try {
+    return coerceSpec(JSON.parse(readFileSync(p, "utf8"))).deployTarget;
+  } catch {
+    return null;
+  }
+}
+
 const COPY_EXCLUDE = new Set<string>(DERIVED_DIRS);
 
 /**
@@ -525,6 +539,29 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
       /* best-effort cleanup */
     }
   }
+}
+
+/** Run a downloadable-tool's entry point ONCE, to completion — no port probe. This is the inverse
+ *  of the server paths above: there, the process staying up (serving) is success; here, a CLI/script
+ *  RUNNING TO COMPLETION and exiting 0 is success — the process exiting is the expected outcome, not
+ *  a crash. Bounded by CLEAN_TIMEOUT_MS, the same from-scratch operation budget install/build/container
+ *  builds already use in this file (a CLI run is a one-shot operation like those, not a quick boot
+ *  probe like PROBE_ATTEMPTS × PROBE_INTERVAL_MS). `env` carries the same dummy/safe env every other
+ *  path uses (safeToolEnv) — never the host's real secrets. */
+async function runCliOnce(projectPath: string, entry: string, env: Record<string, string | undefined>): Promise<Finding[]> {
+  const run = Bun.spawnSync(["node", entry], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+  const exitCode = run.exitCode ?? 1;
+  if (exitCode === 0) return [];
+  const log = `${run.stdout?.toString() ?? ""}${run.stderr?.toString() ?? ""}`.trim();
+  return [
+    {
+      tool: "verify",
+      ruleId: "cli-run-failed",
+      severity: "high",
+      file: entry,
+      message: `\`node ${entry}\` exited ${exitCode} — the CLI tool did not run cleanly${log ? ` — error: ${log.slice(-600)}` : ""}`,
+    },
+  ];
 }
 
 function cleanFinding(stage: "copy" | "install" | "build", log: string): Finding {
@@ -763,6 +800,21 @@ export async function runVerify(
       const noArtifacts = summarizeBuildArtifacts(projectPath, startedMs);
       if (noArtifacts) findings.push(noArtifacts);
     }
+    return verdictOf("verify", findings, ranAt);
+  }
+
+  // deployTarget: "downloadable-tool" — a runnable CLI/script, not a server. Fundamentally
+  // different from every path above: there is no port to probe and no "stayed up" signal to
+  // wait for. Install deps if needed, run the entry ONCE to completion, and judge it purely on
+  // exit code — exiting 0 IS success here (unlike the node path below, where the process exiting
+  // means it crashed before ever coming up).
+  if (plan.kind === "cli") {
+    const installFail = ensureInstalled(projectPath, env);
+    if (installFail) {
+      findings.push(...summarizeBuild(installFail));
+      return verdictOf("verify", findings, ranAt);
+    }
+    findings.push(...(await runCliOnce(projectPath, plan.entry, env)));
     return verdictOf("verify", findings, ranAt);
   }
 

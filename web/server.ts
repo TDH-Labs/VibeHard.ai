@@ -10,21 +10,22 @@
  * Honest limits (alpha): single-process, sessions in memory, builds run on this machine (not an
  * isolated sandbox), no public hosting. Good enough for you + a few trusted testers locally.
  */
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
-import { decideRigor, llmInterviewer, llmIntake, reviewSpec, type InterviewTurn } from "../src/spec/index.ts";
+import { coerceSpec, decideRigor, llmInterviewer, llmIntake, reviewSpec, type DeployTarget, type InterviewTurn } from "../src/spec/index.ts";
 import { isBlocking } from "../src/types.ts";
 import { byoModelFactory } from "../src/engine/bolt/driver.ts";
 import { applyBillingDecision, decideBillingEvent, parseStripeEvent, verifyStripeSignature } from "../src/platform/billing-webhook.ts";
 import { LocalEscalationSink } from "../src/escalation/index.ts";
 import { translateFindings, llmTranslator } from "../src/translate/index.ts";
 import { requiredCredentialsForApp } from "../src/credentials/index.ts";
+import { verifySentinel } from "../src/gate/index.ts";
 import { llmFunctionalReviewer, summarize } from "../src/functest/functest.ts";
 import { Orchestrator, type Channel, type OutboundMessage } from "../src/orchestrator/orchestrator.ts";
 import { realBuildTools } from "../src/orchestrator/build-tools.ts";
@@ -502,6 +503,44 @@ const running = new Map<string, Bun.Subprocess>();
 const stopFlags = new Set<string>();
 const tenantDir = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/[^a-zA-Z0-9_-]/g, "_"));
 
+/** What the persisted PRD (.vibehard/spec.json) says this app's deploy target is — "hosted-app"
+ *  (default) unless the build was for a local CLI/script (deployTarget: "downloadable-tool"). Read
+ *  the same way verify.ts's readRigor/readDeployTarget do: coerceSpec on the raw JSON, so a
+ *  missing/malformed file conservatively reads as "hosted-app" (never falsely offers a download). */
+function deployTargetForApp(tenantId: string, app: string): DeployTarget {
+  try {
+    const p = join(tenantDir(tenantId), "apps", app, ".vibehard", "spec.json");
+    if (!existsSync(p)) return "hosted-app";
+    return coerceSpec(JSON.parse(readFileSync(p, "utf8"))).deployTarget;
+  } catch {
+    return "hosted-app";
+  }
+}
+
+/** Zip a tenant app's workspace for download (deployTarget: "downloadable-tool" — there's no
+ *  hosted URL, so this IS how a gate-passed build reaches the user). Excludes `.git/` and
+ *  `node_modules/` (regenerable from package.json — don't ship it) and `.env` (kept as
+ *  `.env.example` so the user still sees what to fill in). credentials/index.ts's NEVER_INJECT /
+ *  AUTO_PROVIDED sets classify which ENV VAR NAMES are sensitive for build-time injection into a
+ *  running app; they don't apply to file selection here — no real secret value is ever written
+ *  into any OTHER file in the workspace, so excluding `.env` wholesale is the whole mitigation. */
+function zipWorkspace(workspace: string, app: string): Buffer {
+  const tmp = mkdtempSync(join(tmpdir(), "vibehard-export-"));
+  try {
+    const zipPath = join(tmp, `${app}.zip`);
+    const zip = Bun.spawnSync(
+      ["zip", "-r", "-q", zipPath, ".", "-x", ".git/*", ".git", "node_modules/*", "node_modules", ".env"],
+      { cwd: workspace, stdout: "pipe", stderr: "pipe" },
+    );
+    if ((zip.exitCode ?? 1) !== 0) {
+      throw new Error(`zip exited ${zip.exitCode} — ${(zip.stderr?.toString() || zip.stdout?.toString() || "unknown error").trim()}`);
+    }
+    return readFileSync(zipPath);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true }); // best-effort cleanup of the scratch zip
+  }
+}
+
 /** Whether a build is already running for `tenantId` — checked before every route that would
  *  spawn one. `running` alone is NOT enough: it's an in-process Map, and this server runs on
  *  MULTIPLE Fly machines behind one load balancer (min_machines_running = 2, see fly.toml) —
@@ -671,7 +710,9 @@ const server = Bun.serve({
         // own key (hasKey) is an optional override, not a prerequisite. The build child process
         // already inherits the operator key from process.env; this flag just tells the UI not to gate.
         turnkey: Boolean(process.env.OPENROUTER_API_KEY || process.env.OPENCODE_API_KEY || process.env.ANTHROPIC_API_KEY),
-        builds: await buildStore.listBuilds(auth.user.tenantId), // persistent project history (survives re-login)
+        // persistent project history (survives re-login); deployTarget merged in so the dashboard
+        // can tell a downloadable-tool build apart from a hosted one (renderDownload vs "Shipped").
+        builds: (await buildStore.listBuilds(auth.user.tenantId)).map((b) => ({ ...b, deployTarget: deployTargetForApp(auth.user.tenantId, b.app) })),
         activeBuild: await buildStore.getActive(auth.user.tenantId), // a running/paused build the dashboard can stop or resume
       });
     }
@@ -949,6 +990,27 @@ const server = Bun.serve({
       if (!rec) return json({ required: [], have: [] });
       const required = requiredCredentialsForApp(join(tenantDir(auth.user.tenantId), "apps", app!));
       return json({ required, have: await integrationKeys(auth.user.tenantId) });
+    }
+
+    if (path === "/api/export") {
+      // Download the gate-approved source as a zip — the "downloadable-tool" counterpart to a
+      // live URL. Same invariant the deploy sentinel already enforces for hosted apps: no
+      // artifact leaves without a passing gate run, so this checks the SAME sentinel deployGate
+      // stamps (SENTINEL_REL / verifySentinel, src/gate/index.ts) — no download without one either.
+      if (!auth) return json({ error: "sign in first" }, 401);
+      const app = url.searchParams.get("app");
+      if (!isSafeAppName(app)) return json({ error: "invalid app name" }, 400);
+      if (!(await buildStore.listBuilds(auth.user.tenantId)).some((b) => b.app === app)) return json({ error: "unknown build" }, 404);
+      const workspace = join(tenantDir(auth.user.tenantId), "apps", app);
+      if (!verifySentinel(workspace)) return json({ error: "this build hasn't passed the security gates yet — nothing to download" }, 403);
+      try {
+        const zipBuf = zipWorkspace(workspace, app);
+        return new Response(zipBuf, {
+          headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${app}.zip"` },
+        });
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : "export failed" }, 500);
+      }
     }
 
     if (path === "/api/build/stop" && req.method === "POST") {

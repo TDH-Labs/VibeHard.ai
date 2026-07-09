@@ -23,6 +23,9 @@ import { verdictOf } from "../types.ts";
 export type SensitiveClass = "none" | "pii" | "phi" | "financial" | "credentials";
 /** How many distinct owners share the app's data — drives the isolation expectation. */
 export type Tenancy = "single-user" | "single-tenant" | "multi-tenant";
+/** Where the built app is meant to run — a live hosted URL, or code the user downloads and
+ *  runs on their own machine. Drives the `verify` gate's check and whether the build is downloadable. */
+export type DeployTarget = "hosted-app" | "downloadable-tool";
 export type Rigor = "prototype" | "production";
 
 export interface DataEntity {
@@ -46,6 +49,7 @@ export interface Spec {
   features: string[];
   users: string; // who uses it, in plain words
   tenancy: Tenancy;
+  deployTarget: DeployTarget; // drives the verify gate's boot check and whether the build is downloadable
   auth: string; // "none" | "email-password" | "oauth" | "sso" | …
   storesData: boolean; // does the app persist data at all?
   dataEntities: DataEntity[];

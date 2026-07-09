@@ -37,7 +37,7 @@ import { readWorkspaceSteering, steeringBlock } from "./steering/steering.ts";
 import { approveConvention, pendingConventions, runInduction } from "./fleet/induct.ts";
 import { translateFinding } from "./translate/index.ts";
 import { autoFix } from "./autofix/index.ts";
-import { decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
+import { coerceSpec, decideRigor, foldInterview, llmIntake, llmInterviewer, MAX_QUESTIONS, planIntake, type InterviewTurn, type Spec } from "./spec/index.ts";
 import { elaboratePrd, llmElaborator, renderPrdMarkdown, type Prd } from "./prd/index.ts";
 import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/index.ts";
 import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
@@ -1328,6 +1328,23 @@ export async function main(argv: string[]): Promise<number> {
     if (!gate.passed) {
       console.log("\n🛑 BLOCK — not deploying. Fix or escalate first (vibehard escalate <dir>).");
       return 1;
+    }
+    // A downloadable-tool has no hosted deploy target — there's nothing for deployApp to
+    // provision or a URL to reach. The gate above already stamped the sentinel (deployGate's
+    // job, not deployApp's), which is all `/api/export` checks before releasing the zip — so
+    // stop here rather than attempting (and failing) a deploy this build was never meant to have.
+    const specPath = join(dir, ".vibehard", "spec.json");
+    if (existsSync(specPath)) {
+      try {
+        const spec = coerceSpec(JSON.parse(readFileSync(specPath, "utf8")));
+        if (spec.deployTarget === "downloadable-tool") {
+          console.log("\n✅ Gates passed — ready to download. (A downloadable tool has no hosted URL to deploy to.)");
+          return 0;
+        }
+      } catch {
+        /* malformed spec.json → fall through to the hosted-deploy path below, matching
+         * coerceSpec's own "unknown deployTarget defaults to hosted-app" convention */
+      }
     }
     // 2. provision (customer-owned Supabase) → migrate → VERIFY LIVE RLS → deploy (Vercel) → live URL
     console.log("\n── provisioning + deploying ──");

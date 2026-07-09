@@ -9,6 +9,7 @@ function spec(over: Partial<Spec> = {}): Spec {
     features: [],
     users: "",
     tenancy: "single-user",
+    deployTarget: "hosted-app",
     auth: "none",
     storesData: false,
     dataEntities: [],

@@ -21,6 +21,7 @@ Return ONLY a JSON object (no prose, no markdown fence) with exactly these field
   "features": string[],      // concrete things the app does
   "users": string,           // who uses it, in plain words
   "tenancy": "single-user" | "single-tenant" | "multi-tenant",  // multi-tenant = multiple separate customers/teams share one deployment
+  "deployTarget": "hosted-app" | "downloadable-tool",  // hosted-app = lives at a URL others reach; downloadable-tool = a CLI/script the user runs locally, no server
   "auth": string,            // "none" | "email-password" | "oauth" | "sso" | ... — how users sign in
   "storesData": boolean,     // does it persist data?
   "dataEntities": [ { "name": string, "fields": string[], "sensitive": boolean } ],  // the data model; sensitive=true for PII/PHI/financial/credentials
@@ -32,6 +33,11 @@ Return ONLY a JSON object (no prose, no markdown fence) with exactly these field
 Rules:
 - Be honest about tenancy/auth/sensitiveData — understating them hides real risk.
 - If multiple customers/teams share one deployment and any data is sensitive, set tenancy "multi-tenant".
+- deployTarget: default "hosted-app" unless the idea is CLEARLY local-only — no server, runs on the
+  user's own machine, a CLI/script/terminal tool, not accessed via a URL by anyone else. E.g. "I want to
+  interact with it via a TUI" + "just me, locally" → "downloadable-tool". A client portal, a dashboard
+  multiple people log into, or anything mentioning "customers"/"clients"/"my team" accessing it remotely
+  → "hosted-app".
 - NEVER describe the app as "compliant" or "certified" with any standard.
 - INTENT (this drives how much rigor the build gets). Read how they describe the idea and answer one question: "Is this something they're building to RELY ON and keep improving — or a quick experiment they might not keep?"
     • sounds real / ongoing / for actual use → realUsers=true AND maintained=true

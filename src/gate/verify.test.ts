@@ -262,6 +262,41 @@ describe("detectLaunch", () => {
   });
 });
 
+describe("detectLaunch — deployTarget: downloadable-tool (a CLI/script, not a server)", () => {
+  test("a node entry + persisted deployTarget downloadable-tool → cli kind, not node", async () => {
+    const dir = await scratch({
+      "cli.js": "console.log('hi')",
+      "package.json": '{"main":"cli.js"}',
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
+    });
+    expect(detectLaunch(dir)).toEqual({ kind: "cli", entry: "cli.js" });
+  });
+
+  test("a node entry + persisted deployTarget hosted-app → still node kind (unchanged)", async () => {
+    const dir = await scratch({
+      "server.js": "require('http')",
+      "package.json": '{"main":"server.js"}',
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "hosted-app" }),
+    });
+    expect(detectLaunch(dir)).toEqual({ kind: "node", entry: "server.js" });
+  });
+
+  test("a node entry with no persisted spec at all → node kind (missing deployTarget stays the strict default)", async () => {
+    const dir = await scratch({ "server.js": "require('http')", "package.json": "{}" });
+    expect(detectLaunch(dir)).toEqual({ kind: "node", entry: "server.js" });
+  });
+
+  test("a Dockerfile still wins over deployTarget: downloadable-tool (container check is first + unconditional)", async () => {
+    const dir = await scratch({
+      Dockerfile: "FROM node:20",
+      "cli.js": "x",
+      "package.json": '{"main":"cli.js"}',
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
+    });
+    expect(detectLaunch(dir)).toEqual({ kind: "container" });
+  });
+});
+
 describe("dockerTag (pure)", () => {
   test("a deterministic, docker-safe tag from the dir name", () => {
     expect(dockerTag("/tmp/My App!")).toBe("vibehard-verify-my-app");

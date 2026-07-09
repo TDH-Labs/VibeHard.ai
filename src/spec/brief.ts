@@ -59,6 +59,20 @@ export function buildGenerationBrief(spec: Spec): string {
     out.push("");
   }
 
+  if (spec.deployTarget === "downloadable-tool") {
+    out.push(
+      "DEPLOY TARGET: downloadable-tool — this is NOT a hosted web app. It runs on the user's own",
+      "machine, invoked from a terminal; nobody reaches it over a URL. The build MUST satisfy every one:",
+      "- Do NOT scaffold a web framework — no Next.js, Express, Fastify, or any other HTTP server.",
+      "- Do NOT create a `Dockerfile` meant for a deployed service.",
+      "- Build a runnable CLI/script entry point instead: a `package.json` with a `bin` field, or a",
+      "  plain `main` script that runs to completion and exits — or, for Python, a `main.py` / script",
+      "  invoked directly.",
+      "- The app must be runnable via a single command with no network server involved.",
+      "",
+    );
+  }
+
   const reqs = securityRequirements(spec);
   if (reqs.length) {
     out.push("SECURITY REQUIREMENTS — these are checked by automated gates; the build MUST satisfy every one:");

@@ -19,7 +19,10 @@ WORKDIR /app
 # Node.js (bundles npm + npx) — NodeSource's setup script for a modern LTS on Debian; the base
 # image's own OS release (Debian 13 "trixie", confirmed via `fly ssh console`) has no nodejs
 # package current enough for what generated apps (Next.js 14/15) expect.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 python3-pip python3-setuptools \
+# zip — the base image ships `tar` (used above) but not `zip`; /api/export (web/server.ts) shells
+# out to it to produce the downloadable-tool export archive, matching the codebase's existing
+# preference for a native binary over an npm archiving dependency.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg python3 python3-pip python3-setuptools zip \
   && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && apt-get clean && rm -rf /var/lib/apt/lists/*

@@ -11,6 +11,7 @@ function spec(over: Partial<Spec> = {}): Spec {
     features: ["sign in", "create note"],
     users: "",
     tenancy: "multi-tenant",
+    deployTarget: "hosted-app",
     auth: "email-password",
     storesData: true,
     dataEntities: [{ name: "notes", fields: ["id"], sensitive: true }],

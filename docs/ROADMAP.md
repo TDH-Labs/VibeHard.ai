@@ -179,7 +179,17 @@ the other machine.
 
 ---
 
-## Tenant workspace storage isn't durable or machine-consistent (found via dogfooding, 2026-07-08)
+## Tenant workspace storage isn't durable or machine-consistent (found via dogfooding, 2026-07-08) — ACUTE PART FIXED 2026-07-09
+
+**Update 2026-07-09.** This wasn't just a risk — it materialized: a routine deploy wiped an
+in-progress dogfooding build the same night this was written (ephemeral local disk, no
+volume, no shared storage). Fixed the acute failure mode immediately: a durable Fly Volume
+mounted at `/root/.vibehard`, single machine (`fly.toml`, commit `b8ec05e`). Verified live —
+a file written to the volume survived a full machine restart. This closes "wiped on deploy"
+and the split-brain (single machine now = single source of truth) for as long as the
+platform runs on one machine. It does NOT close the underlying architecture gap below —
+re-open this before scaling past one machine.
+
 
 **The bug.** `fly.toml` has no `[mounts]` — each Fly machine has its own local disk, and
 Fly round-robins requests across the fleet. A tenant's build directory

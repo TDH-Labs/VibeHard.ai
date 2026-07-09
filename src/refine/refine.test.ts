@@ -11,6 +11,7 @@ const BASE: Spec = {
   features: ["a", "b"],
   users: "people",
   tenancy: "single-tenant",
+  deployTarget: "hosted-app",
   auth: "email-password",
   storesData: true,
   dataEntities: [],

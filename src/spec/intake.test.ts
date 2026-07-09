@@ -9,6 +9,7 @@ const readySpec: Spec = {
   features: ["convert length"],
   users: "anyone",
   tenancy: "single-user",
+  deployTarget: "hosted-app",
   auth: "none",
   storesData: false,
   dataEntities: [],

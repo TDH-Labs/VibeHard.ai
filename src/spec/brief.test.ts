@@ -9,6 +9,7 @@ function spec(over: Partial<Spec> = {}): Spec {
     features: ["do a thing"],
     users: "people",
     tenancy: "multi-tenant",
+    deployTarget: "hosted-app",
     auth: "email-password",
     storesData: true,
     dataEntities: [{ name: "records", fields: ["id", "user_id"], sensitive: true }],
@@ -67,5 +68,20 @@ describe("buildGenerationBrief", () => {
   test("a trivial app omits the security section entirely", () => {
     const brief = buildGenerationBrief(spec({ auth: "none", storesData: false, dataEntities: [], sensitiveData: ["none"], tenancy: "single-user" }));
     expect(brief).not.toContain("SECURITY REQUIREMENTS");
+  });
+
+  test("hosted-app (default) has no downloadable-tool instructions", () => {
+    const brief = buildGenerationBrief(spec({ deployTarget: "hosted-app" }));
+    expect(brief).not.toContain("DEPLOY TARGET: downloadable-tool");
+  });
+
+  test("downloadable-tool tells the generator NOT to scaffold a web framework or Dockerfile, and to build a CLI entry point", () => {
+    const brief = buildGenerationBrief(spec({ deployTarget: "downloadable-tool" }));
+    expect(brief).toContain("DEPLOY TARGET: downloadable-tool");
+    expect(brief).toMatch(/Do NOT scaffold a web framework/);
+    expect(brief).toMatch(/no Next\.js, Express, Fastify/);
+    expect(brief).toMatch(/Do NOT create a `Dockerfile`/);
+    expect(brief).toMatch(/`bin` field/);
+    expect(brief).toMatch(/single command with no network server/);
   });
 });

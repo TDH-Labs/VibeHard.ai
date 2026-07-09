@@ -12,6 +12,7 @@ const spec = (over: Partial<Spec> = {}): Spec => ({
   features: ["take a payment", "send an email receipt"],
   users: "",
   tenancy: "multi-tenant",
+  deployTarget: "hosted-app",
   auth: "email-password",
   storesData: true,
   dataEntities: [],

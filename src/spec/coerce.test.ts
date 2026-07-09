@@ -22,6 +22,7 @@ describe("coerceSpec — the trust boundary (untrusted JSON → valid Spec)", ()
       features: ["add patient"],
       users: "staff",
       tenancy: "multi-tenant",
+      deployTarget: "downloadable-tool",
       auth: "email-password",
       storesData: true,
       dataEntities: [{ name: "patients", fields: ["id", "name"], sensitive: true }],
@@ -29,7 +30,7 @@ describe("coerceSpec — the trust boundary (untrusted JSON → valid Spec)", ()
       realUsers: true,
       maintained: true,
     });
-    expect(p).toMatchObject({ name: "clinic", tenancy: "multi-tenant", auth: "email-password", storesData: true });
+    expect(p).toMatchObject({ name: "clinic", tenancy: "multi-tenant", deployTarget: "downloadable-tool", auth: "email-password", storesData: true });
     expect(p.dataEntities[0]).toEqual({ name: "patients", fields: ["id", "name"], sensitive: true });
   });
 
@@ -38,6 +39,7 @@ describe("coerceSpec — the trust boundary (untrusted JSON → valid Spec)", ()
       const p = coerceSpec(junk);
       expect(p.name).toBe("untitled-app");
       expect(p.tenancy).toBe("single-user");
+      expect(p.deployTarget).toBe("hosted-app"); // missing → the stricter verify path (boot-and-health-check)
       expect(p.auth).toBe("none"); // omitted auth defaults to none → reviewSpec flags it for sensitive apps
       expect(p.features).toEqual([]);
       expect(p.sensitiveData).toEqual(["none"]);
@@ -45,10 +47,15 @@ describe("coerceSpec — the trust boundary (untrusted JSON → valid Spec)", ()
   });
 
   test("invalid enums are clamped; non-string array members dropped", () => {
-    const p = coerceSpec({ tenancy: "galaxy", sensitiveData: ["pii", "nonsense", 7], features: ["ok", 5, null] });
+    const p = coerceSpec({ tenancy: "galaxy", deployTarget: "on-prem-mainframe", sensitiveData: ["pii", "nonsense", 7], features: ["ok", 5, null] });
     expect(p.tenancy).toBe("single-user"); // unknown tenancy → conservative default
+    expect(p.deployTarget).toBe("hosted-app"); // unknown deployTarget → conservative (stricter) default
     expect(p.sensitiveData).toEqual(["pii"]); // bad members filtered
     expect(p.features).toEqual(["ok"]); // non-strings dropped
+  });
+
+  test("a well-formed downloadable-tool deployTarget is preserved", () => {
+    expect(coerceSpec({ deployTarget: "downloadable-tool" }).deployTarget).toBe("downloadable-tool");
   });
 
   test("malformed data entities are dropped (no name) and fields coerced", () => {

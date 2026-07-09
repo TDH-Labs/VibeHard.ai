@@ -312,6 +312,13 @@ async function renderCredentials(app,el){
   el.appendChild(wrap);
   wrap.querySelectorAll(".creds-save").forEach(b=>b.onclick=async()=>{const k=b.getAttribute("data-k");const inp=wrap.querySelector('input[data-k="'+k+'"]');const v=((inp&&inp.value)||"").trim();if(!v)return;b.disabled=true;b.textContent="…";const {status}=await api("/api/integrations",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key:k,value:v})});if(status>=400){b.disabled=false;b.textContent="Save";return}await renderCredentials(app,el)});
 }
+function renderDownload(app,el){
+  // deployTarget: "downloadable-tool" — there's no hosted URL, so the gate-approved code itself
+  // IS the deliverable. Replaces the "Shipped — safe to go live" message with a download link
+  // hitting /api/export (which re-checks the gate sentinel server-side before streaming the zip).
+  if(!el||!app)return;
+  el.innerHTML='<h3>✓ Gates passed — ready to download.</h3><span class="muted">This is a local tool, not a hosted app — download the code and run it on your own machine.</span><div style="margin-top:12px"><a class="btn" href="/api/export?app='+encodeURIComponent(app)+'">⬇ Download source (.zip)</a></div>';
+}
 async function renderHeld(app,el){
   if(!el)return;
   const ex=el.querySelector?el.querySelector(".held-findings"):null;if(ex){ex.remove();return}
@@ -424,7 +431,7 @@ function startBuild(prompt,resumeApp,mode){
       else{res.className="result held";res.innerHTML='<h3>The build hit an error.</h3><span class="muted">Open the live log to see what happened.</span>';notify("Build error","Open the build to see what happened.")}
     }
     res.style.display="block";
-    load(true).then(()=>{const b=me.builds&&me.builds[0];if(!b)return;if(r==="blocked")renderHeld(b.app,res);if(r==="live"||r==="blocked"||r==="deploy-failed"){renderFunctest(b.app,res);renderCredentials(b.app,res);}if(r==="live"){const pb=document.createElement("button");pb.textContent="✨ Polish the look";pb.className="ghost";pb.style.marginTop="12px";pb.onclick=()=>startBuild(null,b.app,"polish");res.appendChild(pb);}});
+    load(true).then(()=>{const b=me.builds&&me.builds[0];if(!b)return;if(r==="blocked")renderHeld(b.app,res);if(r==="live"||r==="blocked"||r==="deploy-failed"){renderFunctest(b.app,res);renderCredentials(b.app,res);}if(r==="live"&&b.deployTarget==="downloadable-tool"){renderDownload(b.app,res);return}if(r==="live"){const pb=document.createElement("button");pb.textContent="✨ Polish the look";pb.className="ghost";pb.style.marginTop="12px";pb.onclick=()=>startBuild(null,b.app,"polish");res.appendChild(pb);}});
   });
 }
 const MAX_Q=7;

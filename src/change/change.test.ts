@@ -26,7 +26,7 @@ function dir(): string {
 function spec(): Spec {
   return {
     name: "paw", summary: "dog grooming waitlist", features: ["join the waitlist", "owner sign-in"],
-    users: "groomers", tenancy: "multi-tenant", auth: "email-password", storesData: true,
+    users: "groomers", tenancy: "multi-tenant", deployTarget: "hosted-app", auth: "email-password", storesData: true,
     dataEntities: [{ name: "waitlist", fields: ["id"], sensitive: true }], sensitiveData: ["pii"], realUsers: true, maintained: true,
   };
 }

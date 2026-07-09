@@ -7,10 +7,11 @@
  * unknown tenancy → "single-user"), so a malformed or adversarial draft can never
  * produce an invalid spec that the readiness check then mis-judges. Pure.
  */
-import type { DataEntity, Spec, SensitiveClass, Tenancy } from "./spec.ts";
+import type { DataEntity, DeployTarget, Spec, SensitiveClass, Tenancy } from "./spec.ts";
 
 const TENANCIES: readonly Tenancy[] = ["single-user", "single-tenant", "multi-tenant"];
 const SENSITIVE: readonly SensitiveClass[] = ["none", "pii", "phi", "financial", "credentials"];
+const DEPLOY_TARGETS: readonly DeployTarget[] = ["hosted-app", "downloadable-tool"];
 
 const asStr = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 const asBool = (v: unknown, d = false): boolean => (typeof v === "boolean" ? v : d);
@@ -31,6 +32,9 @@ function coerceEntity(v: unknown): DataEntity | null {
 export function coerceSpec(raw: unknown): Spec {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const tenancy = TENANCIES.includes(o.tenancy as Tenancy) ? (o.tenancy as Tenancy) : "single-user";
+  // Unknown/missing → "hosted-app": the stricter verify path (boot-and-health-check is a
+  // strictly more demanding bar than a CLI run), so failing toward it is the safe direction.
+  const deployTarget = DEPLOY_TARGETS.includes(o.deployTarget as DeployTarget) ? (o.deployTarget as DeployTarget) : "hosted-app";
   const sensitiveData = (Array.isArray(o.sensitiveData) ? o.sensitiveData : []).filter(
     (x): x is SensitiveClass => SENSITIVE.includes(x as SensitiveClass),
   );
@@ -43,6 +47,7 @@ export function coerceSpec(raw: unknown): Spec {
     features: asStrArr(o.features),
     users: asStr(o.users),
     tenancy,
+    deployTarget,
     auth: asStr(o.auth, "none").trim() || "none",
     storesData: asBool(o.storesData, dataEntities.length > 0),
     dataEntities,

@@ -6,7 +6,7 @@ import type { Prd, Requirement } from "../prd/index.ts";
 import type { Architecture, Workstream } from "../architecture/index.ts";
 
 function spec(over: Partial<Spec> = {}): Spec {
-  return { name: "app", summary: "", features: ["sign in", "create note"], users: "", tenancy: "multi-tenant", auth: "email-password", storesData: true, dataEntities: [{ name: "notes", fields: ["id"], sensitive: true }], sensitiveData: ["pii"], realUsers: true, maintained: true, ...over };
+  return { name: "app", summary: "", features: ["sign in", "create note"], users: "", tenancy: "multi-tenant", deployTarget: "hosted-app", auth: "email-password", storesData: true, dataEntities: [{ name: "notes", fields: ["id"], sensitive: true }], sensitiveData: ["pii"], realUsers: true, maintained: true, ...over };
 }
 const req = (feature: string): Requirement => ({ id: feature, feature, detail: "d", acceptance: ["x"], priority: "MVP", scenarioRefs: [] });
 function prd(over: Partial<Prd> = {}): Prd {

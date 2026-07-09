@@ -5,7 +5,7 @@ import type { Spec } from "../spec/index.ts";
 import type { Prd } from "../prd/index.ts";
 
 function spec(): Spec {
-  return { name: "portal", summary: "", features: ["sign in"], users: "", tenancy: "multi-tenant", auth: "email-password", storesData: true, dataEntities: [{ name: "a", fields: ["id"], sensitive: true }], sensitiveData: ["pii"], realUsers: true, maintained: true };
+  return { name: "portal", summary: "", features: ["sign in"], users: "", tenancy: "multi-tenant", deployTarget: "hosted-app", auth: "email-password", storesData: true, dataEntities: [{ name: "a", fields: ["id"], sensitive: true }], sensitiveData: ["pii"], realUsers: true, maintained: true };
 }
 function prd(): Prd {
   const s = spec();

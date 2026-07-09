@@ -10,6 +10,7 @@ export {
   specVerdict,
   reviewSpec,
   type DataEntity,
+  type DeployTarget,
   type Spec,
   type Rigor,
   type SensitiveClass,
