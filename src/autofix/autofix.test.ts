@@ -167,6 +167,42 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /ceiling/.test(l))).toBe(true);
   });
 
+  test("2026-07-09: an exceeded wall-clock ceiling escalates the MAIN loop, even mid-progress", async () => {
+    // maxDurationMs: -1 means even zero elapsed time already exceeds it — deterministic, no
+    // real waiting, and immune to Date.now() millisecond-resolution ties (0 elapsed > 0 is
+    // false; 0 elapsed > -1 is always true). Uses a WINNING sequence (blocking set
+    // shrinking every round) that would NOT otherwise trip cycle/plateau/NTE detection, to
+    // prove the ceiling is a genuinely independent outer bound, not a restatement of those.
+    const cf = countingFixer();
+    const r = await autoFix("/ws", { gate: scriptedGate([blockN(3), blockN(2), blockN(1), PASS]), fixer: cf.fixer, budget: 10, maxDurationMs: -1, now: ts });
+    expect(r.fixed).toBe(false);
+    expect(r.attempts).toBe(0); // caught before the very first round ever ran
+    expect(cf.calls()).toBe(0);
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /wall-clock ceiling/.test(l))).toBe(true);
+  });
+
+  test("2026-07-09: an exceeded wall-clock ceiling also stops the no-human EXTENSION phase", async () => {
+    // The exact phase the live 2026-07-09 incident was sitting in when it went silent — it had
+    // no wall-clock check of its own before this fix. budget: 1 forces the main loop to exit
+    // into the extension phase after one round (BLOCK doesn't converge in 1 attempt); the
+    // extension's own ceiling check must then catch it, not run all `extraBudgetNoHuman` rounds.
+    const cf = countingFixer();
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([BLOCK]),
+      fixer: cf.fixer,
+      budget: 1,
+      humanAvailable: async () => false,
+      extraBudgetNoHuman: 5,
+      maxDurationMs: -1,
+      now: ts,
+    });
+    expect(r.fixed).toBe(false);
+    expect(r.escalation).not.toBeNull();
+    expect(r.log.some((l) => /wall-clock ceiling during extension/.test(l))).toBe(true);
+    expect(r.log.some((l) => /5 extra no-human attempt\(s\) also failed/.test(l))).toBe(false); // accurate: not all 5 ran
+  });
+
   test("the GATE disposes, not the fixer — a no-op fixer can't force green", async () => {
     const cf = countingFixer();
     const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: cf.fixer, budget: 2 });

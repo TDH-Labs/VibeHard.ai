@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { builtinModules } from "node:module";
 import type { Finding } from "../types.ts";
 import { safeToolEnv } from "../gate/verify.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 const BUILTINS = new Set<string>([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
 

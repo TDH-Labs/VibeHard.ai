@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 /** The exact gitleaks version the production image installs natively (Dockerfile) — see the
  *  same 2026-07-06 note in sast.ts (SEMGREP_VERSION): docker was never available on the
@@ -70,7 +71,7 @@ export async function runSecrets(
         `--config=${join(rulesDir, "gitleaks.toml")}`, // keep default rules; allowlist derived dirs (§11)
         "--report-format", "json", "--report-path", reportPath,
       ],
-      { cwd: absPath },
+      { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
     );
     exitCode = proc.exitCode ?? -1;
     stderr = proc.stderr?.toString() ?? "";

@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding } from "../types.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 /** Parse `pkg@installed: <title> (fixed in a, b, c)` from a trivy Finding message. */
 export function parseDepFinding(f: Finding): { pkg: string; installed: string; fixed: string[] } | null {
@@ -151,6 +152,7 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
     cwd: workspacePath,
     stdout: "ignore",
     stderr: "ignore",
+    timeout: SUBPROCESS_TIMEOUT_MS,
   });
   return { ...plan, installExit: install.exitCode ?? 1 };
 }

@@ -10,6 +10,7 @@
  */
 import { basename } from "node:path";
 import type { HostProvider } from "./types.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 export interface CommandResult {
   exitCode: number;
@@ -20,13 +21,23 @@ export interface CommandRunner {
   run(cmd: string[], opts: { cwd: string; env?: Record<string, string> }): Promise<CommandResult>;
 }
 
-/** Default runner over Bun.spawn (the only place real I/O happens). */
+/** Default runner over Bun.spawn (the only place real I/O happens). Bounded: unlike
+ *  Bun.spawnSync, the async Bun.spawn has no built-in timeout/signal option, so an
+ *  unbounded `vercel deploy` (real network I/O to Vercel's API) could hang the deploy step
+ *  forever with no crash trace — the same class of silent-hang risk found live 2026-07-09
+ *  in the gate scanners' subprocess calls (src/util/timeouts.ts). Kill it after
+ *  SUBPROCESS_TIMEOUT_MS if it hasn't exited. */
 export const bunRunner: CommandRunner = {
   run: async (cmd, opts) => {
     const proc = Bun.spawn(cmd, { cwd: opts.cwd, env: { ...process.env, ...(opts.env ?? {}) }, stdout: "pipe", stderr: "pipe" });
-    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-    const exitCode = await proc.exited;
-    return { exitCode, stdout, stderr };
+    const timer = setTimeout(() => proc.kill(), SUBPROCESS_TIMEOUT_MS);
+    try {
+      const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+      const exitCode = await proc.exited;
+      return { exitCode, stdout, stderr };
+    } finally {
+      clearTimeout(timer);
+    }
   },
 };
 

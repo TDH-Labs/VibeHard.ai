@@ -28,6 +28,7 @@ import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { coerceSpec, decideRigor, type DeployTarget, type Rigor } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 import { parseBuildErrors } from "./build-errors.ts";
 import type { HostProvider } from "../substrate/types.ts";
 import { FlyHostProvider } from "../substrate/fly.ts";
@@ -362,6 +363,7 @@ function ensureInstalled(projectPath: string, env: Record<string, string | undef
     env,
     stdout: "pipe",
     stderr: "pipe",
+    timeout: SUBPROCESS_TIMEOUT_MS,
   });
   if ((install.exitCode ?? 1) !== 0) {
     return {
@@ -376,7 +378,7 @@ function ensureInstalled(projectPath: string, env: Record<string, string | undef
 /** Install Python deps for a from-source app (pip). Returns a finding on failure, else null. */
 function ensurePythonInstalled(projectPath: string, env: Record<string, string | undefined>): Finding | null {
   if (!existsSync(join(projectPath, "requirements.txt"))) return null; // pyproject-only → assume the runtime provides them (v1)
-  const install = Bun.spawnSync(["pip", "install", "-r", "requirements.txt"], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe" });
+  const install = Bun.spawnSync(["pip", "install", "-r", "requirements.txt"], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
   if ((install.exitCode ?? 1) === 0) return null;
   const log = `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`.trim();
   return {
@@ -413,7 +415,7 @@ async function runBuild(projectPath: string, script: string): Promise<BuildOutco
   const env = safeToolEnv(projectPath);
   const installFail = ensureInstalled(projectPath, env);
   if (installFail) return installFail;
-  const build = Bun.spawnSync(["npm", "run", script], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe" });
+  const build = Bun.spawnSync(["npm", "run", script], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
   return {
     stage: "build",
     exitCode: build.exitCode ?? 1,
@@ -632,7 +634,7 @@ async function probeContainerOnce(tag: string, hostPort: number, env: Record<str
   const args = ["docker", "run", "-d", "--name", name, "-p", `${hostPort}:${CONTAINER_PORT}`, "-e", `PORT=${CONTAINER_PORT}`];
   for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   args.push(tag);
-  const run = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" });
+  const run = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
   if ((run.exitCode ?? 1) !== 0) {
     return { status: 0, log: `${run.stderr?.toString() ?? ""}`.trim(), cleanShutdown: true };
   }

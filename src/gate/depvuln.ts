@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 const LOCKFILES = ["package-lock.json", "bun.lockb", "bun.lock", "yarn.lock", "pnpm-lock.yaml"];
 
@@ -133,7 +134,7 @@ export async function runDepVuln(
   // the exact workspace that broke sast), so this is defense-in-depth, not an observed fix.
   const proc = Bun.spawnSync(
     ["trivy", "fs", "--quiet", "--format", "json", "--scanners", "vuln", "--cache-dir", TRIVY_CACHE_DIR, "."],
-    { cwd: absPath },
+    { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
   );
   const findings = [
     ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),

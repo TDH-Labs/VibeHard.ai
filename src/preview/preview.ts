@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { installStale, safeToolEnv } from "../gate/verify.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 export interface PkgLike {
   scripts?: Record<string, string>;
@@ -70,7 +71,7 @@ export async function runPreview(dir: string, opts: PreviewOptions = {}): Promis
   // 1) install if needed
   if (!existsSync(join(dir, "node_modules")) || installStale(dir)) {
     log("  ▸ installing dependencies…");
-    const inst = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: dir, stdout: "inherit", stderr: "inherit" });
+    const inst = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: dir, stdout: "inherit", stderr: "inherit", timeout: SUBPROCESS_TIMEOUT_MS });
     if (inst.exitCode !== 0) throw new Error("npm install failed");
   }
 
@@ -86,7 +87,7 @@ export async function runPreview(dir: string, opts: PreviewOptions = {}): Promis
     // the seed legitimately needs the service-role key to WRITE demo rows — pass that, but nothing else
     // beyond toolchain + public Supabase (no FLY/VERCEL/platform secrets).
     const seedEnv = { ...safeToolEnv(dir), ...supaPublic, SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY as string };
-    Bun.spawnSync(["bun", "scripts/seed.ts"], { cwd: dir, stdout: "inherit", stderr: "inherit", env: seedEnv });
+    Bun.spawnSync(["bun", "scripts/seed.ts"], { cwd: dir, stdout: "inherit", stderr: "inherit", env: seedEnv, timeout: SUBPROCESS_TIMEOUT_MS });
   }
 
   // 3) boot the dev server; watch its output for the URL it advertises. The app runs through RLS with

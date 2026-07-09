@@ -111,6 +111,17 @@ export interface AutoFixOptions {
   humanAvailable?: () => boolean | Promise<boolean>;
   /** Extra fix attempts when no human is available (default 5). */
   extraBudgetNoHuman?: number;
+  /** Wall-clock ceiling on the WHOLE loop, independent of the attempt count (default 45 min).
+   *  Every individual operation inside a round is itself bounded now (LLM calls: 240s +
+   *  retry, generateTextResilient; subprocess calls: SUBPROCESS_TIMEOUT_MS, src/util/
+   *  timeouts.ts) — but bounding every piece doesn't bound the WHOLE, and a slow-but-not-
+   *  hung cascade (many rounds, each legitimately taking minutes) could still run far longer
+   *  than reasonable. This is the outer safety net: if the loop is still going past this many
+   *  ms, it stops and escalates through the SAME held-for-review path a normal stuck build
+   *  already uses — self-healing by falling back to an existing, already-correct state,
+   *  not a new failure mode. Found live 2026-07-09: a real build went silent for ~7 hours
+   *  with zero forward progress and zero error. */
+  maxDurationMs?: number;
   now?: string;
   onStep?: (msg: string) => void;
 }
@@ -129,6 +140,10 @@ export interface AutoFixResult {
  *  exits earlier — converged, or escalated because it's stuck — so this only bites a slow-but-
  *  converging cascade, where the headroom is cheap insurance against clipping a fix still landing. */
 const DEFAULT_BUDGET = 10;
+
+/** Default outer wall-clock ceiling on the whole autoFix loop (see AutoFixOptions.maxDurationMs).
+ *  45 minutes is generous for a real multi-round build with heavy fix rounds, and still finite. */
+const DEFAULT_MAX_DURATION_MS = 45 * 60_000;
 
 /** The budget must SCALE with how many features the build owes: the completeness gate makes the
  *  loop build one missing feature per round, and each feature is ~1 build round + ~1 round to fix
@@ -176,6 +191,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   };
   const fixer: Fixer = opts.fixer ?? defaultFixer();
   const nte = opts.budget ?? defaultBudgetFor(workspacePath);
+  const maxDurationMs = opts.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
+  const startedAt = Date.now();
   const log: string[] = [];
   const note = (m: string): void => {
     log.push(m);
@@ -201,6 +218,15 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   let stopReason = `reached the ${nte}-attempt ceiling`;
 
   while (attempts < nte) {
+    // Outer wall-clock ceiling, independent of the attempt count — every operation inside a
+    // round is itself bounded now (LLM calls, subprocess calls), but bounding every piece
+    // doesn't bound the WHOLE loop; a slow-but-not-hung cascade could still run unreasonably
+    // long. Checked at the top of every round, same place the other stuck-detectors live.
+    if (Date.now() - startedAt > maxDurationMs) {
+      stopReason = `exceeded the ${Math.round(maxDurationMs / 60_000)}-minute wall-clock ceiling (${attempts} attempt(s) so far)`;
+      note(`${stopReason}; escalating`);
+      break;
+    }
     // Deterministic normalization before the gate ever looks: a hand-written or fabricated
     // base-image digest gets replaced with the real one here, so neither the gate nor the
     // deploy sandbox ever has to deal with a FROM line that can't resolve.
@@ -293,7 +319,17 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   const extra = opts.extraBudgetNoHuman ?? 5;
   if (extra > 0 && opts.humanAvailable && !(await opts.humanAvailable())) {
     note(`no human available — continuing up to ${extra} more attempt(s) to self-resolve`);
+    let ceilingHit = false;
     for (let i = 0; i < extra; i++) {
+      // Same outer ceiling as the main loop — this extension phase is exactly where the
+      // live 2026-07-09 incident was sitting when it went silent, and it had no wall-clock
+      // check of its own at all.
+      if (Date.now() - startedAt > maxDurationMs) {
+        ceilingHit = true;
+        stopReason = `exceeded the ${Math.round(maxDurationMs / 60_000)}-minute wall-clock ceiling during extension attempts (${attempts} attempt(s) so far)`;
+        note(`${stopReason}; stopping`);
+        break;
+      }
       attempts++;
       const extraBlocking = final.verdicts.flatMap((v) => v.findings).filter(isBlocking);
       const blocked = final.verdicts.filter((v) => v.status === "block").map((v) => `${v.gate}(${v.blocking})`).join(", ");
@@ -324,7 +360,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
         return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
       }
     }
-    if (!stopReason.includes("tampering")) stopReason = `${stopReason}; ${extra} extra no-human attempt(s) also failed`;
+    if (!ceilingHit && !stopReason.includes("tampering")) stopReason = `${stopReason}; ${extra} extra no-human attempt(s) also failed`;
   }
 
   note(`escalating residual findings — ${stopReason}`);

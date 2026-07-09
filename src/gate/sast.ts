@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { DERIVED_DIRS, hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 /** The exact semgrep version the production image installs natively (Dockerfile) — this
  *  constant is documentation, not an invocation parameter; there is no container to pin it
@@ -79,7 +80,7 @@ export async function runSast(
   // the ambient .vibehard ancestor never appears, so it can't be (mis)matched.
   const proc = Bun.spawnSync(
     ["semgrep", "scan", "--quiet", "--json", "--config", join(rulesDir, "sqli.yaml"), "--config", "p/default", ...excludes, "."],
-    { cwd: absPath },
+    { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
   );
   const findings = interpretSemgrep(
     proc.stdout?.toString() ?? "",
