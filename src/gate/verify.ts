@@ -29,6 +29,7 @@ import { verdictOf } from "../types.ts";
 import { coerceSpec, decideRigor, type DeployTarget, type Rigor } from "../spec/index.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
+import { withHostLock } from "../util/host-lock.ts";
 import { parseBuildErrors } from "./build-errors.ts";
 import type { HostProvider } from "../substrate/types.ts";
 import { FlyHostProvider } from "../substrate/fly.ts";
@@ -349,22 +350,37 @@ export function installStale(projectPath: string): boolean {
   }
 }
 
+/** `withHostLock`'s note callback, wired everywhere in this file: a lock wait/timeout is
+ *  operational telemetry, not a code defect — it goes to the (tee'd) console, never into the
+ *  Finding stream, so it can't pollute severity aggregation or need a translate/dictionary entry. */
+function hostLockNote(m: string): void {
+  console.error(`[verify] ${m}`);
+}
+
 /** Install deps when they are declared but not installed — or no longer match
  *  package.json. A freshly GENERATED app has source but no installed deps, and the
  *  auto-fix loop ADDS deps to package.json between gate runs; both cases need a
  *  (re)install or you can neither build nor launch (a node app dies "Cannot find
  *  module" / a build fails "Module not found"). Both verify paths need this. Returns
- *  null on success/nothing-to-do, or an install BuildOutcome on failure. */
-function ensureInstalled(projectPath: string, env: Record<string, string | undefined>): BuildOutcome | null {
+ *  null on success/nothing-to-do, or an install BuildOutcome on failure.
+ *
+ *  Wrapped in the cross-process host lock (EPIC #32): this and the gate scanners are the
+ *  heaviest host-side operations, and were the two things that actually starved each other
+ *  when two builds ran concurrently on one machine (found live, 2026-07-09). */
+async function ensureInstalled(projectPath: string, env: Record<string, string | undefined>): Promise<BuildOutcome | null> {
   const pkg = readPkg(projectPath);
   if (!pkg || !hasDeps(pkg) || !installStale(projectPath)) return null;
-  const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
-    cwd: projectPath,
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: SUBPROCESS_TIMEOUT_MS,
-  });
+  const install = await withHostLock(
+    () =>
+      Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
+        cwd: projectPath,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+      }),
+    { note: hostLockNote },
+  );
   if ((install.exitCode ?? 1) !== 0) {
     return {
       stage: "install",
@@ -376,9 +392,12 @@ function ensureInstalled(projectPath: string, env: Record<string, string | undef
 }
 
 /** Install Python deps for a from-source app (pip). Returns a finding on failure, else null. */
-function ensurePythonInstalled(projectPath: string, env: Record<string, string | undefined>): Finding | null {
+async function ensurePythonInstalled(projectPath: string, env: Record<string, string | undefined>): Promise<Finding | null> {
   if (!existsSync(join(projectPath, "requirements.txt"))) return null; // pyproject-only → assume the runtime provides them (v1)
-  const install = Bun.spawnSync(["pip", "install", "-r", "requirements.txt"], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
+  const install = await withHostLock(
+    () => Bun.spawnSync(["pip", "install", "-r", "requirements.txt"], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS }),
+    { note: hostLockNote },
+  );
   if ((install.exitCode ?? 1) === 0) return null;
   const log = `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`.trim();
   return {
@@ -413,9 +432,9 @@ export function safeToolEnv(projectPath: string): Record<string, string> {
  *  is injected so a build-time env read doesn't fail. */
 async function runBuild(projectPath: string, script: string): Promise<BuildOutcome> {
   const env = safeToolEnv(projectPath);
-  const installFail = ensureInstalled(projectPath, env);
+  const installFail = await ensureInstalled(projectPath, env);
   if (installFail) return installFail;
-  const build = Bun.spawnSync(["npm", "run", script], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
+  const build = await withHostLock(() => Bun.spawnSync(["npm", "run", script], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS }), { note: hostLockNote });
   return {
     stage: "build",
     exitCode: build.exitCode ?? 1,
@@ -522,24 +541,32 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
       // skip derived dirs by basename → a fresh tree, like a clean checkout
       filter: (src) => !COPY_EXCLUDE.has(src.split("/").pop() ?? ""),
     });
-    const cmd = existsSync(join(tmp, "package-lock.json"))
-      ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"]
-      : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"];
-    const install = Bun.spawnSync(cmd, { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
-    if ((install.exitCode ?? 1) !== 0) {
-      return [cleanFinding("install", `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`)];
-    }
-    if (pkg.scripts?.build) {
-      const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
-      if ((build.exitCode ?? 1) !== 0) {
-        const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`;
-        // localize against projectPath (the source the fixer edits) — the same relative
-        // files exist in the clean copy, so the resolved paths are valid for both.
-        const localized = parseBuildErrors(log, projectPath, "clean-verify-failed");
-        return localized.length ? localized : [cleanFinding("build", log)];
-      }
-    }
-    return [];
+    // Both spawns share ONE lock acquisition (EPIC #32) — this is a from-scratch install +
+    // build, the single heaviest operation in the whole gate chain; re-acquiring between the
+    // two steps would just let another process's heavy work wedge itself in the middle.
+    return await withHostLock(
+      () => {
+        const cmd = existsSync(join(tmp, "package-lock.json"))
+          ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"]
+          : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"];
+        const install = Bun.spawnSync(cmd, { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+        if ((install.exitCode ?? 1) !== 0) {
+          return [cleanFinding("install", `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`)];
+        }
+        if (pkg.scripts?.build) {
+          const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+          if ((build.exitCode ?? 1) !== 0) {
+            const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`;
+            // localize against projectPath (the source the fixer edits) — the same relative
+            // files exist in the clean copy, so the resolved paths are valid for both.
+            const localized = parseBuildErrors(log, projectPath, "clean-verify-failed");
+            return localized.length ? localized : [cleanFinding("build", log)];
+          }
+        }
+        return [];
+      },
+      { note: hostLockNote },
+    );
   } catch (e) {
     return [cleanFinding("copy", String(e))];
   } finally {
@@ -551,6 +578,23 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
   }
 }
 
+/** Pure: a `cli` launch kind's run outcome → Finding[]. Shared by the local (Bun.spawnSync) and
+ *  sandboxed (Fly exec, EPIC #32) paths so both produce the IDENTICAL finding shape — the fixer
+ *  and any UI keyed on ruleId shouldn't have to know which path actually ran the command. */
+function cliRunFinding(entry: string, exitCode: number, log: string): Finding[] {
+  if (exitCode === 0) return [];
+  const trimmed = log.trim();
+  return [
+    {
+      tool: "verify",
+      ruleId: "cli-run-failed",
+      severity: "high",
+      file: entry,
+      message: `\`node ${entry}\` exited ${exitCode} — the CLI tool did not run cleanly${trimmed ? ` — error: ${trimmed.slice(-600)}` : ""}`,
+    },
+  ];
+}
+
 /** Run a downloadable-tool's entry point ONCE, to completion — no port probe. This is the inverse
  *  of the server paths above: there, the process staying up (serving) is success; here, a CLI/script
  *  RUNNING TO COMPLETION and exiting 0 is success — the process exiting is the expected outcome, not
@@ -559,19 +603,10 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
  *  probe like PROBE_ATTEMPTS × PROBE_INTERVAL_MS). `env` carries the same dummy/safe env every other
  *  path uses (safeToolEnv) — never the host's real secrets. */
 async function runCliOnce(projectPath: string, entry: string, env: Record<string, string | undefined>): Promise<Finding[]> {
-  const run = Bun.spawnSync(["node", entry], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+  const run = await withHostLock(() => Bun.spawnSync(["node", entry], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS }), { note: hostLockNote });
   const exitCode = run.exitCode ?? 1;
-  if (exitCode === 0) return [];
-  const log = `${run.stdout?.toString() ?? ""}${run.stderr?.toString() ?? ""}`.trim();
-  return [
-    {
-      tool: "verify",
-      ruleId: "cli-run-failed",
-      severity: "high",
-      file: entry,
-      message: `\`node ${entry}\` exited ${exitCode} — the CLI tool did not run cleanly${log ? ` — error: ${log.slice(-600)}` : ""}`,
-    },
-  ];
+  const log = `${run.stdout?.toString() ?? ""}${run.stderr?.toString() ?? ""}`;
+  return cliRunFinding(entry, exitCode, log);
 }
 
 function cleanFinding(stage: "copy" | "install" | "build", log: string): Finding {
@@ -612,9 +647,11 @@ export function dockerTag(projectPath: string): string {
   return `vibehard-verify-${base}`;
 }
 
-/** Build the app's Docker image (the deploy artifact). Returns a finding on failure, else null. */
-function buildContainerImage(projectPath: string, tag: string): Finding | null {
-  const build = Bun.spawnSync(["docker", "build", "-t", tag, "."], { cwd: projectPath, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+/** Build the app's Docker image (the deploy artifact). Returns a finding on failure, else null.
+ *  Only reached when no Fly sandbox host is configured (see `resolveSandboxHost`) — the local
+ *  fallback, so a docker build competing for host CPU is exactly the EPIC #32 lock's job. */
+async function buildContainerImage(projectPath: string, tag: string): Promise<Finding | null> {
+  const build = await withHostLock(() => Bun.spawnSync(["docker", "build", "-t", tag, "."], { cwd: projectPath, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS }), { note: hostLockNote });
   if ((build.exitCode ?? 1) === 0) return null;
   const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`.trim();
   return {
@@ -773,7 +810,7 @@ export async function runVerify(
       return verdictOf("verify", findings, ranAt);
     }
     const tag = dockerTag(projectPath);
-    const buildFinding = buildContainerImage(projectPath, tag);
+    const buildFinding = await buildContainerImage(projectPath, tag);
     if (buildFinding) {
       findings.push(buildFinding);
       return verdictOf("verify", findings, ranAt);
@@ -819,7 +856,18 @@ export async function runVerify(
   // exit code — exiting 0 IS success here (unlike the node path below, where the process exiting
   // means it crashed before ever coming up).
   if (plan.kind === "cli") {
-    const installFail = ensureInstalled(projectPath, env);
+    // EPIC #32: same "prefer an isolated Fly machine over the host" preference as the
+    // container/build paths above — installing deps + running a downloadable tool's own entry
+    // point is untrusted, generated-code execution too. Until now this was the one launch kind
+    // with no sandbox wiring at all, regardless of whether a Fly host was configured.
+    const flyHost = resolveSandboxHost(deps.flyHost);
+    if (flyHost) {
+      const dockerfile = synthVerifyDockerfile(null);
+      const result = await runInFlyExecSandbox(projectPath, dockerfile, ["node", plan.entry], deps.flyExec);
+      findings.push(...cliRunFinding(plan.entry, result.exitCode, result.log));
+      return verdictOf("verify", findings, ranAt);
+    }
+    const installFail = await ensureInstalled(projectPath, env);
     if (installFail) {
       findings.push(...summarizeBuild(installFail));
       return verdictOf("verify", findings, ranAt);
@@ -852,13 +900,13 @@ export async function runVerify(
 
   // A launched app (node or python) can't run without its deps; a fresh generation has none yet.
   if (plan.kind === "python") {
-    const f = ensurePythonInstalled(projectPath, env);
+    const f = await ensurePythonInstalled(projectPath, env);
     if (f) {
       findings.push(f);
       return verdictOf("verify", findings, ranAt);
     }
   } else {
-    const installFail = ensureInstalled(projectPath, env);
+    const installFail = await ensureInstalled(projectPath, env);
     if (installFail) {
       findings.push(...summarizeBuild(installFail));
       return verdictOf("verify", findings, ranAt);

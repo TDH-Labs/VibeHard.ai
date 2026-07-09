@@ -149,11 +149,11 @@ describe("CLASS: internal module imported but never generated (the blind spot)",
 integration("CLASS: undeclared dependency — deterministic install (live)", () => {
   test(
     "applyMissingDeps adds 'stripe' to a copy of the fixture",
-    () => {
+    async () => {
       const tmp = mkdtempSync(join(tmpdir(), "vibehard-harness-"));
       try {
         cpSync(join(APPS, "undeclared-dep"), tmp, { recursive: true });
-        const res = applyMissingDeps(tmp, ["stripe"]);
+        const res = await applyMissingDeps(tmp, ["stripe"]);
         expect(res.installed).toContain("stripe");
         const pkg = JSON.parse(readFileSync(join(tmp, "package.json"), "utf8"));
         expect(pkg.dependencies.stripe).toBeDefined();

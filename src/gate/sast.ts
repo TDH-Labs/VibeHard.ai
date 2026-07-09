@@ -8,6 +8,7 @@ import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { DERIVED_DIRS, hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
+import { withHostLock } from "../util/host-lock.ts";
 
 /** The exact semgrep version the production image installs natively (Dockerfile) — this
  *  constant is documentation, not an invocation parameter; there is no container to pin it
@@ -78,9 +79,16 @@ export async function runSast(
   // target — "SAST scanned 0 files", failing closed, blocking the build on nothing. Scanning
   // "." from cwd=absPath means every candidate path semgrep sees starts INSIDE the workspace;
   // the ambient .vibehard ancestor never appears, so it can't be (mis)matched.
-  const proc = Bun.spawnSync(
-    ["semgrep", "scan", "--quiet", "--json", "--config", join(rulesDir, "sqli.yaml"), "--config", "p/default", ...excludes, "."],
-    { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
+  // EPIC #32: semgrep is the heaviest host-side scanner (a real CPU/memory-bound ruleset
+  // eval, not a quick grep) — found live 2026-07-09, it's exactly what failed to even start
+  // ("SAST scan did not run (exit -1)") when two builds' scans ran concurrently on one host.
+  const proc = await withHostLock(
+    () =>
+      Bun.spawnSync(
+        ["semgrep", "scan", "--quiet", "--json", "--config", join(rulesDir, "sqli.yaml"), "--config", "p/default", ...excludes, "."],
+        { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
+      ),
+    { note: (m) => console.error(`[sast] ${m}`) },
   );
   const findings = interpretSemgrep(
     proc.stdout?.toString() ?? "",

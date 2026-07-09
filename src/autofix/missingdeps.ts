@@ -22,6 +22,7 @@ import { builtinModules } from "node:module";
 import type { Finding } from "../types.ts";
 import { safeToolEnv } from "../gate/verify.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
+import { withHostLock } from "../util/host-lock.ts";
 
 const BUILTINS = new Set<string>([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
 
@@ -72,24 +73,32 @@ export interface MissingDepsResult {
 /**
  * Install each missing package, one at a time so one bogus name can't abort the rest.
  * `npm install pkg` adds it to package.json and regenerates the lockfile in sync.
+ *
+ * EPIC #32: each install shares the host lock with every other heavy subprocess (npm/pip
+ * installs, security scanners) — installing N missing packages one-by-one already serializes
+ * itself within this call; the lock's job is coordinating with OTHER, separate build processes.
  */
-export function applyMissingDeps(workspacePath: string, packages: string[]): MissingDepsResult {
+export async function applyMissingDeps(workspacePath: string, packages: string[]): Promise<MissingDepsResult> {
   const installed: string[] = [];
   const failed: string[] = [];
   if (!existsSync(join(workspacePath, "package.json"))) return { installed, failed: packages };
   for (const pkg of packages) {
     // --ignore-scripts (audit2 B-3): installing a missing/typosquatted dep must NOT run its
     // postinstall on the build host (which carries the operator's env). Resolve + place only.
-    const r = Bun.spawnSync(["npm", "install", pkg, "--no-audit", "--no-fund", "--save", "--ignore-scripts"], {
-      cwd: workspacePath,
-      // audit3 M-1: scope the env — without this, npm inherits the FULL host process.env (FLY_API_TOKEN,
-      // VIBEHARD_SECRETS_KEY, …) right inside the live build pipeline. safeToolEnv passes only toolchain
-      // vars + the app's dummy keys (the same isolation the verify gate uses).
-      env: safeToolEnv(workspacePath),
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 120_000,
-    });
+    const r = await withHostLock(
+      () =>
+        Bun.spawnSync(["npm", "install", pkg, "--no-audit", "--no-fund", "--save", "--ignore-scripts"], {
+          cwd: workspacePath,
+          // audit3 M-1: scope the env — without this, npm inherits the FULL host process.env (FLY_API_TOKEN,
+          // VIBEHARD_SECRETS_KEY, …) right inside the live build pipeline. safeToolEnv passes only toolchain
+          // vars + the app's dummy keys (the same isolation the verify gate uses).
+          env: safeToolEnv(workspacePath),
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout: 120_000,
+        }),
+      { note: (m) => console.error(`[missingdeps] ${m}`) },
+    );
     if ((r.exitCode ?? 1) === 0) installed.push(pkg);
     else failed.push(pkg);
   }

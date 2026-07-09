@@ -536,6 +536,43 @@ describe("runVerify — build kind, EPIC #32 sandboxed exec path", () => {
   });
 });
 
+describe("runVerify — cli kind (downloadable-tool), EPIC #32 sandboxed exec path (2026-07-09)", () => {
+  // Until now the `cli` launch kind (deployTarget: downloadable-tool) had NO sandbox wiring at
+  // all, regardless of whether a Fly host was configured — the one launch kind that always ran
+  // untrusted install+run directly on the platform host. This closes that gap.
+  test("a Fly host configured → runs `node <entry>` in the exec sandbox, never touches host npm", async () => {
+    const d = await scratch({
+      "package.json": JSON.stringify({ main: "src/index.js", dependencies: { commander: "^12" } }),
+      "src/index.js": "console.log('ok')",
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
+    });
+    const { runner, calls } = fakeExecRunner({ exitCode: 0, stdout: "ok\n" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
+    });
+    expect(v.findings).toEqual([]); // pass, no findings
+    expect(calls.some((c) => c[1] === "machine" && c[2] === "run" && c.includes("node") && c.includes("src/index.js"))).toBe(true);
+    expect(existsSync(join(d, "node_modules"))).toBe(false); // never fell through to a local install
+  });
+
+  test("the sandboxed run fails → a cli-run-failed finding, the SAME shape the local path produces", async () => {
+    const d = await scratch({
+      "package.json": JSON.stringify({ main: "src/index.js" }),
+      "src/index.js": "process.exit(1)",
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
+    });
+    const { runner } = fakeExecRunner({ exitCode: 1, stderr: "boom\n" });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
+    });
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]?.ruleId).toBe("cli-run-failed");
+    expect(v.findings[0]?.message).toContain("boom");
+  });
+});
+
 describe("runVerify — node kind, EPIC #32 sandboxed deploy path", () => {
   test("a Fly host configured → deploys+probes the sandbox, and the synthesized Dockerfile never lingers", async () => {
     const d = await scratch({ "server.js": "require('http').createServer((_,r)=>r.end('ok')).listen(process.env.PORT)" });

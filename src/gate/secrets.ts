@@ -10,6 +10,7 @@ import type { Finding, GateVerdict } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
+import { withHostLock } from "../util/host-lock.ts";
 
 /** The exact gitleaks version the production image installs natively (Dockerfile) — see the
  *  same 2026-07-06 note in sast.ts (SEMGREP_VERSION): docker was never available on the
@@ -65,13 +66,19 @@ export async function runSecrets(
     // gitleaks's allowlist regex empirically matches relative to --source already (verified:
     // secrets passed on the exact workspace that broke sast), so this is defense-in-depth to
     // keep the two gates' invocation shape identical, not a fix for an observed failure here.
-    const proc = Bun.spawnSync(
-      [
-        "gitleaks", "detect", "--source=.", "--no-git",
-        `--config=${join(rulesDir, "gitleaks.toml")}`, // keep default rules; allowlist derived dirs (§11)
-        "--report-format", "json", "--report-path", reportPath,
-      ],
-      { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
+    // EPIC #32: same host-lock discipline as sast.ts — gitleaks is a real filesystem walk +
+    // regex scan, heavy enough to contend for CPU when another build's scan runs concurrently.
+    const proc = await withHostLock(
+      () =>
+        Bun.spawnSync(
+          [
+            "gitleaks", "detect", "--source=.", "--no-git",
+            `--config=${join(rulesDir, "gitleaks.toml")}`, // keep default rules; allowlist derived dirs (§11)
+            "--report-format", "json", "--report-path", reportPath,
+          ],
+          { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
+        ),
+      { note: (m) => console.error(`[secrets] ${m}`) },
     );
     exitCode = proc.exitCode ?? -1;
     stderr = proc.stderr?.toString() ?? "";

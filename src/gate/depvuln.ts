@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import type { Finding, GateVerdict, Severity } from "../types.ts";
 import { verdictOf } from "../types.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
+import { withHostLock } from "../util/host-lock.ts";
 
 const LOCKFILES = ["package-lock.json", "bun.lockb", "bun.lock", "yarn.lock", "pnpm-lock.yaml"];
 
@@ -132,9 +133,15 @@ export async function runDepVuln(
   // workspace lives under a .vibehard-named ancestor (the platform's own state root); trivy's
   // own Target reporting is already relative to the given target (verified: depvuln passed on
   // the exact workspace that broke sast), so this is defense-in-depth, not an observed fix.
-  const proc = Bun.spawnSync(
-    ["trivy", "fs", "--quiet", "--format", "json", "--scanners", "vuln", "--cache-dir", TRIVY_CACHE_DIR, "."],
-    { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
+  // EPIC #32: same host-lock discipline as sast.ts/secrets.ts — trivy's CVE-database walk is
+  // heavy enough to contend for CPU/memory when another build's scan runs concurrently.
+  const proc = await withHostLock(
+    () =>
+      Bun.spawnSync(
+        ["trivy", "fs", "--quiet", "--format", "json", "--scanners", "vuln", "--cache-dir", TRIVY_CACHE_DIR, "."],
+        { cwd: absPath, timeout: SUBPROCESS_TIMEOUT_MS },
+      ),
+    { note: (m) => console.error(`[depvuln] ${m}`) },
   );
   const findings = [
     ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),

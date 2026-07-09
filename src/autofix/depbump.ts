@@ -13,6 +13,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding } from "../types.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
+import { withHostLock } from "../util/host-lock.ts";
 
 /** Parse `pkg@installed: <title> (fixed in a, b, c)` from a trivy Finding message. */
 export function parseDepFinding(f: Finding): { pkg: string; installed: string; fixed: string[] } | null {
@@ -132,7 +133,7 @@ export function planDepBumps(pkg: PkgManifest, depFindings: Finding[]): Omit<Dep
  * transitive ones are forced via `overrides`. §11: the version comes from the gate finding, and
  * the gate re-verifies. The only I/O is the package.json write + npm install.
  */
-export function applyDepBumps(workspacePath: string, depFindings: Finding[]): DepBumpResult {
+export async function applyDepBumps(workspacePath: string, depFindings: Finding[]): Promise<DepBumpResult> {
   const empty: DepBumpResult = { bumped: [], majorBumped: [], overridden: [], unfixable: [], installExit: null };
   const pkgPath = join(workspacePath, "package.json");
   if (!existsSync(pkgPath)) return empty;
@@ -148,11 +149,16 @@ export function applyDepBumps(workspacePath: string, depFindings: Finding[]): De
   if (!plan.bumped.length && !plan.majorBumped.length && !plan.overridden.length) return { ...plan, installExit: null };
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-  const install = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
-    cwd: workspacePath,
-    stdout: "ignore",
-    stderr: "ignore",
-    timeout: SUBPROCESS_TIMEOUT_MS,
-  });
+  // EPIC #32: shares the host lock with every other heavy subprocess on this machine.
+  const install = await withHostLock(
+    () =>
+      Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
+        cwd: workspacePath,
+        stdout: "ignore",
+        stderr: "ignore",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+      }),
+    { note: (m) => console.error(`[depbump] ${m}`) },
+  );
   return { ...plan, installExit: install.exitCode ?? 1 };
 }

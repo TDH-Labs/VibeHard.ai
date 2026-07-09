@@ -24,13 +24,18 @@ import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
 import { detectUndeclaredImports } from "../diagnose/diagnose.ts";
 import { parseBuildErrors } from "../gate/build-errors.ts";
 import { readJournal } from "../journal/journal.ts";
+import { withHostLock } from "../util/host-lock.ts";
 
 /** Run `tsc --noEmit` to surface EVERY type error at once (the BATCHED view). `next build`
  *  stops at the first error, so a big app's tail is discovered one-per-rebuild and exhausts
- *  the attempt budget; this lets the fixer address them all in a single pass. */
-function collectTypeErrors(workspacePath: string): Finding[] {
+ *  the attempt budget; this lets the fixer address them all in a single pass.
+ *  EPIC #32: shares the host lock — a full-project typecheck is real CPU work. */
+async function collectTypeErrors(workspacePath: string): Promise<Finding[]> {
   if (!existsSync(join(workspacePath, "tsconfig.json"))) return [];
-  const r = Bun.spawnSync(["npx", "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe", timeout: 180_000 });
+  const r = await withHostLock(
+    () => Bun.spawnSync(["npx", "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe", timeout: 180_000 }),
+    { note: (m) => console.error(`[fixer] ${m}`) },
+  );
   if ((r.exitCode ?? 0) === 0) return [];
   return parseBuildErrors(`${r.stdout?.toString() ?? ""}${r.stderr?.toString() ?? ""}`, workspacePath);
 }
@@ -178,7 +183,7 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     // 1) Dependency CVEs → deterministic version bump (same-major where possible; a
     //    breaking MAJOR bump as the fallback — the version still comes from the finding, §11).
     const depFindings = blocking.filter((f) => f.tool === "trivy" && f.ruleId !== "scan-failed");
-    const depResult = depFindings.length ? applyDepBumps(workspacePath, depFindings) : null;
+    const depResult = depFindings.length ? await applyDepBumps(workspacePath, depFindings) : null;
     const majorBumped = depResult?.majorBumped ?? [];
 
     // 2) Imported-but-UNDECLARED packages → deterministic `npm install` (version from the
@@ -188,7 +193,7 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     //    AND every statically-undeclared import in ONE pass — closing the whole class at once.
     const verifyFailing = blocking.some((f) => f.tool === "verify");
     const missing = [...new Set([...parseMissingModules(blocking), ...(verifyFailing ? detectUndeclaredImports(workspacePath) : [])])];
-    const missingResult = missing.length ? applyMissingDeps(workspacePath, missing) : null;
+    const missingResult = missing.length ? await applyMissingDeps(workspacePath, missing) : null;
     const installedMissing = (missingResult?.installed.length ?? 0) > 0;
 
     // 3) The LLM pass — for code findings AND to adapt the code to any breaking major
@@ -199,7 +204,7 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     // Batched type errors: when the build is failing (and we're not deferring to a re-gate
     // after a deterministic dep install), enumerate ALL type errors with tsc and hand the
     // whole set to the LLM at once — so it fixes the tail in one pass, not one-per-rebuild.
-    const tscFindings = verifyFailing && !installedMissing ? collectTypeErrors(workspacePath) : [];
+    const tscFindings = verifyFailing && !installedMissing ? await collectTypeErrors(workspacePath) : [];
     const allCodeFindings = [...blocking.filter((f) => f.tool !== "trivy" && !(installedMissing && f.tool === "verify")), ...tscFindings];
 
     // Build ONE missing feature per round. The completeness gate honestly reports EVERY missing

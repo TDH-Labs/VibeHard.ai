@@ -311,3 +311,55 @@ one machine, deploy or not.
 
 Ties directly to EPIC #32 (Build sandbox / per-build isolation, in progress) — the sandbox
 work should settle this as part of defining where a build's workspace actually lives.
+
+---
+
+## EPIC #32 — concurrent builds starve each other on shared host CPU (found via dogfooding, 2026-07-09) — PARTIALLY CLOSED
+
+**Confirmed live.** Running two real `vibehard fix`/`build` pipelines at once on the single shared
+Fly machine caused semgrep to fail to even start (`"SAST scan did not run (exit -1)"`) and an
+`npm install` to be killed by `SIGTERM` after blowing through its own timeout — both were
+resource contention, not code defects (confirmed by immediately re-running each build SOLO,
+which converged cleanly). This was long-tracked as EPIC #32 (the sandbox/isolation epic) but had
+never actually been hit under real concurrent load before.
+
+**What was already built (found, not new):** `src/substrate/fly-sandbox.ts` (isolated deploy+boot)
+and `src/substrate/fly-exec-sandbox.ts` (isolated one-shot command exec) already exist and were
+already wired into the `container`/`build`/`node` `runVerify` paths via `resolveSandboxHost` —
+production just never had `FLY_API_TOKEN` set, so every path silently fell back to local
+execution (by design — see the fallback comment on `VerifyDeps.flyHost`). Nobody had actually
+turned it on.
+
+**Shipped 2026-07-09:**
+1. **`cli` launch kind (downloadable-tool) sandbox wiring** — this was the ONE launch kind with
+   NO sandbox path at all, regardless of token config; it always ran `npm install` + the entry
+   point directly on the host. Now mirrors `build`/`container`/`node`: prefers
+   `runInFlyExecSandbox` when a Fly host is configured. `cliRunFinding` extracted as a pure
+   helper so the sandboxed and local paths produce the identical `cli-run-failed` finding shape.
+2. **Cross-process host lock** (`src/util/host-lock.ts`, `withHostLock`) — a `mkdir`-based
+   advisory mutex serializing every heavy host-side subprocess (npm/pip install, `npm run build`,
+   `docker build`, `tsc --noEmit`, and the semgrep/gitleaks/trivy scanners) across ALL `vibehard`
+   CLI processes on one machine. This is the fix for the ACTUAL contention observed — `Bun.spawnSync`
+   only blocks within its own process, so two separate CLI invocations (two builds, a retry
+   racing an in-flight fix) have no shared JS state to coordinate through; a lock directory is
+   the standard cross-process primitive. Stale-holder reclaim (dead pid or >10min old) and a
+   bounded max-wait (proceeds WITHOUT the lock after 5min rather than ever hang a build forever —
+   contention is a performance problem, not a correctness one, the opposite of the gate's
+   fail-closed default) keep this from becoming its own hazard.
+
+**Still open (not done tonight):**
+- **`FLY_API_TOKEN` is not set in production** — the already-built sandbox paths (container/
+  build/node/cli) all still fall back to local execution today. Flipping this on is a real
+  ops/cost decision (every sandboxed verify run spins up + tears down a real, billed Fly
+  machine) and shouldn't happen silently — needs an explicit decision on token scoping (a
+  dedicated sandbox-provisioning token, not a personal/full-account one) and a look at the
+  per-build cost this adds before enabling.
+- The SAST/secrets/depvuln scanners are permanently host-side by design (they only read source
+  as data, never execute it — no security reason to sandbox them) — the host lock is their
+  PERMANENT contention fix, not a stopgap pending token activation, unlike the install/build/exec
+  paths above.
+- No concurrency CAP at the `Platform`/`BuildRunner` orchestration layer (`src/platform/`) —
+  today nothing stops N tenants' builds from all entering the (now-serialized-by-lock) heavy
+  work queue at once; the lock prevents them from corrupting each other's runs, but doesn't
+  bound how many pile up waiting. A real queue/worker-pool belongs at that layer once build
+  volume justifies it.
