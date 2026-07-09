@@ -205,10 +205,23 @@ or downloadable) where more than one workstream needs to touch `package.json` (o
 `"main": "dist/index.js"` (implying a `tsc` build step must run first) even though the
 `project-selector-tui` workstream's own log explicitly said it built a plain-JS entry
 (`src/index.js`) specifically to satisfy the downloadable-tool entry-point contract — a LATER
-workstream's overwrite silently reverted that. Separately, `verify` held on an `EINTEGRITY` npm
-checksum mismatch (`clean-verify-failed`) — plausible fallout from `npm ci` validating a lockfile
-against a `package.json` that no longer matches what was actually intended, though the exact
-causal chain from "concurrent overwrite" to "this specific hash mismatch" wasn't traced further.
+workstream's overwrite silently reverted that.
+
+**The `EINTEGRITY` failure is UNRELATED — traced and fixed separately (2026-07-09).** Originally
+logged above as "plausible fallout" from the race; that was wrong. Diffing the lockfile's stored
+hash for `terminal-size@4.0.1` against the live npm registry's real one showed they differ by
+exactly 2 characters out of 86 (`...RLR+8N1jLJ...D...` vs `...RLT+8N1jLJ...x...`) — a genuine
+corrupted download or version mismatch would differ completely (SHA-512 avalanche effect); a
+near-miss like this is the signature of the MODEL free-generating a plausible-looking lockfile
+(same failure class as the earlier hallucinated Dockerfile digest, see below) rather than the
+registry or the race condition. Root cause: `src/engine/bolt/engine.ts`'s file-materialization
+write path had no filter — any `<boltAction type="file" filePath="package-lock.json">` the model
+emitted was written verbatim. Fixed by refusing to write model-authored lockfiles at that one
+chokepoint (`LOCKFILE_BASENAMES` guard, covers `package-lock.json`, `npm-shrinkwrap.json`,
+`yarn.lock`, `bun.lock`, `bun.lockb`, `pnpm-lock.yaml`) — the real lockfile can only come from
+`ensureInstalled()`'s actual npm/bun install now. All 5 call sites (codegen, change, art-director,
+fixer, refactor) share this one write path, so the fix covers initial generation and every
+autofix pass. Tests: `src/engine/bolt/engine.test.ts` — "hallucinated-lockfile guard".
 
 **Fix directions (not scoped or built yet):**
 1. Assign ownership of shared config files (`package.json`, `package-lock.json`,
