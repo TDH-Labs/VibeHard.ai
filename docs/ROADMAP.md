@@ -347,13 +347,15 @@ turned it on.
    contention is a performance problem, not a correctness one, the opposite of the gate's
    fail-closed default) keep this from becoming its own hazard.
 
-**Still open (not done tonight):**
-- **`FLY_API_TOKEN` is not set in production** — the already-built sandbox paths (container/
-  build/node/cli) all still fall back to local execution today. Flipping this on is a real
-  ops/cost decision (every sandboxed verify run spins up + tears down a real, billed Fly
-  machine) and shouldn't happen silently — needs an explicit decision on token scoping (a
-  dedicated sandbox-provisioning token, not a personal/full-account one) and a look at the
-  per-build cost this adds before enabling.
+**Correction (2026-07-09, later same night):** `FLY_API_TOKEN` IS actually set in production
+(confirmed via `fly secrets list --app vibehard-platform`) — the paragraph above, written
+earlier tonight, was wrong. The sandbox paths (container/build/node/cli) are therefore already
+live, not falling back to local execution. Caught this by observing a real
+`fly machine run --dockerfile ... npm run build` child process spawned during a live dogfood
+re-run. Still open: whether this token is scoped down to sandbox-provisioning only or is a
+broader/personal-account token (worth checking — `fly` doesn't expose a token's own scope from
+the CLI; would need to check how it was originally issued), and what the per-build Fly cost
+this is already incurring looks like (no cost tracking/alerting on it yet).
 - The SAST/secrets/depvuln scanners are permanently host-side by design (they only read source
   as data, never execute it — no security reason to sandbox them) — the host lock is their
   PERMANENT contention fix, not a stopgap pending token activation, unlike the install/build/exec
