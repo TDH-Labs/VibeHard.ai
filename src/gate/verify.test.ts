@@ -286,12 +286,29 @@ describe("detectLaunch — deployTarget: downloadable-tool (a CLI/script, not a 
     expect(detectLaunch(dir)).toEqual({ kind: "node", entry: "server.js" });
   });
 
-  test("a Dockerfile still wins over deployTarget: downloadable-tool (container check is first + unconditional)", async () => {
+  test("2026-07-09: a downloadable-tool with a stray Dockerfile does NOT go through the container path — falls through to cli", async () => {
+    // Belt-and-suspenders regression: a real dogfooding run had the architecture stage generate
+    // a Dockerfile for a declared downloadable-tool (a separate, now-fixed bug upstream); this
+    // caused verify to spin up a real ephemeral Fly sandbox to boot-test a container that was
+    // never meant to be deployed, and fail. A stray Dockerfile must never route a downloadable
+    // tool into the container/fly-sandbox path — the architecture gate catches the stray
+    // Dockerfile itself (downloadable-tool-uses-hosted-stack); verify's job is just to check
+    // whatever entry point actually exists.
     const dir = await scratch({
       Dockerfile: "FROM node:20",
       "cli.js": "x",
       "package.json": '{"main":"cli.js"}',
       ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
+    });
+    expect(detectLaunch(dir)).toEqual({ kind: "cli", entry: "cli.js" });
+  });
+
+  test("a hosted-app Dockerfile still wins unconditionally (unchanged regression)", async () => {
+    const dir = await scratch({
+      Dockerfile: "FROM node:20",
+      "server.js": "require('http')",
+      "package.json": '{"main":"server.js"}',
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "hosted-app" }),
     });
     expect(detectLaunch(dir)).toEqual({ kind: "container" });
   });

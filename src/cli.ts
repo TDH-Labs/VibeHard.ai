@@ -305,10 +305,17 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // Auto-pick the design preset from the app's domain (warm/professional/bold/clean) unless the
   // operator forced one with VIBEHARD_DESIGN — so it looks RIGHT without asking.
   const designPresetKey = process.env.VIBEHARD_DESIGN ?? pickDesignPreset(arch.prd.spec);
+  // A downloadable CLI/TUI has no web UI to theme — Python (FastAPI API) already skips the design
+  // block for the same reason; a local tool gets no <boltArtifact> Tailwind instructions either.
+  const isDownloadableTool = arch.prd.spec.deployTarget === "downloadable-tool";
   // Per-tenant steering (EPIC #54): the customer's standing vocabulary/style rules, dropped into
   // the workspace by the web layer. Filtered + sanitized at render (steeringBlock); never read by gates.
   let systemPrompt =
-    (process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : selectSystemPrompt(arch.stack) + designBlock(designPresetKey)) +
+    (process.env.VIBEHARD_LANG === "python"
+      ? PYTHON_SYSTEM_PROMPT
+      : isDownloadableTool
+        ? selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget)
+        : selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget) + designBlock(designPresetKey)) +
     fleetBlock(arch.stack, "codegen") +
     steeringBlock(readWorkspaceSteering(target));
 
@@ -841,8 +848,14 @@ export async function main(argv: string[]): Promise<number> {
     for (const dropped of dropPropertyTests(target, stale)) console.log(`  ▸ proptest: dropped ${dropped} (its requirement changed)`);
 
     console.log(`\n── applying the change with ${providerOf()}/${modelForStage("fix")} … ──`);
+    // newSpec (post-delta) is the freshest deployTarget — a change request could in principle flip
+    // it, and a downloadable tool gets no Tailwind design block (no web UI to theme).
     const changeSystemPrompt =
-      selectSystemPrompt(arch.stack) + designBlock(process.env.VIBEHARD_DESIGN ?? pickDesignPreset(newSpec)) + fleetBlock(arch.stack, "codegen") + steeringBlock(readWorkspaceSteering(target));
+      (newSpec.deployTarget === "downloadable-tool"
+        ? selectSystemPrompt(arch.stack, newSpec.deployTarget)
+        : selectSystemPrompt(arch.stack, newSpec.deployTarget) + designBlock(process.env.VIBEHARD_DESIGN ?? pickDesignPreset(newSpec))) +
+      fleetBlock(arch.stack, "codegen") +
+      steeringBlock(readWorkspaceSteering(target));
     if (!(await streamGeneration(target, buildChangeBrief(target, delta, blast), providerOf(), modelForStage("fix"), changeSystemPrompt, "change"))) return 1;
     recordNote(target, `change request applied (${auditRel}): ${delta.summary}`);
 
@@ -964,7 +977,8 @@ export async function main(argv: string[]): Promise<number> {
     // Reuse the built app's codegen system prompt (stack-correct bolt protocol); the "only change
     // X, here's the current app" framing lives in the refine brief (src/refine/refine.ts).
     const arch = loadStage<Architecture>(target, "architecture.json");
-    const systemPrompt = process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : arch ? selectSystemPrompt(arch.stack) : undefined;
+    const systemPrompt =
+      process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : arch ? selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget) : undefined;
     console.log(`refining ${target} — incremental regen → re-gate → revert if it breaks a passing build …`);
     const result = await refine(target, change, {
       now: new Date().toISOString(),

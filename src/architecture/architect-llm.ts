@@ -49,7 +49,9 @@ You are an expert Software Architect. You turn a Software Requirements Specifica
 # Rules
 - TRACEABILITY (§6): every SRS functional requirement id (FR-1, FR-2…) MUST appear in the "covers" of at least one workstream. A single component may cover several FRs.
 - The workstream dependency graph MUST be acyclic (typical order: data/schema → server/api → ui). Every workstream owns >=1 file. "dependsOn" may only name other workstreams in the list.
-- DEPLOYMENT CONSTRAINT (hard): the data layer MUST be Supabase (Postgres + Row-Level Security) — the security boundary the platform verifies live before deploy. Do NOT use MongoDB, Firebase, MySQL, DynamoDB, PlanetScale, SQLite, or a self-managed Postgres (pg/Prisma/TypeORM/Knex/Drizzle). Deploy as EITHER a Vercel app (Next.js / Vite / static) OR a single Dockerfile container (e.g. FastAPI on Fly).
+- DEPLOYMENT CONSTRAINT (hard, branches on stack_hint.deployTarget):
+  - deployTarget "hosted-app" (default): the data layer MUST be Supabase (Postgres + Row-Level Security) — the security boundary the platform verifies live before deploy. Do NOT use MongoDB, Firebase, MySQL, DynamoDB, PlanetScale, SQLite, or a self-managed Postgres (pg/Prisma/TypeORM/Knex/Drizzle). Deploy as EITHER a Vercel app (Next.js / Vite / static) OR a single Dockerfile container (e.g. FastAPI on Fly).
+  - deployTarget "downloadable-tool": this is NOT a hosted app — it runs on the user's own machine, invoked from a terminal; nobody reaches it over a URL. Do NOT propose Supabase, any other hosted/cloud database, a Dockerfile, or ANY deploy/hosting artifact. The data layer (if the app stores data at all) is local: a local SQLite file for anything relational, or plain local JSON/file-based storage for simple flat records. "stack" should name a local runtime (e.g. "Node.js + TypeScript + Ink (TUI) + SQLite" or "Node.js + TypeScript (CLI) + local JSON store"), never a hosting platform.
 - §2 pattern: give the rationale (from the SRS constraints) AND state the trade-offs explicitly. §4 dataArchitecture.schema: a concise SQL DDL for the core entities (derive from the SRS data model; include the RLS-relevant owner columns).
 - §4b dataModel: emit the STRUCTURED model for every persisted entity — its access policy (owner = a user's own rows; tenant = any member of the tenant; tenant-admin = members read, admins write; auth = any logged-in user; public = world-readable) and typed fields with FK \`references\`. A tenant-scoped entity MUST include its tenant FK field (e.g. centerId references the tenant entity). This drives the generated migrations/RLS — be precise; don't restate the prose DDL here.
 - BE CONCISE so the whole JSON fits in one response: short phrases, a focused DDL, 3-7 workstreams. A truncated document is a failed document.
@@ -69,7 +71,7 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
   return async (prd: Prd, prior, srs?: Srs) => {
     const summary = {
       name: prd.spec.name,
-      stack_hint: { tenancy: prd.spec.tenancy, auth: prd.spec.auth, storesData: prd.spec.storesData },
+      stack_hint: { tenancy: prd.spec.tenancy, auth: prd.spec.auth, storesData: prd.spec.storesData, deployTarget: prd.spec.deployTarget },
       // Design against the SRS when it ran (its FR ids drive the "covers" traceability); else the PRD.
       functionalRequirements: srs ? srs.functionalRequirements.map((f) => ({ id: f.id, title: f.title })) : prd.requirements.map((r) => ({ id: r.id, title: r.feature })),
       dataModel: srs && srs.dataModel.length ? srs.dataModel : prd.spec.dataEntities,

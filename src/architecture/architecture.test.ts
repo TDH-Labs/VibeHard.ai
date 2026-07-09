@@ -57,6 +57,42 @@ describe("assessSubstrateFit — architect-steering (stack must be substrate-dep
   });
 });
 
+describe("assessSubstrateFit — deployTarget: downloadable-tool has no substrate to fit (2026-07-09)", () => {
+  const archLocal = (stack: string): Architecture =>
+    arch([ws("db"), ws("cli", ["db"])], {
+      prd: { spec: { name: "app", storesData: true, deployTarget: "downloadable-tool" }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd,
+      stack,
+    });
+
+  test("local SQLite stack + storesData → no findings at all (the substrate checks don't apply)", () => {
+    expect(assessSubstrateFit(archLocal("Node.js + TypeScript + Ink (TUI) + SQLite"))).toEqual([]);
+  });
+
+  test("a local JSON/file-based store, no DB engine named → also fine (not forced onto Supabase)", () => {
+    expect(assessSubstrateFit(archLocal("Node.js + TypeScript (CLI) + local JSON store"))).toEqual([]);
+  });
+
+  test("2026-07-09 regression: the architect proposing Supabase anyway → blocking downloadable-tool-uses-hosted-stack", () => {
+    // The exact failure observed live: a declared single-user local TUI tool, and the LLM
+    // proposed "Node.js + TypeScript + Ink (TUI) + Supabase" regardless of the relaxed prompt.
+    const f = assessSubstrateFit(archLocal("Node.js + TypeScript + Ink (TUI) + Supabase")).find((x) => x.ruleId === "downloadable-tool-uses-hosted-stack");
+    expect(f?.severity).toBe("high");
+  });
+
+  test("a Vercel-named stack for a downloadable tool is also caught (any hosting platform, not just Supabase)", () => {
+    expect(assessSubstrateFit(archLocal("Next.js on Vercel")).map((f) => f.ruleId)).toContain("downloadable-tool-uses-hosted-stack");
+  });
+
+  test("the incompatible-backend and stack-not-supabase checks (hosted-app only) never fire for a downloadable tool", () => {
+    // Even a stack that WOULD trip stack-incompatible-backend for a hosted app (MongoDB) isn't
+    // relevant here — a downloadable tool was never going to use a managed cloud backend either
+    // way; the only thing worth flagging is a HOSTED signal, which "MongoDB" alone isn't.
+    const ids = assessSubstrateFit(archLocal("Node.js + TypeScript + local MongoDB-shaped embedded store")).map((f) => f.ruleId);
+    expect(ids).not.toContain("stack-incompatible-backend");
+    expect(ids).not.toContain("stack-not-supabase");
+  });
+});
+
 describe("reviewArchitecture — graph validation (the disposer)", () => {
   test("a clean, complete SAD → no findings, verdict passes", () => {
     const a = arch([ws("api", ["db"]), ws("db")]);

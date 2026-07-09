@@ -234,12 +234,20 @@ function readPyDeps(projectPath: string): string {
 /** Pure-ish (reads package.json / requirements): pick the launch strategy. A node entry
  *  wins, then a Python web app, then a `build` script (static/SPA build-verify). */
 export function detectLaunch(projectPath: string): LaunchPlan {
+  const isDownloadable = readDeployTarget(projectPath) === "downloadable-tool";
   // A Dockerfile means the deploy artifact IS a container — verify THAT (its own runtime,
   // isolated deps, parity with what the host runs), not a local interpreter. Wins over
-  // node/python so a containerized app of ANY language is verified the same correct way.
-  if (existsSync(join(projectPath, "Dockerfile"))) return { kind: "container" };
+  // node/python so a containerized app of ANY language is verified the same correct way —
+  // EXCEPT for a downloadable-tool, which never gets deployed at all. A Dockerfile there
+  // (belt-and-suspenders: the architecture stage is steered away from ever generating one,
+  // but this must not silently trust that) means the container/fly-sandbox-boot path would
+  // run — the exact failure observed live, 2026-07-09: a real ephemeral Fly machine spun up
+  // to boot-test a container that was never meant to be deployed, and failed. Fall through to
+  // the CLI entry-point check instead; a stray Dockerfile is the architecture gate's problem
+  // to catch (downloadable-tool-uses-hosted-stack), not verify's problem to run.
+  if (!isDownloadable && existsSync(join(projectPath, "Dockerfile"))) return { kind: "container" };
   const entry = findEntry(projectPath);
-  if (entry) return readDeployTarget(projectPath) === "downloadable-tool" ? { kind: "cli", entry } : { kind: "node", entry };
+  if (entry) return isDownloadable ? { kind: "cli", entry } : { kind: "node", entry };
   if (existsSync(join(projectPath, "requirements.txt")) || existsSync(join(projectPath, "pyproject.toml"))) {
     const pe = pythonEntry(projectPath);
     if (pe) return { kind: "python", cmd: pythonStartCommand(pe, readPyDeps(projectPath)) };

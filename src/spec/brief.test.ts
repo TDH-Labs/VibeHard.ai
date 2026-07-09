@@ -84,4 +84,14 @@ describe("buildGenerationBrief", () => {
     expect(brief).toMatch(/`bin` field/);
     expect(brief).toMatch(/single command with no network server/);
   });
+
+  test("2026-07-09: downloadable-tool also tells the generator NOT to use Supabase — local storage only", () => {
+    // Real dogfooding run: the generator produced Supabase migrations/RLS/auth for a declared
+    // local-only tool. The architecture stage is separately steered away from proposing Supabase
+    // at all (src/architecture/architect-llm.ts + assessSubstrateFit), but this brief reaches
+    // codegen directly too — belt-and-suspenders, not reliant on the architecture fix alone.
+    const brief = buildGenerationBrief(spec({ deployTarget: "downloadable-tool" }));
+    expect(brief).toMatch(/do NOT use Supabase or any/i);
+    expect(brief).toMatch(/SQLite file/);
+  });
 });

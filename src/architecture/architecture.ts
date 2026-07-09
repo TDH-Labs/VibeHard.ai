@@ -145,11 +145,38 @@ const SUPABASE_RE = /\bsupabase\b/i;
 const INCOMPATIBLE_BACKEND_RE = /\b(mongo(?:db)?|firebase|firestore|dynamo(?:db)?|planetscale|cockroach(?:db)?|fauna(?:db)?|mysql|mariadb|sqlite|neon)\b/i;
 const RAW_DB_CLIENT_RE = /\b(pg|node-postgres|prisma|typeorm|sequelize|knex|drizzle)\b/i;
 
+/** A stack that names a hosting platform or a cloud/hosted DB — wrong for a downloadable-tool,
+ *  which never gets a URL and runs entirely on the user's own machine. */
+const HOSTED_SIGNAL_RE = /\b(supabase|vercel|firebase|dockerfile|fly\.io)\b/i;
+
 /** Deterministic architect-steering: the stack must be deployable on the substrate
- *  (Supabase data layer + Vercel/Fly host). Off-substrate → blocking gaps the loop fixes. */
+ *  (Supabase data layer + Vercel/Fly host) — UNLESS the spec declared deployTarget
+ *  "downloadable-tool", which has no substrate to fit at all (no hosting, no cloud DB).
+ *  Off-substrate → blocking gaps the loop fixes. */
 export function assessSubstrateFit(arch: Architecture): Finding[] {
   const out: Finding[] = [];
   const stack = arch.stack || "";
+  const isDownloadable = arch.prd?.spec?.deployTarget === "downloadable-tool";
+
+  if (isDownloadable) {
+    // The inverse check: this is a declared local tool, so a stack that names ANY hosting
+    // platform or cloud DB is the architect ignoring deployTarget (observed live, 2026-07-09 —
+    // the LLM proposed Supabase + a Dockerfile for a single-user local TUI tool despite the
+    // system prompt's relaxed instruction). Force it to re-propose rather than silently letting
+    // a cloud-shaped design through for a tool that was never supposed to have one.
+    const hosted = stack.match(HOSTED_SIGNAL_RE);
+    if (hosted) {
+      out.push(
+        gap(
+          "downloadable-tool-uses-hosted-stack",
+          "high",
+          `This is a declared downloadable tool (deployTarget: "downloadable-tool") — it never gets a hosted URL — but its stack names "${hosted[0]}", which only makes sense for a hosted app. Use local storage instead (SQLite, or plain local JSON/file-based storage), and no deploy artifact (no Dockerfile, no hosting platform).`,
+        ),
+      );
+    }
+    return out; // no substrate to fit — the checks below are all about being deployable, which doesn't apply
+  }
+
   const incompatible = stack.match(INCOMPATIBLE_BACKEND_RE);
   if (incompatible) {
     out.push(
