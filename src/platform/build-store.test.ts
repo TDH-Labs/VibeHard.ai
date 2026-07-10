@@ -118,6 +118,29 @@ function contractTests(name: string, makeStore: () => Promise<BuildProgressStore
       const ids = await store.listTenantIds();
       expect(ids.sort()).toEqual(["t-1", "t-2"]);
     });
+
+    test("countRunning is 0 with no builds", async () => {
+      const store = await makeStore();
+      expect(await store.countRunning()).toBe(0);
+    });
+
+    test("countRunning only counts status 'running', across every tenant — the platform-wide cap's job", async () => {
+      const store = await makeStore();
+      await store.setActive("t-1", active({ status: "running" }));
+      await store.setActive("t-2", active({ status: "running" }));
+      await store.setActive("t-3", active({ status: "paused" }));
+      await store.setActive("t-4", active({ status: "live" }));
+      expect(await store.countRunning()).toBe(2);
+    });
+
+    test("countRunning drops as builds finish", async () => {
+      const store = await makeStore();
+      await store.setActive("t-1", active({ status: "running" }));
+      await store.setActive("t-2", active({ status: "running" }));
+      expect(await store.countRunning()).toBe(2);
+      await store.setActive("t-1", active({ status: "live" }));
+      expect(await store.countRunning()).toBe(1);
+    });
   });
 }
 

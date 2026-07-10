@@ -41,6 +41,13 @@ export interface BuildProgressStore {
   patchBuild(tenantId: string, app: string, patch: Partial<BuildRecord>): Promise<void>;
   /** Every tenant id that has ANY tracked build — sweepStaleRunning's boot-time enumeration. */
   listTenantIds(): Promise<string[]>;
+  /** How many tenants have a build actively `running` right now, ACROSS EVERY MACHINE — the
+   *  cross-machine concurrency-cap seam (EPIC #32 follow-up). Must read the shared store, not
+   *  count an in-process Map: the platform runs on multiple Fly machines behind one load
+   *  balancer (min_machines_running >= 2), so any one machine only ever sees builds IT
+   *  personally spawned — the exact bug isBuildRunning's own per-tenant guard was already fixed
+   *  for (2026-07-07). */
+  countRunning(): Promise<number>;
 }
 
 const safeId = (id: string): string => id.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -109,6 +116,14 @@ export class FileBuildProgressStore implements BuildProgressStore {
     const tdir = join(this.baseDir, "tenants");
     if (!existsSync(tdir)) return [];
     return readdirSync(tdir);
+  }
+
+  async countRunning(): Promise<number> {
+    let n = 0;
+    for (const id of await this.listTenantIds()) {
+      if ((await this.getActive(id))?.status === "running") n++;
+    }
+    return n;
   }
 }
 
@@ -183,5 +198,23 @@ export class PgBuildProgressStore implements BuildProgressStore {
   async listTenantIds(): Promise<string[]> {
     const rows = await this.sql(`select distinct scope from active_builds`);
     return rows.map((r) => String(r.scope));
+  }
+
+  async countRunning(): Promise<number> {
+    // Fetch + parse in JS rather than a `data::jsonb->>'status'` SQL filter, matching every
+    // other method on this class (data is stored as opaque text — consistent across the real
+    // Postgres and embedded pglite backends without depending on either's JSON-operator dialect).
+    // active_builds is one row per TENANT (their single active build), so this is bounded by
+    // tenant count, not build history — a full scan here is fine at today's scale.
+    const rows = await this.sql(`select data from active_builds`);
+    let n = 0;
+    for (const r of rows) {
+      try {
+        if ((JSON.parse(String(r.data)) as ActiveBuild).status === "running") n++;
+      } catch {
+        /* unreadable row — don't let it count toward capacity either way */
+      }
+    }
+    return n;
   }
 }

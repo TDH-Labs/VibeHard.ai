@@ -393,3 +393,30 @@ this is already incurring looks like (no cost tracking/alerting on it yet).
   work queue at once; the lock prevents them from corrupting each other's runs, but doesn't
   bound how many pile up waiting. A real queue/worker-pool belongs at that layer once build
   volume justifies it.
+
+**Shipped 2026-07-09 (later): whole-platform concurrency cap.** Added `BuildProgressStore.countRunning()`
+(`src/platform/build-store.ts`), implemented on both `FileBuildProgressStore` and
+`PgBuildProgressStore` — counts tenants with `status === "running"` by reading the shared store,
+not an in-process counter, for the same reason `isBuildRunning`'s per-tenant guard had to move off
+a local `Map` back on 2026-07-07: the platform runs on 2+ Fly machines behind one load balancer
+(`min_machines_running = 2`), so any one machine only ever sees builds IT personally spawned. Wired
+into `web/server.ts` as `atBuildCapacity()` (`countRunning() >= VIBEHARD_MAX_CONCURRENT_BUILDS`,
+default 4), checked in all three build-spawning routes (`/api/build`, `/api/redeploy`+`/api/polish`,
+`/api/change`+`/api/rollback`) immediately after the existing per-tenant `isBuildRunning` guard —
+returns 503 with a distinct "platform is at capacity" message so it's not confused with the
+per-tenant 409 "you already have a build running." This is a coarse admission-control gate, not the
+real queue/worker-pool noted above — a tenant who gets 503'd just has to retry, there's no queueing
+or backpressure signal beyond that. Tests: `src/platform/build-store.test.ts` (`countRunning`
+contract cases run against both backends).
+
+**Open finding, NOT acted on (2026-07-09): `FLY_API_TOKEN` may be broader-scoped than it needs to
+be.** `fly tokens list -o personal` shows non-expiring (2126) org-level tokens named "Drydock" /
+"Drydock replacement" / "Organization Token" — consistent with `FLY_API_TOKEN` being an
+organization-wide token rather than one scoped narrowly to sandbox machine provisioning for this
+one app. `fly` doesn't expose a token's own scope from the CLI, so this is circumstantial, not
+confirmed. Deliberately not rotating or replacing this token autonomously — it's a live production
+credential backing real deploys, and swapping it is exactly the kind of access-control change that
+needs the account owner's explicit decision, not an agent's. If tighter scoping matters, the fix is
+minting a new deploy-scoped token via `fly tokens create deploy` (or an org token restricted to just
+this app) and swapping `FLY_API_TOKEN` in `fly secrets set` — a five-minute change for Adam to make
+or explicitly authorize.

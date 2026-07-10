@@ -557,6 +557,20 @@ async function isBuildRunning(tenantId: string): Promise<boolean> {
   return (await buildStore.getActive(tenantId))?.status === "running";
 }
 
+/** Whole-machine, cross-tenant concurrency cap (EPIC #32 follow-up — found via dogfooding
+ *  2026-07-09: nothing bounded how many DIFFERENT tenants could pile up spawning builds — each
+ *  its own heavy subprocess (npm installs, security scanners, LLM streaming) — on this ONE
+ *  shared host at once. `isBuildRunning` only stops the SAME tenant from double-submitting; it
+ *  says nothing about 10 different tenants all clicking "build" in the same minute. Backed by
+ *  `buildStore.countRunning()` (the shared Postgres store, not an in-process counter) for the
+ *  same reason `isBuildRunning` had to move off the local `running` Map: this runs on multiple
+ *  Fly machines behind one load balancer, so any local count would only ever see this machine's
+ *  own builds. Configurable so ops can raise it as the platform scales past one machine. */
+const MAX_CONCURRENT_BUILDS = Number(process.env.VIBEHARD_MAX_CONCURRENT_BUILDS) || 4;
+async function atBuildCapacity(): Promise<boolean> {
+  return (await buildStore.countRunning()) >= MAX_CONCURRENT_BUILDS;
+}
+
 // ── orchestrator: the conversational owner of a build (the chat panel's backend) ───────────
 type InboxMsg = { at: number; kind: OutboundMessage["kind"]; text: string };
 // Durable via tenantKv rows `inbox:<app>` (EPIC #33 final sweep) — plain JSON, not secret.
@@ -1029,6 +1043,8 @@ const server = Bun.serve({
       // minted a fresh app id, burned quota, and raced the in-flight build to a bogus "blocked"
       // with zero findings (found live 2026-07-04, fresh-eyes walkthrough). One build per tenant.
       if (await isBuildRunning(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
+      // EPIC #32 follow-up: whole-platform cap, independent of the per-tenant guard above.
+      if (await atBuildCapacity()) return json({ error: "the platform is at capacity right now — please try again in a few minutes" }, 503);
       const prompt = url.searchParams.get("prompt")?.trim();
       const resumeApp = url.searchParams.get("app")?.trim() || undefined; // resume an existing workspace
       const design = url.searchParams.get("design")?.trim() || undefined; // #12 chosen design preset
@@ -1048,6 +1064,7 @@ const server = Bun.serve({
       if (!auth) return json({ error: "sign in first" }, 401);
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit2 C-6 CSRF
       if (await isBuildRunning(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409); // same reconnect guard as /api/build
+      if (await atBuildCapacity()) return json({ error: "the platform is at capacity right now — please try again in a few minutes" }, 503);
       const app = url.searchParams.get("app")?.trim();
       const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
       if (!rec) return json({ error: "no such build" }, 404);
@@ -1062,6 +1079,7 @@ const server = Bun.serve({
       if (!auth) return json({ error: "sign in first" }, 401);
       if (!sameOrigin(req)) return json({ error: "cross-origin request refused" }, 403); // audit3 D-2 CSRF
       if (await isBuildRunning(auth.user.tenantId)) return json({ error: "a build is already running — reload the page to reattach, or Stop it first" }, 409);
+      if (await atBuildCapacity()) return json({ error: "the platform is at capacity right now — please try again in a few minutes" }, 503);
       const app = url.searchParams.get("app")?.trim();
       if (app && !isSafeAppName(app)) return json({ error: "invalid app id" }, 400); // C1 traversal guard
       const rec = app ? (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app) : null;
