@@ -1,131 +1,74 @@
 /**
- * Gate pipeline + deploy sentinel — runs the registered gates against a project,
- * aggregates verdicts, and (for deploy) writes the unskippable sentinel ONLY
- * when every gate passes. Engine-blind: it takes a directory of code, regardless
- * of what produced it. The deploy verdict is deterministic with zero LLM in the
- * path (PROJECT_BRIEF.md §11 "Deploy verdict", §13).
+ * Re-export shim (2026-07-10 extraction) — the gate chain now lives in @vibehard/gate-check.
+ * Kept at this path so every existing internal import (`../gate/index.ts`) needs zero changes.
+ *
+ * GATES / FAST_GATES / runGate / deployGate are deliberately NOT blind re-exports: the package's
+ * own bare `verifyGate`/`completenessGate` degrade for standalone use (no sandbox → local docker;
+ * no reviewer → fails closed). This file IS VibeHard's gate-wiring layer — it binds the real Fly
+ * sandbox (substrate/fly*.ts) and the real LLM completeness reviewer (configForStage + defaultModelFactory)
+ * back in, so production behavior is unchanged from before the extraction.
  */
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { rm } from "node:fs/promises";
-import { verdictOf, type Gate, type GateVerdict } from "../types.ts";
-import { sastGate } from "./sast.ts";
-import { secretsGate } from "./secrets.ts";
-import { depvulnGate } from "./depvuln.ts";
-import { rlsGate } from "./rls.ts";
-import { complianceGate } from "./compliance.ts";
-import { piiGate } from "./pii.ts";
-import { prodReadinessGate } from "./prod-readiness.ts";
-import { verifyGate, fastVerifyGate } from "./verify.ts";
-import { completenessGate } from "./completeness.ts";
-import { migrateGate } from "./migrate.ts";
-import { rlsEnforceGate } from "./rls-enforce.ts";
-import { proptestGate } from "./proptest.ts";
+import {
+  type Gate,
+  type GateVerdict,
+  type VerifyDeps,
+  createVerifyGate,
+  createFastVerifyGate,
+  createCompletenessGate,
+  llmFunctionalReviewer,
+  sastGate,
+  secretsGate,
+  depvulnGate,
+  rlsGate,
+  migrateGate,
+  rlsEnforceGate,
+  complianceGate,
+  piiGate,
+  prodReadinessGate,
+  proptestGate,
+  runGate as runGateBare,
+  deployGate as deployGateBare,
+} from "@vibehard/gate-check";
+import { FlyHostProvider } from "../substrate/fly.ts";
+import { runInFlySandbox } from "../substrate/fly-sandbox.ts";
+import { runInFlyExecSandbox, type FlyExecSandboxDeps } from "../substrate/fly-exec-sandbox.ts";
+import { configForStage } from "../config/models.ts";
+import { defaultModelFactory } from "../engine/bolt/driver.ts";
 
-/** The default gate chain. Source scanners run FIRST, on authored source; verify runs
- *  LAST because it builds the app (creating .next/dist/…) — keeping derived output out
- *  of the source scans (§11, §19). compliance and prod-readiness are
- *  classification/rigor-driven: a no-op unless the app's spec was persisted by the
- *  front-half, so they never fire on a project that didn't go through it. */
-export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, rlsEnforceGate, complianceGate, piiGate, prodReadinessGate, proptestGate, verifyGate, completenessGate];
+/** The real Fly sandbox, wired exactly as before the extraction: a real FlyHostProvider when
+ *  FLY_API_TOKEN is set (production); undefined otherwise (local docker fallback — dev/CI/tests,
+ *  none of which set the token). */
+const verifyDeps: VerifyDeps = {
+  flyHost: process.env.FLY_API_TOKEN ? new FlyHostProvider() : undefined,
+  runSandbox: runInFlySandbox,
+  runExecSandbox: (projectPath, dockerfile, cmd, deps) => runInFlyExecSandbox(projectPath, dockerfile, cmd, deps as FlyExecSandboxDeps | undefined),
+};
 
-/** The FAST chain for the inner fix loop: same gates, but verify is the cheap in-place-build
- *  proxy (seconds, not the minutes of clean-room + container + boot probes). Iterate on this;
- *  the full GATES run ONCE at convergence to confirm the real artifact + no regression. */
-export const FAST_GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, rlsEnforceGate, complianceGate, piiGate, prodReadinessGate, proptestGate, fastVerifyGate];
+const realVerifyGate = createVerifyGate(verifyDeps);
+const realFastVerifyGate = createFastVerifyGate(verifyDeps);
+const realCompletenessGate = createCompletenessGate({
+  reviewer: llmFunctionalReviewer({ modelFactory: defaultModelFactory, config: configForStage("functest") }),
+});
 
-/** Relative path of the "all gates passed" sentinel within a project. */
-export const SENTINEL_REL = ".gate/HARD_VERIFY_PASS";
+/** The default gate chain — same composition/order as before the extraction (see package's own
+ *  index.ts docstring for the reasoning), with the real Fly-verify + real LLM-completeness gates
+ *  substituted in for the package's bare/degraded defaults. */
+export const GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, rlsEnforceGate, complianceGate, piiGate, prodReadinessGate, proptestGate, realVerifyGate, realCompletenessGate];
 
-/** Per-process fallback when VIBEHARD_SENTINEL_SECRET is unset (CLI/dev/test). audit3 M-4: the old
- *  fallback was a COMMITTED literal ("dev-sentinel-insecure"), a publicly-known key anyone could use to
- *  forge a sentinel. A random per-process key removes that: stamp+verify within one process (the real
- *  gate→deploy flow, and tests) still match, while a forged sentinel can't be signed by an attacker who
- *  doesn't know the key. Cross-process without the env var fails verification → fail-CLOSED (deploy
- *  blocked), never fail-open. Set VIBEHARD_SENTINEL_SECRET for stable cross-process verification. */
-const FALLBACK_SENTINEL_KEY = randomBytes(32).toString("hex");
+/** The FAST chain for the inner fix loop — same as GATES but the cheap in-place-build verify proxy,
+ *  no completeness (unchanged from before the extraction). */
+export const FAST_GATES: Gate[] = [sastGate, secretsGate, depvulnGate, rlsGate, migrateGate, rlsEnforceGate, complianceGate, piiGate, prodReadinessGate, proptestGate, realFastVerifyGate];
 
-/** HMAC-sign a sentinel payload. Key = VIBEHARD_SENTINEL_SECRET, else a per-process random key.
- *  Message = "<projectPath>\n<timestamp>" so a sentinel is bound to exactly one project directory:
- *  copying it into a sibling workspace fails verification (C3 fix). */
-function sentinelMac(projectPath: string, timestamp: string): string {
-  const secret = process.env.VIBEHARD_SENTINEL_SECRET || FALLBACK_SENTINEL_KEY;
-  return createHmac("sha256", secret).update(`${projectPath}\n${timestamp}`).digest("hex");
+export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerdict?: (v: GateVerdict) => void) {
+  return runGateBare(projectPath, gates, onVerdict);
 }
 
-/** Verify the sentinel's HMAC. Fails closed: any missing/malformed/wrong-key content → false. */
-export function verifySentinel(projectPath: string): boolean {
-  const sentinelPath = join(projectPath, SENTINEL_REL);
-  if (!existsSync(sentinelPath)) return false;
-  try {
-    const [timestamp, mac] = readFileSync(sentinelPath, "utf8").trim().split("\n");
-    if (!timestamp || !mac) return false;
-    const expected = sentinelMac(projectPath, timestamp);
-    return timingSafeEqual(Buffer.from(mac, "hex"), Buffer.from(expected, "hex"));
-  } catch {
-    return false; // fail-closed: bad read / wrong length / corrupted → deny
-  }
+export async function deployGate(projectPath: string, gates: Gate[] = GATES) {
+  return deployGateBare(projectPath, gates);
 }
 
-export interface PipelineResult {
-  verdicts: GateVerdict[];
-  passed: boolean;
-}
-
-export interface DeployResult extends PipelineResult {
-  /** Absolute path to the sentinel if written (passed); null if deploy is blocked. */
-  sentinel: string | null;
-}
-
-export async function runGate(projectPath: string, gates: Gate[] = GATES, onVerdict?: (v: GateVerdict) => void): Promise<PipelineResult> {
-  const verdicts: GateVerdict[] = [];
-  for (const g of gates) {
-    let v: GateVerdict;
-    try {
-      v = await g.run(projectPath);
-    } catch (e) {
-      // C-5 (audit2) fail-closed: a gate that THROWS (e.g. Bun.spawnSync raises "Executable not found
-      // in $PATH" when docker/trivy/semgrep/gitleaks is missing — a throw, not a non-zero exit) must
-      // never escape the loop and crash the pipeline into an unverified state. Convert it to a BLOCKING
-      // verdict so the build is held, not silently shipped.
-      const message = `the ${g.name} gate crashed (${e instanceof Error ? e.message : String(e)}) — failing closed (§11): a gate that can't run must block, never pass`;
-      v = verdictOf(g.name, [{ tool: g.name, ruleId: "gate-crashed", severity: "critical", file: projectPath, message }], new Date().toISOString());
-    }
-    onVerdict?.(v); // surface each gate's result the moment it lands (live per-gate progress)
-    verdicts.push(v);
-  }
-  // A deploy is allowed when no gate BLOCKS *and* at least one gate did substantive work (status
-  // "pass"). B3 (audit2): an app where EVERY gate is "n/a" was never actually verified — nothing
-  // applied — so it must NOT stamp the sentinel and ship vacuously. "n/a" never blocks, but a board
-  // of all-n/a is not a pass.
-  const noBlocks = verdicts.every((v) => v.status === "pass" || v.status === "n/a");
-  const anySubstantive = verdicts.some((v) => v.status === "pass");
-  return { verdicts, passed: noBlocks && anySubstantive };
-}
-
-/**
- * The ratchet, in one place: write the sentinel iff `passed`, else remove a stale
- * one so a prior pass can never authorize a now-failing build. Shared by the
- * deploy gate and the escalation resume path so there is exactly one sentinel writer.
- */
-export async function stampSentinel(projectPath: string, passed: boolean): Promise<string | null> {
-  const sentinel = join(projectPath, SENTINEL_REL);
-  if (passed) {
-    const ts = new Date().toISOString();
-    const mac = sentinelMac(projectPath, ts);
-    await Bun.write(sentinel, `${ts}\n${mac}\n`);
-    return sentinel;
-  }
-  await rm(sentinel, { force: true });
-  return null;
-}
-
-/**
- * The deploy gate. Runs the chain and stamps the sentinel ONLY if every gate
- * passes. Nothing deploys without this sentinel.
- */
-export async function deployGate(projectPath: string, gates: Gate[] = GATES): Promise<DeployResult> {
-  const result = await runGate(projectPath, gates);
-  return { ...result, sentinel: await stampSentinel(projectPath, result.passed) };
-}
+// Everything else (the gate contract types, individual gate functions, sentinel helpers, the
+// vendored spec/backend-model/proptest-validate contracts, subprocess infra) is unchanged from
+// the package — passed straight through. Local declarations above (GATES/FAST_GATES/runGate/
+// deployGate) shadow the package's same-named exports per ES module semantics; no conflict.
+export * from "@vibehard/gate-check";

@@ -18,8 +18,8 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Finding } from "../types.ts";
-import type { SensitiveClass } from "../spec/index.ts";
+import type { Finding } from "./types.ts";
+import type { SensitiveClass } from "./spec-contract.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 
 const DERIVED = new Set<string>(DERIVED_DIRS);

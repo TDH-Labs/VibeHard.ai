@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { interpretSemgrep, mapSeverity, parseSemgrep } from "./sast.ts";
-import { verdictOf } from "../types.ts";
+import { verdictOf } from "./types.ts";
 
 describe("mapSeverity", () => {
   test("ERROR→high, WARNING→medium, else low", () => {

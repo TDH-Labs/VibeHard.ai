@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { deployGate } from "./index.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
+const FIXTURES = join(import.meta.dir, "..", "..", "..", "fixtures");
 const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("deploy gate — M1 DoD (real scanners)", () => {

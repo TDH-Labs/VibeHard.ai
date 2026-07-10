@@ -4,11 +4,11 @@
  * only I/O (integration-tested). Ported from ~/dev/gate-proof/gates/sast.sh.
  */
 import { join, resolve } from "node:path";
-import type { Finding, GateVerdict, Severity } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import type { Finding, GateVerdict, Severity } from "./types.ts";
+import { verdictOf } from "./types.ts";
 import { DERIVED_DIRS, hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
-import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
-import { withHostLock } from "../util/host-lock.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "./timeouts.ts";
+import { withHostLock } from "./host-lock.ts";
 
 /** The exact semgrep version the production image installs natively (Dockerfile) — this
  *  constant is documentation, not an invocation parameter; there is no container to pin it

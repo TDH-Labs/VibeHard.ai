@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { propTestGateRun, listPropTestFiles, type PropRunner } from "./proptest.ts";
-import { PROPTEST_DIR } from "../proptest/validate.ts";
+import { PROPTEST_DIR } from "./proptest-validate.ts";
 
 const NOW = "2026-01-01T00:00:00Z";
 const tmps: string[] = [];
@@ -39,7 +39,7 @@ function writeApp(dir: string, clampBody: string, testContent: string = VALID_TE
   writeFileSync(join(dir, PROPTEST_DIR, "f1.test.ts"), testContent);
   // Real fast-check without a real npm install: link the platform's own copy.
   mkdirSync(join(dir, "node_modules"), { recursive: true });
-  symlinkSync(join(import.meta.dir, "..", "..", "node_modules", "fast-check"), join(dir, "node_modules", "fast-check"), "dir");
+  symlinkSync(join(import.meta.dir, "..", "..", "..", "node_modules", "fast-check"), join(dir, "node_modules", "fast-check"), "dir");
 }
 
 describe("proptest gate — verdict mapping (stub runner)", () => {

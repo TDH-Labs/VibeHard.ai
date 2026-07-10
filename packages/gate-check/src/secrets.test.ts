@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { interpretGitleaks, parseGitleaks } from "./secrets.ts";
-import { verdictOf } from "../types.ts";
+import { verdictOf } from "./types.ts";
 
 describe("parseGitleaks (pure)", () => {
   test("maps gitleaks JSON into structured Finding[]", () => {

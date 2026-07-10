@@ -17,9 +17,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
-import type { Finding, GateVerdict } from "../types.ts";
-import { notApplicable, verdictOf } from "../types.ts";
-import { llmFunctionalReviewer, type FunctionalReviewer } from "../functest/functest.ts";
+import type { Finding, Gate, GateVerdict } from "./types.ts";
+import { notApplicable, verdictOf } from "./types.ts";
+import type { FunctionalReviewer } from "./functest.ts";
 
 // Feature-name words that carry no signal about WHICH feature it is — they appear in many features,
 // so a match on them would let a genuinely-missing feature slip through. Distinctiveness comes from
@@ -85,7 +85,12 @@ export function looksImplemented(feature: string, projectPath: string): boolean 
 }
 
 export interface CompletenessOptions {
-  reviewer?: FunctionalReviewer; // injectable for tests
+  // No package-owned default (2026-07-10 seam decoupling): the host application must inject a
+  // configured reviewer (e.g. VibeHard's own `llmFunctionalReviewer({modelFactory, config})`) to
+  // actually run this check. Not injected → treated the SAME as a reviewer that throws (below):
+  // fails CLOSED, not silently n/a — a spec with real features genuinely wants this checked, and
+  // "no reviewer wired" is exactly as "unverifiable" as "the wired reviewer broke."
+  reviewer?: FunctionalReviewer;
   ranAt?: string;
 }
 
@@ -103,7 +108,11 @@ export async function runCompleteness(projectPath: string, opts: CompletenessOpt
   }
   if (!features.length) return notApplicable("completeness", ranAt);
 
-  const reviewer = opts.reviewer ?? llmFunctionalReviewer();
+  if (!opts.reviewer) {
+    const message = `Could not verify feature completeness — no functional reviewer is configured. This is a setup problem, NOT a code change: the host application must supply a reviewer for this check to run. Failing closed so an unverifiable build is never called "done".`;
+    return verdictOf("completeness", [{ tool: "completeness", ruleId: "completeness-unverified", severity: "high", file: "app/", message }], ranAt);
+  }
+  const reviewer = opts.reviewer;
   let checks;
   try {
     checks = await reviewer(features, projectPath);
@@ -137,4 +146,13 @@ export async function runCompleteness(projectPath: string, opts: CompletenessOpt
   return verdictOf("completeness", findings, ranAt);
 }
 
-export const completenessGate = { name: "completeness", run: (p: string) => runCompleteness(p) };
+// Bare default: no reviewer injected, so any spec with real features fails closed (see above) —
+// genuinely standalone use (no LLM configured at all) still gets an honest, non-silent verdict.
+export const completenessGate: Gate = { name: "completeness", run: (p: string) => runCompleteness(p) };
+
+/** Construct a completeness gate bound to a specific reviewer — what a host application (e.g.
+ *  VibeHard's own gate-wiring layer, passing `llmFunctionalReviewer({modelFactory, config})`)
+ *  uses in place of the bare `completenessGate` to actually run the check for real. */
+export function createCompletenessGate(opts: CompletenessOptions): Gate {
+  return { name: "completeness", run: (p: string) => runCompleteness(p, opts) };
+}

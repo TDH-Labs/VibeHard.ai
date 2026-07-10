@@ -12,7 +12,6 @@ import {
   pythonStartCommand,
   isUp,
   parseEnvKeys,
-  resolveSandboxHost,
   runVerify,
   safeToolEnv,
   summarizeBuild,
@@ -24,12 +23,10 @@ import {
   synthVerifyDockerfile,
   verifyRuns,
 } from "./verify.ts";
-import { verdictOf } from "../types.ts";
-import type { HostProvider } from "../substrate/types.ts";
-import { FlyHostProvider } from "../substrate/fly.ts";
-import type { CommandResult, CommandRunner } from "../substrate/vercel.ts";
+import { verdictOf, type GateVerdict } from "./types.ts";
+import type { ExecSandboxResult, HostProvider, RunExecSandboxFn, RunSandboxFn, SandboxResult } from "./sandbox-seam.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
+const FIXTURES = join(import.meta.dir, "..", "..", "..", "fixtures");
 
 const tmps: string[] = [];
 afterEach(async () => {
@@ -378,38 +375,6 @@ describe("safeToolEnv — CRITICAL-2: platform secrets must not leak into genera
   });
 });
 
-describe("resolveSandboxHost — the container path's isolation gating (EPIC #32a)", () => {
-  const fakeHost: HostProvider = {
-    name: "fake-fly",
-    deploy: async () => ({ url: "https://fake.example", hostRef: "fake-ref" }),
-    teardown: async () => {},
-  };
-  const saved = process.env.FLY_API_TOKEN;
-  afterEach(() => {
-    if (saved === undefined) delete process.env.FLY_API_TOKEN;
-    else process.env.FLY_API_TOKEN = saved;
-  });
-
-  test("an injected host ALWAYS wins, regardless of FLY_API_TOKEN (tests/callers never touch real Fly)", () => {
-    delete process.env.FLY_API_TOKEN;
-    expect(resolveSandboxHost(fakeHost)).toBe(fakeHost);
-    process.env.FLY_API_TOKEN = "some-token";
-    expect(resolveSandboxHost(fakeHost)).toBe(fakeHost); // still the injected one, not a real FlyHostProvider
-  });
-
-  test("no injected host + no FLY_API_TOKEN → undefined (falls back to local docker, today's behavior)", () => {
-    delete process.env.FLY_API_TOKEN;
-    expect(resolveSandboxHost(undefined)).toBeUndefined();
-  });
-
-  test("no injected host + FLY_API_TOKEN set → a real FlyHostProvider (constructing it does no I/O)", () => {
-    process.env.FLY_API_TOKEN = "some-token";
-    const host = resolveSandboxHost(undefined);
-    expect(host).toBeInstanceOf(FlyHostProvider);
-    expect(host?.name).toBe("fly");
-  });
-});
-
 describe("summarizeSandbox — a Fly-sandboxed container result → findings (EPIC #32a)", () => {
   test("ok → no findings (pass)", () => {
     expect(summarizeSandbox({ ok: true, status: 200, url: "https://x", log: "" })).toEqual([]);
@@ -477,38 +442,39 @@ function fakeHostProvider(over: Partial<HostProvider> = {}): HostProvider {
     ...over,
   };
 }
-function fakeExecRunner(result: Partial<CommandResult> = {}) {
-  const calls: string[][] = [];
-  const runner: CommandRunner = {
-    run: async (cmd) => {
-      calls.push(cmd);
-      return { exitCode: 0, stdout: "", stderr: "", ...result };
-    },
+// Fakes at the injected seam itself (RunSandboxFn/RunExecSandboxFn), not at a lower-level
+// CommandRunner — verify.ts now only cares that it CALLS the injected function correctly and
+// interprets its result correctly. Whether a REAL implementation (e.g. VibeHard's Fly-backed
+// one) constructs the right `fly machine run` invocation underneath is that implementation's
+// own test responsibility (src/substrate/fly-exec-sandbox.test.ts), not gate-check's.
+function fakeRunExecSandbox(result: Partial<ExecSandboxResult> = {}): { fn: RunExecSandboxFn; calls: Array<{ projectPath: string; dockerfile: string; cmd: string[] }> } {
+  const calls: Array<{ projectPath: string; dockerfile: string; cmd: string[] }> = [];
+  const fn: RunExecSandboxFn = async (projectPath, dockerfile, cmd) => {
+    calls.push({ projectPath, dockerfile, cmd });
+    return { exitCode: 0, log: "", ...result };
   };
-  return { runner, calls };
+  return { fn, calls };
+}
+function fakeRunSandbox(result: Partial<SandboxResult> = {}): RunSandboxFn {
+  return async () => ({ ok: true, status: 200, url: "https://sbx.fly.dev", log: "", ...result });
 }
 
 describe("runVerify — build kind, EPIC #32 sandboxed exec path", () => {
-  test("a Fly host configured → runs in the exec sandbox, never touches host npm/local runBuild", async () => {
+  test("a sandbox host configured → runs via the injected exec sandbox, never touches host npm/local runBuild", async () => {
     const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "vite build" } }) });
-    const { runner, calls } = fakeExecRunner({ exitCode: 0, stdout: "built\n" });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
-    });
+    const { fn, calls } = fakeRunExecSandbox({ exitCode: 0, log: "built\n" });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runExecSandbox: fn });
     expect(v.findings).toEqual([]); // pass, no findings
-    expect(calls.some((c) => c[1] === "machine" && c[2] === "run")).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.cmd).toEqual(["sh", "-c", "npm run build"]); // verify.ts called the seam with the right command
     // never fell through to a local `npm run build` on the host — no dist/ was produced locally
     expect(existsSync(join(d, "dist"))).toBe(false);
   });
 
   test("the sandboxed build fails → a build-failed finding carrying the sandbox's log", async () => {
     const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "vite build" } }) });
-    const { runner } = fakeExecRunner({ exitCode: 1, stderr: "Module not found: foo\n" });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
-    });
+    const { fn } = fakeRunExecSandbox({ exitCode: 1, log: "Module not found: foo\n" });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runExecSandbox: fn });
     expect(v.findings.length).toBeGreaterThan(0);
     expect(v.findings.some((f) => f.message.includes("Module not found"))).toBe(true);
   });
@@ -520,11 +486,8 @@ describe("runVerify — build kind, EPIC #32 sandboxed exec path", () => {
     const buildkitLog =
       "load build definition from dockerfile: 209B 0.2s done\n#1 DONE 0.2s\n\n#2 [internal] load .dockerignore\n" +
       "Error: error building: failed to solve: process \"/bin/sh -c npm install --no-audit --no-fund\" did not complete successfully: exit code: 1";
-    const { runner } = fakeExecRunner({ exitCode: 1, stderr: buildkitLog });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
-    });
+    const { fn } = fakeRunExecSandbox({ exitCode: 1, log: buildkitLog });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runExecSandbox: fn });
     expect(v.findings).toHaveLength(1);
     expect(v.findings[0]?.ruleId).toBe("sandbox-image-build-failed");
     expect(v.findings[0]?.file).toBe("Dockerfile");
@@ -533,46 +496,46 @@ describe("runVerify — build kind, EPIC #32 sandboxed exec path", () => {
     expect(v.findings[0]?.message).toContain("failed to solve");
   });
 
-  test("no Fly host configured → resolveSandboxHost returns undefined, falling through unchanged", () => {
-    // Structural, not behavioral: with no flyHost/token, `resolveSandboxHost(deps.flyHost)` in the
-    // build branch is falsy, so execution falls through past the new `if (flyHost) {...; return}`
-    // block to the exact pre-existing `runBuild` call below it — unmodified code, already covered
-    // by this file's other build-kind tests (e.g. summarizeBuildArtifacts, "true" script). A real
-    // `npm run build` invocation here is redundant coverage AND flaky in this sandboxed test env
-    // (npm's own startup network check hangs with no outbound access) — resolveSandboxHost's own
-    // gating logic already has dedicated tests above.
-    //
-    // Bun auto-loads .env for every `bun` invocation (including `bun test`), so a real
-    // FLY_API_TOKEN can be live in process.env here — must clear it first, same as the
-    // `resolveSandboxHost` describe block above.
-    const saved = process.env.FLY_API_TOKEN;
-    delete process.env.FLY_API_TOKEN;
+  test("no sandbox injected (flyHost/runExecSandbox absent) → falls through to the local runBuild path unchanged", async () => {
+    // Structural: with runExecSandbox undefined, `if (flyHost && deps.runExecSandbox)` in the
+    // build branch is falsy regardless of flyHost, so execution falls through to the exact
+    // pre-existing local `runBuild` call — the real path (host-lock + `npm run build`), same as
+    // this file's other build-kind tests (e.g. summarizeBuildArtifacts, "true" script). The lock
+    // dir is redirected to a scratch tmp dir for the duration of this test: the real default
+    // (/root/.vibehard/.host-lock) assumes a root-owned host and isn't writable in every test env.
+    const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "true" } }) });
+    const lockDir = await mkdtemp(join(tmpdir(), "vibehard-hostlock-"));
+    const prevLockDir = process.env.VIBEHARD_HOST_LOCK_DIR;
+    process.env.VIBEHARD_HOST_LOCK_DIR = lockDir;
+    const { fn, calls } = fakeRunExecSandbox();
+    let v: GateVerdict;
     try {
-      expect(resolveSandboxHost(undefined)).toBeUndefined();
+      v = await runVerify(d, undefined, { flyHost: fakeHostProvider() }); // no runExecSandbox
     } finally {
-      if (saved === undefined) delete process.env.FLY_API_TOKEN;
-      else process.env.FLY_API_TOKEN = saved;
+      if (prevLockDir === undefined) delete process.env.VIBEHARD_HOST_LOCK_DIR;
+      else process.env.VIBEHARD_HOST_LOCK_DIR = prevLockDir;
+      await rm(lockDir, { recursive: true, force: true });
     }
+    expect(calls).toHaveLength(0); // the injected fake was never called
+    expect(fn).toBeDefined(); // (keeps the unused-var linter quiet; the point is calls.length)
+    expect(v.gate).toBe("verify");
   });
 });
 
 describe("runVerify — cli kind (downloadable-tool), EPIC #32 sandboxed exec path (2026-07-09)", () => {
   // Until now the `cli` launch kind (deployTarget: downloadable-tool) had NO sandbox wiring at
-  // all, regardless of whether a Fly host was configured — the one launch kind that always ran
-  // untrusted install+run directly on the platform host. This closes that gap.
-  test("a Fly host configured → runs `node <entry>` in the exec sandbox, never touches host npm", async () => {
+  // all, regardless of whether a sandbox host was configured — the one launch kind that always
+  // ran untrusted install+run directly on the platform host. This closes that gap.
+  test("a sandbox host configured → runs `node <entry>` via the injected exec sandbox, never touches host npm", async () => {
     const d = await scratch({
       "package.json": JSON.stringify({ main: "src/index.js", dependencies: { commander: "^12" } }),
       "src/index.js": "console.log('ok')",
       ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
     });
-    const { runner, calls } = fakeExecRunner({ exitCode: 0, stdout: "ok\n" });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
-    });
+    const { fn, calls } = fakeRunExecSandbox({ exitCode: 0, log: "ok\n" });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runExecSandbox: fn });
     expect(v.findings).toEqual([]); // pass, no findings
-    expect(calls.some((c) => c[1] === "machine" && c[2] === "run" && c.includes("node") && c.includes("src/index.js"))).toBe(true);
+    expect(calls[0]?.cmd).toEqual(["node", "src/index.js"]);
     expect(existsSync(join(d, "node_modules"))).toBe(false); // never fell through to a local install
   });
 
@@ -582,11 +545,8 @@ describe("runVerify — cli kind (downloadable-tool), EPIC #32 sandboxed exec pa
       "src/index.js": "process.exit(1)",
       ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
     });
-    const { runner } = fakeExecRunner({ exitCode: 1, stderr: "boom\n" });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
-    });
+    const { fn } = fakeRunExecSandbox({ exitCode: 1, log: "boom\n" });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runExecSandbox: fn });
     expect(v.findings).toHaveLength(1);
     expect(v.findings[0]?.ruleId).toBe("cli-run-failed");
     expect(v.findings[0]?.message).toContain("boom");
@@ -599,11 +559,8 @@ describe("runVerify — cli kind (downloadable-tool), EPIC #32 sandboxed exec pa
       ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
     });
     const buildkitLog = "load build definition from dockerfile: 209B 0.2s done\nError: error building: failed to solve: process \"/bin/sh -c npm install --no-audit --no-fund\" did not complete successfully: exit code: 1";
-    const { runner } = fakeExecRunner({ exitCode: 1, stderr: buildkitLog });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
-    });
+    const { fn } = fakeRunExecSandbox({ exitCode: 1, log: buildkitLog });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runExecSandbox: fn });
     expect(v.findings).toHaveLength(1);
     expect(v.findings[0]?.ruleId).toBe("sandbox-image-build-failed");
     expect(v.findings[0]?.message).not.toContain("cli tool did not run cleanly");
@@ -612,12 +569,9 @@ describe("runVerify — cli kind (downloadable-tool), EPIC #32 sandboxed exec pa
 });
 
 describe("runVerify — node kind, EPIC #32 sandboxed deploy path", () => {
-  test("a Fly host configured → deploys+probes the sandbox, and the synthesized Dockerfile never lingers", async () => {
+  test("a sandbox host configured → deploys+probes via the injected sandbox, and the synthesized Dockerfile never lingers", async () => {
     const d = await scratch({ "server.js": "require('http').createServer((_,r)=>r.end('ok')).listen(process.env.PORT)" });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider(),
-      flySandboxFetch: async () => ({ status: 200 }), // the sandbox's own HTTP probe — never a real network call in tests
-    });
+    const v = await runVerify(d, undefined, { flyHost: fakeHostProvider(), runSandbox: fakeRunSandbox({ status: 200 }) });
     expect(v.findings).toEqual([]); // fakeHostProvider's deploy + a healthy fake probe → pass
     expect(existsSync(join(d, "Dockerfile"))).toBe(false); // transient — cleaned up after
   });
@@ -626,18 +580,24 @@ describe("runVerify — node kind, EPIC #32 sandboxed deploy path", () => {
     const d = await scratch({ "server.js": "console.log('x')" });
     const v = await runVerify(d, undefined, {
       flyHost: fakeHostProvider(),
-      flySandboxFetch: async () => ({ status: 502 }),
+      runSandbox: fakeRunSandbox({ ok: false, status: 502, url: null, log: "unhealthy" }),
     });
     expect(v.findings.some((f) => f.ruleId === "sandbox-boot-failed")).toBe(true);
     expect(existsSync(join(d, "Dockerfile"))).toBe(false);
   });
 
-  test("Dockerfile is cleaned up even when the sandboxed deploy throws", async () => {
+  test("Dockerfile is cleaned up even when the injected sandbox itself throws", async () => {
+    // A real sandbox implementation is expected to catch its own internal failures and resolve
+    // to ok:false (see the sibling test above) rather than reject — but verify.ts's OWN
+    // try/finally around the sandboxed call must not leak the transient Dockerfile even if a
+    // caller's implementation violates that contract and throws.
     const d = await scratch({ "server.js": "console.log('x')" });
-    const v = await runVerify(d, undefined, {
-      flyHost: fakeHostProvider({ deploy: async () => { throw new Error("fly deploy failed"); } }),
-    });
-    expect(v.findings.some((f) => f.ruleId === "sandbox-boot-failed")).toBe(true);
+    const throwingRunSandbox: RunSandboxFn = async () => {
+      throw new Error("sandbox implementation blew up");
+    };
+    await expect(runVerify(d, undefined, { flyHost: fakeHostProvider(), runSandbox: throwingRunSandbox })).rejects.toThrow(
+      "sandbox implementation blew up",
+    );
     expect(existsSync(join(d, "Dockerfile"))).toBe(false);
   });
 });

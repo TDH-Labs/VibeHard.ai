@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runGate } from "./index.ts";
-import { verdictOf, type Gate } from "../types.ts";
+import { verdictOf, type Gate } from "./types.ts";
 
 describe("runGate — C-5 (audit2): a gate that THROWS fails closed, never crashes the pipeline", () => {
   const okGate: Gate = { name: "ok", run: async () => verdictOf("ok", [], "t") };

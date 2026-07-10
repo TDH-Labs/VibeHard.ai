@@ -13,7 +13,7 @@ import {
   rlsEnabledTables,
   runRls,
 } from "./rls.ts";
-import { verdictOf } from "../types.ts";
+import { verdictOf } from "./types.ts";
 
 const tmps: string[] = [];
 afterEach(async () => {
@@ -90,7 +90,7 @@ describe("readMigrations (I/O)", () => {
   });
 
   test("reads the remediated fixture's migrations", async () => {
-    const sources = await readMigrations(join(import.meta.dir, "..", "..", "fixtures", "remediated"));
+    const sources = await readMigrations(join(import.meta.dir, "..", "..", "..", "fixtures", "remediated"));
     expect(sources.length).toBeGreaterThan(0);
     expect(parseRls(sources)).toEqual([]); // remediated → clean
   });

@@ -11,10 +11,10 @@
 import { resolve, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import type { Finding, GateVerdict, Severity } from "../types.ts";
-import { verdictOf } from "../types.ts";
-import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
-import { withHostLock } from "../util/host-lock.ts";
+import type { Finding, GateVerdict, Severity } from "./types.ts";
+import { verdictOf } from "./types.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "./timeouts.ts";
+import { withHostLock } from "./host-lock.ts";
 
 const LOCKFILES = ["package-lock.json", "bun.lockb", "bun.lock", "yarn.lock", "pnpm-lock.yaml"];
 

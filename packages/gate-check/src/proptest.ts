@@ -14,8 +14,8 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { notApplicable, verdictOf, type Finding, type Gate } from "../types.ts";
-import { PROPTEST_DIR, propTestVacuityReason, requirementIdOf } from "../proptest/validate.ts";
+import { notApplicable, verdictOf, type Finding, type Gate } from "./types.ts";
+import { PROPTEST_DIR, propTestVacuityReason, requirementIdOf } from "./proptest-validate.ts";
 import { safeToolEnv } from "./verify.ts";
 
 /** Bounded like CLEAN_TIMEOUT_MS in verify.ts — a hung property (infinite loop in app code

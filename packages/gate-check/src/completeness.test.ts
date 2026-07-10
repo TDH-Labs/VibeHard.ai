@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCompleteness } from "./completeness.ts";
-import type { FunctionalReviewer } from "../functest/functest.ts";
+import type { FunctionalReviewer } from "./functest.ts";
 
 const tmps: string[] = [];
 afterEach(() => {

@@ -1,10 +1,17 @@
+/**
+ * Cross-package integration: proves gate-check's `runRlsEnforcement` correctly judges REAL SQL
+ * produced by VibeHard's own codegen (`generateBackend`), not idealized hand-written fixtures.
+ * Moved out of @vibehard/gate-check (2026-07-10 extraction) — the package has no reason to know
+ * about VibeHard's specific backend generator; this test belongs where both halves it exercises
+ * (VibeHard's codegen + the package's gate) are actually available.
+ */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { coerceDataModel } from "../backend/model.ts";
-import { generateBackend } from "../backend/generate.ts";
-import { runRlsEnforcement } from "./rls-enforce.ts";
+import { coerceDataModel } from "./model.ts";
+import { generateBackend } from "./generate.ts";
+import { runRlsEnforcement } from "@vibehard/gate-check";
 
 const tmps: string[] = [];
 afterEach(() => {

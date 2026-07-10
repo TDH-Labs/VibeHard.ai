@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assessCompliance, detectDeletePath, runCompliance, type ComplianceInput } from "./compliance.ts";
-import { isBlocking, verdictOf } from "../types.ts";
+import { isBlocking, verdictOf } from "./types.ts";
 
 function input(over: Partial<ComplianceInput> = {}): ComplianceInput {
   return {

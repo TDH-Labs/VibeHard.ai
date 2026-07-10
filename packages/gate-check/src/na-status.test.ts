@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runGate } from "./index.ts";
-import { notApplicable, verdictOf, type Finding, type Gate } from "../types.ts";
+import { notApplicable, verdictOf, type Finding, type Gate } from "./types.ts";
 
 const naGate: Gate = { name: "classify", run: async () => notApplicable("classify", "t") };
 const passGate: Gate = { name: "scan", run: async () => verdictOf("scan", [], "t") };

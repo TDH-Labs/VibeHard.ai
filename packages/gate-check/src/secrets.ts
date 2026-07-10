@@ -6,11 +6,11 @@
 import { join, resolve } from "node:path";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { Finding, GateVerdict } from "../types.ts";
-import { verdictOf } from "../types.ts";
+import type { Finding, GateVerdict } from "./types.ts";
+import { verdictOf } from "./types.ts";
 import { hasAuthoredSource, relativizeFinding } from "./scan-scope.ts";
-import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
-import { withHostLock } from "../util/host-lock.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "./timeouts.ts";
+import { withHostLock } from "./host-lock.ts";
 
 /** The exact gitleaks version the production image installs natively (Dockerfile) — see the
  *  same 2026-07-06 note in sast.ts (SEMGREP_VERSION): docker was never available on the

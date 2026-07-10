@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { applyRigor, checkContainer, checkPinning, checkReadme, checkTsStrict } from "./prod-readiness.ts";
-import type { Finding } from "../types.ts";
+import type { Finding } from "./types.ts";
 
 describe("checkPinning — unbounded version ranges", () => {
   test("`latest`, `*`, `x`, and `>=` are flagged; exact/^/~ are fine", () => {

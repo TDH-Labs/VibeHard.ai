@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { runDepVuln } from "./depvuln.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "..", "fixtures");
+const FIXTURES = join(import.meta.dir, "..", "..", "..", "fixtures");
 const run = process.env.VIBEHARD_INTEGRATION ? describe : describe.skip;
 
 run("dep-vuln gate (real trivy)", () => {

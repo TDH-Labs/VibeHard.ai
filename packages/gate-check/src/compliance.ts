@@ -20,9 +20,9 @@
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Finding, GateVerdict } from "../types.ts";
-import { notApplicable, verdictOf } from "../types.ts";
-import type { DeployTarget, SensitiveClass, Tenancy } from "../spec/index.ts";
+import type { Finding, GateVerdict } from "./types.ts";
+import { notApplicable, verdictOf } from "./types.ts";
+import type { DeployTarget, SensitiveClass, Tenancy } from "./spec-contract.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 import { classificationMismatch, detectSensitiveSignals, inferredClasses } from "./sensitive-signals.ts";
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { interpretTrivy, mapTrivySeverity, parseTrivy } from "./depvuln.ts";
-import { verdictOf } from "../types.ts";
+import { verdictOf } from "./types.ts";
 
 // Shaped like real `trivy fs --format json --scanners vuln` output.
 const TRIVY_JSON = {

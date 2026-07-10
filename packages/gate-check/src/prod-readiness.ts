@@ -16,9 +16,9 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Finding, GateVerdict } from "../types.ts";
-import { notApplicable, verdictOf } from "../types.ts";
-import { coerceSpec, decideRigor, type Rigor } from "../spec/index.ts";
+import type { Finding, GateVerdict } from "./types.ts";
+import { notApplicable, verdictOf } from "./types.ts";
+import { coerceSpec, decideRigor, type Rigor } from "./spec-contract.ts";
 
 const f = (ruleId: string, severity: Finding["severity"], file: string, message: string): Finding => ({
   tool: "prod-readiness",

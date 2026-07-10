@@ -59,26 +59,18 @@ run("verify cli path (real node spawn, downloadable-tool deployTarget)", () => {
     // fails the EXISTING health-check-failed path, not the new cli path — proving the "cli" kind
     // is strictly opt-in behind deployTarget, never silently applied to a hosted-app build.
     //
-    // Bun auto-loads .env for every `bun` invocation (including `bun test`), so a real
-    // FLY_API_TOKEN can be live in process.env here — must clear it first (same as
-    // resolveSandboxHost's own describe block in verify.test.ts), or this node-kind path takes
-    // the EPIC #32 sandboxed-deploy branch and makes a real Fly API call instead of the local
-    // probe this test means to exercise.
-    const saved = process.env.FLY_API_TOKEN;
-    delete process.env.FLY_API_TOKEN;
-    try {
-      const dir = await scratch({
-        "server.js": "process.exit(0);",
-        "package.json": '{"main":"server.js"}',
-        ".vibehard/spec.json": JSON.stringify({ deployTarget: "hosted-app" }),
-      });
-      const v = await runVerify(dir);
-      expect(v.status).toBe("block");
-      expect(v.findings.some((f) => f.ruleId === "health-check-failed")).toBe(true);
-      expect(v.findings.some((f) => f.ruleId === "cli-run-failed")).toBe(false);
-    } finally {
-      if (saved === undefined) delete process.env.FLY_API_TOKEN;
-      else process.env.FLY_API_TOKEN = saved;
-    }
+    // No sandbox deps injected (the default `runVerify(dir)` call below), so the EPIC #32
+    // sandboxed-deploy branch (gated on deps.flyHost && deps.runSandbox both being present,
+    // 2026-07-10 seam refactor) can never trigger here regardless of environment — unlike the
+    // old FLY_API_TOKEN-driven auto-construction this package no longer does.
+    const dir = await scratch({
+      "server.js": "process.exit(0);",
+      "package.json": '{"main":"server.js"}',
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "hosted-app" }),
+    });
+    const v = await runVerify(dir);
+    expect(v.status).toBe("block");
+    expect(v.findings.some((f) => f.ruleId === "health-check-failed")).toBe(true);
+    expect(v.findings.some((f) => f.ruleId === "cli-run-failed")).toBe(false);
   }, 30_000);
 });
