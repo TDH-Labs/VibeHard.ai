@@ -513,6 +513,26 @@ describe("runVerify — build kind, EPIC #32 sandboxed exec path", () => {
     expect(v.findings.some((f) => f.message.includes("Module not found"))).toBe(true);
   });
 
+  test("2026-07-09: the SANDBOX'S OWN image build fails (before npm run build ever ran) → a distinct, accurately-labeled finding, not a misleading 'npm run build exited' one", async () => {
+    // Real captured incident: the Dockerfile's own baked-in `RUN npm install` step failed, but
+    // the resulting finding claimed "`npm run build` exited 1" — npm run build never even ran.
+    const d = await scratch({ "package.json": JSON.stringify({ scripts: { build: "tsc" } }) });
+    const buildkitLog =
+      "load build definition from dockerfile: 209B 0.2s done\n#1 DONE 0.2s\n\n#2 [internal] load .dockerignore\n" +
+      "Error: error building: failed to solve: process \"/bin/sh -c npm install --no-audit --no-fund\" did not complete successfully: exit code: 1";
+    const { runner } = fakeExecRunner({ exitCode: 1, stderr: buildkitLog });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
+    });
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]?.ruleId).toBe("sandbox-image-build-failed");
+    expect(v.findings[0]?.file).toBe("Dockerfile");
+    expect(v.findings[0]?.message).not.toContain("npm run build` exited"); // not misattributed to the app's own script
+    expect(v.findings[0]?.message).toContain("before `npm run build` ever ran");
+    expect(v.findings[0]?.message).toContain("failed to solve");
+  });
+
   test("no Fly host configured → resolveSandboxHost returns undefined, falling through unchanged", () => {
     // Structural, not behavioral: with no flyHost/token, `resolveSandboxHost(deps.flyHost)` in the
     // build branch is falsy, so execution falls through past the new `if (flyHost) {...; return}`
@@ -570,6 +590,24 @@ describe("runVerify — cli kind (downloadable-tool), EPIC #32 sandboxed exec pa
     expect(v.findings).toHaveLength(1);
     expect(v.findings[0]?.ruleId).toBe("cli-run-failed");
     expect(v.findings[0]?.message).toContain("boom");
+  });
+
+  test("2026-07-09: the sandbox's own image build fails (before node <entry> ever ran) → sandbox-image-build-failed, not a misleading cli-run-failed", async () => {
+    const d = await scratch({
+      "package.json": JSON.stringify({ main: "src/index.js" }),
+      "src/index.js": "console.log('ok')",
+      ".vibehard/spec.json": JSON.stringify({ deployTarget: "downloadable-tool" }),
+    });
+    const buildkitLog = "load build definition from dockerfile: 209B 0.2s done\nError: error building: failed to solve: process \"/bin/sh -c npm install --no-audit --no-fund\" did not complete successfully: exit code: 1";
+    const { runner } = fakeExecRunner({ exitCode: 1, stderr: buildkitLog });
+    const v = await runVerify(d, undefined, {
+      flyHost: fakeHostProvider(),
+      flyExec: { runner, token: "t", name: () => "vibehard-exec-test" },
+    });
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]?.ruleId).toBe("sandbox-image-build-failed");
+    expect(v.findings[0]?.message).not.toContain("cli tool did not run cleanly");
+    expect(v.findings[0]?.message).toContain("before `node src/index.js` ever ran");
   });
 });
 

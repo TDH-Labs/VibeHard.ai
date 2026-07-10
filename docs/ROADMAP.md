@@ -253,11 +253,21 @@ Direction #1 (single-owner) and #3 (collision detection at the architecture leve
 un-built alternatives — not needed now that #2 closes the actual damage, but worth revisiting if
 a merge ever produces a genuinely wrong result for a field this policy doesn't anticipate.
 
-Also noted in passing, not investigated: one held finding's `message` field
-(`verify:build-failed`) contained literal Docker/Depot console text (`"Building image with
-Depot..."`) that has no business appearing in an `npm run build` failure — `cleanEnvVerify`
-(the actual code that ran) is confirmed plain `npm`/`tsc`, no Docker anywhere. Something is
-contaminating a finding's message with unrelated captured output. Not chased down.
+**Stray Docker/Depot text in a `verify:build-failed` message — root-caused + fixed 2026-07-09.**
+Not contamination — the message was accurate to a DIFFERENT code path than the one it claimed.
+The `build` and `cli` launch kinds' sandboxed exec branches (`runInFlyExecSandbox`, EPIC #32)
+build an ephemeral Docker image (the synthesized Dockerfile's own baked-in `RUN npm install`)
+BEFORE running the actual command (`npm run build` / `node <entry>`) inside it. When that IMAGE
+BUILD itself fails — before the real command ever runs — the captured log is BuildKit/Depot's own
+output (`"load build definition from dockerfile"`, `"failed to solve: process ... did not
+complete successfully"`), but `summarizeBuild`/`cliRunFinding` unconditionally labeled it
+`"`npm run build` exited N"` / `"`node <entry>` exited N"` regardless — sending whoever reads the
+finding chasing the app's build SCRIPT when the real problem is one layer down, in the sandbox's
+own image. Fixed: `sandboxExecFinding()` (`src/gate/verify.ts`) detects BuildKit's own
+`failed to solve:` / `error building:` / `load build definition from dockerfile` framing and
+emits an accurately-labeled `sandbox-image-build-failed` finding instead, falling through to the
+existing (correct) command-failure path otherwise. Tests: `verify.test.ts`, both the `build` and
+`cli` kind sandbox describe blocks, replaying the actual captured BuildKit log from the incident.
 
 ---
 

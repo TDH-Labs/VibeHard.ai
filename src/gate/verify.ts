@@ -578,6 +578,39 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
   }
 }
 
+/** BuildKit's own "failed to solve" framing is a recognizable signature of the SANDBOX'S OWN
+ *  image build failing (the synthesized Dockerfile's baked-in `RUN npm install`, most often) —
+ *  distinct from the actual sandboxed COMMAND failing inside an already-built image. Found live,
+ *  2026-07-09: a held finding claimed "`npm run build` exited 1" while its own captured log was
+ *  unmistakably Docker/Depot build output ("load build definition from dockerfile", "failed to
+ *  solve: process ... npm install ... did not complete successfully") — `npm run build` never
+ *  even ran. Mislabeling this sends whoever reads it (a human, or the autofix LLM) chasing the
+ *  app's build SCRIPT when the real problem is one layer down, in the sandbox's own image. */
+function isSandboxImageBuildFailure(log: string): boolean {
+  return /failed to solve:|error building:|load build definition from dockerfile/i.test(log);
+}
+
+/** A sandboxed exec's result → the finding that actually describes what failed. `describeCmd` is
+ *  what to call the thing that was SUPPOSED to run (e.g. "`npm run build`") when it's genuinely
+ *  that which failed; `onCommandFailure` builds that finding (the existing, already-correct path
+ *  for a real command failure) — this only intercepts the image-build-failed case ahead of it. */
+function sandboxExecFinding(result: { exitCode: number; log: string }, describeCmd: string, onCommandFailure: (log: string) => Finding[]): Finding[] {
+  if (result.exitCode === 0) return [];
+  if (isSandboxImageBuildFailure(result.log)) {
+    const trimmed = result.log.trim();
+    return [
+      {
+        tool: "verify",
+        ruleId: "sandbox-image-build-failed",
+        severity: "high",
+        file: "Dockerfile",
+        message: `The isolated sandbox couldn't even build its own image — before ${describeCmd} ever ran. This is usually the Dockerfile's own baked-in dependency install failing, not your app's build script${trimmed ? ` — error: ${trimmed.slice(-600)}` : ""}`,
+      },
+    ];
+  }
+  return onCommandFailure(result.log);
+}
+
 /** Pure: a `cli` launch kind's run outcome → Finding[]. Shared by the local (Bun.spawnSync) and
  *  sandboxed (Fly exec, EPIC #32) paths so both produce the IDENTICAL finding shape — the fixer
  *  and any UI keyed on ruleId shouldn't have to know which path actually ran the command. */
@@ -837,7 +870,7 @@ export async function runVerify(
       // machine), so summarizeBuildArtifacts (a LOCAL disk check) can't run here — same tradeoff the
       // container path already accepts (summarizeSandbox trusts the sandbox's own signal, no extra
       // local check). The exit code + log tail from inside the sandbox is the whole verdict.
-      findings.push(...summarizeBuild({ stage: "build", exitCode: result.exitCode, log: result.log }, projectPath));
+      findings.push(...sandboxExecFinding(result, `\`npm run ${plan.script}\``, (log) => summarizeBuild({ stage: "build", exitCode: result.exitCode, log }, projectPath)));
       return verdictOf("verify", findings, ranAt);
     }
     const startedMs = Date.now();
@@ -864,7 +897,7 @@ export async function runVerify(
     if (flyHost) {
       const dockerfile = synthVerifyDockerfile(null);
       const result = await runInFlyExecSandbox(projectPath, dockerfile, ["node", plan.entry], deps.flyExec);
-      findings.push(...cliRunFinding(plan.entry, result.exitCode, result.log));
+      findings.push(...sandboxExecFinding(result, `\`node ${plan.entry}\``, (log) => cliRunFinding(plan.entry, result.exitCode, log)));
       return verdictOf("verify", findings, ranAt);
     }
     const installFail = await ensureInstalled(projectPath, env);
