@@ -440,6 +440,10 @@ const MAX_Q=7;
 async function beginBuild(prompt){
   if(!prompt)return;
   if(!me.hasKey&&!me.turnkey){$("#buildhint").textContent="add your own AI key under Advanced below, or upgrade your plan";return}
+  // Ask for notification permission HERE, before the interview — not just in startBuild(), which
+  // only runs after the interview finishes. Without this, a question that arrives while the user
+  // has tabbed away can never notify: permission would still be "default" at that point.
+  if("Notification" in window&&Notification.permission==="default")Notification.requestPermission();
   $("#buildbtn").disabled=true;$("#buildhint").textContent="thinking of a first question…";
   await askNext(prompt,[]);
 }
@@ -471,6 +475,7 @@ async function askNext(prompt,turns){
   $("#qlist").innerHTML=html;
   $("#questions").classList.remove("hide");$("#buildbtn").disabled=false;
   $("#questions").scrollIntoView({behavior:"smooth",block:"center"});
+  notify("Question "+(turns.length+1)+" ready",q.question);
   // One path for "answered" — a tapped choice or typed text both push a turn and advance.
   const choose=(a)=>{const ans=(a||"").trim();if(!ans)return;turns.push({question:q.question,answer:ans});$("#questions").classList.add("hide");$("#buildhint").textContent="next question…";$("#buildbtn").disabled=true;askNext(prompt,turns)};
   $("#qlist").querySelectorAll(".qopt").forEach(b=>{b.onclick=()=>choose(b.getAttribute("data-label"))});
