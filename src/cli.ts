@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { formatWithOptions } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
+import { printReport } from "@vibehard/gate-check";
 import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
 import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
@@ -576,17 +577,7 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     const result = cmd === "deploy" ? await deployGate(arg) : await runGate(arg);
-    for (const v of result.verdicts) {
-      console.log(`\n── ${v.gate} → ${v.status.toUpperCase()} (${v.blocking} blocking) ──`);
-      for (const f of v.findings) explainFinding(f);
-    }
-    if (result.passed) {
-      console.log("\n✅ PASS — deploy allowed");
-      if ("sentinel" in result) console.log(`   sentinel written: ${result.sentinel}`);
-    } else {
-      console.log("\n🛑 BLOCK — deploy refused");
-      if ("sentinel" in result) console.log("   no sentinel written");
-    }
+    printReport(result, { formatFinding: (f, indent) => explainFinding(f, indent) });
     return result.passed ? 0 : 1;
   }
 

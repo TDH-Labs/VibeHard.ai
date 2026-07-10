@@ -171,3 +171,7 @@ export { coerceDataModel } from "./backend-model.ts";
 // budget + lock, matching what they borrowed from `src/util/` before this extraction.
 export { SUBPROCESS_TIMEOUT_MS } from "./timeouts.ts";
 export { withHostLock } from "./host-lock.ts";
+
+// The gate-verdict printer — shared by VibeHard's `vibehard gate`/`vibehard deploy` CLI and this
+// package's own standalone `gate-check` CLI (bin/gate-check.ts).
+export { printReport, type ReportResult, type PrintReportOptions } from "./report.ts";
