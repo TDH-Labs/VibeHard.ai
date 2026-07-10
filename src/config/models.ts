@@ -4,28 +4,42 @@
  * which is the worst place to economize (it's where buggy apps come from). Instead, each pipeline
  * stage maps to a capability TIER, and the tier maps to a concrete model for the active provider:
  *
- *   • code    — codegen + auto-fix (highest stakes, code-heavy)        → the strongest CODE model
- *   • reason  — intake, spec, PRD, SRS, SAD, review, refactor, polish  → a solid reasoning model
- *   • light   — advisory (functest, procurement narration)            → a fast, cheap model
+ *   • code       — codegen + auto-fix (highest stakes, code-heavy)         → the strongest CODE model
+ *   • reason     — architecture (SAD) + adversarial review                 → the strongest REASONING
+ *                  (mistakes here cascade into every downstream workstream, or defeat the one
+ *                  check designed to catch a bad plan before it's built — never economize here)
+ *   • reason-lite — intake, spec, PRD, SRS, refactor, polish               → a cheaper reasoning
+ *                  model (2026-07-09: split out of `reason` — these stages are either bounded/
+ *                  fail-safe by design (intake caps at 7 questions and degrades to "done" on any
+ *                  error) or self-correcting (refactor/polish revert themselves if they regress a
+ *                  passing build), so a materially cheaper model is a reasonable trade here even
+ *                  before it's been A/B'd against `reason` on real output)
+ *   • light      — advisory (functest, procurement narration)              → a fast, cheap model
  *
  * Resolution per stage: VIBEHARD_MODEL_<STAGE> (explicit override) → VIBEHARD_MODEL (global "one
  * model everywhere" escape hatch) → the right-fit tier default. So a stage is always visible and
  * overridable, and there's no silent "everything ran on the cheap model" trap.
+ *
+ * Cloud-only, deliberately: this file has no "local"/"ollama" provider and shouldn't grow one. A
+ * self-hosted model on someone's laptop can't back a live multi-tenant SaaS build — it'd tie the
+ * product's uptime to that machine being on and reachable. Local models have a real role in
+ * offline dev-time testing (the eval harness, run on a developer's own machine); they don't belong
+ * in this file, which is what a LIVE build actually calls.
  */
 export type Stage = "intake" | "spec" | "prd" | "srs" | "sad" | "review" | "codegen" | "fix" | "refactor" | "polish" | "functest" | "procurement";
-type Tier = "code" | "reason" | "light";
+type Tier = "code" | "reason" | "reason-lite" | "light";
 
 const TIER: Record<Stage, Tier> = {
-  intake: "reason",
-  spec: "reason",
-  prd: "reason",
-  srs: "reason",
+  intake: "reason-lite",
+  spec: "reason-lite",
+  prd: "reason-lite",
+  srs: "reason-lite",
   sad: "reason",
   review: "reason",
   codegen: "code",
   fix: "code",
-  refactor: "reason",
-  polish: "reason",
+  refactor: "reason-lite",
+  polish: "reason-lite",
   functest: "light",
   procurement: "light",
 };
@@ -33,10 +47,14 @@ const TIER: Record<Stage, Tier> = {
 // Right-fit model per tier, per provider (OpenRouter / OpenCode Zen / Anthropic). The openrouter
 // tierset is the SAME model families as opencode's, just under OpenRouter's vendor-prefixed slugs
 // (verified against the live /api/v1/models catalog 2026-07-01) — switching gateways ≠ switching models.
+// `reason-lite` prices ~2x-2.7x cheaper than `reason` on OpenRouter's live catalog (checked
+// 2026-07-09: deepseek-v4-pro $0.435/$0.87 per M tokens vs deepseek-v3.2 $0.2145/$0.32175) while
+// staying in the SAME model family as `reason`, not a cross-vendor jump — the safer first move
+// pending a real quality A/B (see docs/ROADMAP.md).
 const MODELS: Record<string, Record<Tier, string>> = {
-  openrouter: { code: "moonshotai/kimi-k2.7-code", reason: "deepseek/deepseek-v4-pro", light: "deepseek/deepseek-v4-flash" },
-  opencode: { code: "kimi-k2.7-code", reason: "deepseek-v4-pro", light: "deepseek-v4-flash" },
-  anthropic: { code: "claude-opus-4-8", reason: "claude-opus-4-8", light: "claude-haiku-4-5" },
+  openrouter: { code: "moonshotai/kimi-k2.7-code", reason: "deepseek/deepseek-v4-pro", "reason-lite": "deepseek/deepseek-v3.2", light: "deepseek/deepseek-v4-flash" },
+  opencode: { code: "kimi-k2.7-code", reason: "deepseek-v4-pro", "reason-lite": "deepseek-v3.2", light: "deepseek-v4-flash" },
+  anthropic: { code: "claude-opus-4-8", reason: "claude-opus-4-8", "reason-lite": "claude-sonnet-5", light: "claude-haiku-4-5" },
 };
 
 export function providerOf(): string {

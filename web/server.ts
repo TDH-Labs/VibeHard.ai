@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
+import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
 import { coerceSpec, decideRigor, llmInterviewer, llmIntake, reviewSpec, type DeployTarget, type InterviewTurn } from "../src/spec/index.ts";
@@ -1135,12 +1136,6 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
   mkdirSync(join(workspace, ".vibehard"), { recursive: true });
   writeFileSync(join(workspace, STEERING_FILE), steeringRules ?? "");
   stopFlags.delete(tenantId);
-  await buildStore.setActive(tenantId, { app, prompt, status: "running" });
-  // Record in the persistent history (or flip an existing record back to running on resume).
-  if (resumeApp && (await buildStore.listBuilds(tenantId)).some((b) => b.app === app)) await buildStore.patchBuild(tenantId, app, { status: "running" });
-  else await buildStore.appendBuild(tenantId, { app, prompt, status: "running", at: Date.now() });
-  let heldTicket: string | undefined; // captured from the build's ::held marker
-  let liveUrl: string | undefined; // captured from ship's "LIVE → <url>" line
   const byo = await loadKey(tenantId);
   // The tenant's key (if set) overrides the operator's for THIS build's child process. The
   // override must be TOTAL: providerOf() in the child resolves openrouter → opencode → anthropic
@@ -1161,6 +1156,17 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
   // colliding name (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) is never injected into the tenant app.
   env.VIBEHARD_TENANT_KEYS = (await integrationKeys(tenantId)).join(",");
   if (design) env.VIBEHARD_DESIGN = design; // #12: the chosen design preset → codegen styling
+  // Pre-flight balance check (found live 2026-07-09: a build died mid-plan when the platform's
+  // OpenRouter account ran to $0) — BEFORE any durable "running" state is written below, so a
+  // refusal here never leaves the tenant looking like they have a stuck build.
+  const budget = await checkOpenRouterBudget(env);
+  if (!budget.ok) return json({ error: budget.reason }, 503);
+  await buildStore.setActive(tenantId, { app, prompt, status: "running" });
+  // Record in the persistent history (or flip an existing record back to running on resume).
+  if (resumeApp && (await buildStore.listBuilds(tenantId)).some((b) => b.app === app)) await buildStore.patchBuild(tenantId, app, { status: "running" });
+  else await buildStore.appendBuild(tenantId, { app, prompt, status: "running", at: Date.now() });
+  let heldTicket: string | undefined; // captured from the build's ::held marker
+  let liveUrl: string | undefined; // captured from ship's "LIVE → <url>" line
   const enc = new TextEncoder();
   const finish = async (status: ActiveBuild["status"]) => {
     await buildStore.setActive(tenantId, { app, prompt, status });

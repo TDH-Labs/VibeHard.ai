@@ -451,3 +451,50 @@ because build subprocesses stream their raw stdout/stderr straight into the SSE 
    unaffected — this only changes what the human watching the log actually sees.
 
 Tests: `src/spec-review/review.test.ts` (adversary-throws case), full suite green (1120 pass).
+
+## Cost credits ran to $0 with no warning + reason-tier cost split (2026-07-09) — FIXED 2026-07-09
+
+**What happened:** the verification build run to prove the review-stage fix worked failed
+immediately, on the very first LLM call, with `This request requires more credits... You requested
+up to 6000 tokens, but can only afford 2482`. Checked the account directly against OpenRouter's
+`/api/v1/credits` endpoint: `total_credits: 115, total_usage: 115.18` — the platform's OpenRouter
+account had run to essentially $0 with **no warning anywhere** (task #37, cost governance, is still
+pending). This blocked every build on the platform, including Adam's own in-progress one, not just
+the verification run — a much bigger problem than the bug that prompted the check.
+
+**Fixed: pre-flight balance check.** New `src/platform/provider-budget.ts` (`checkOpenRouterBudget`)
+queries OpenRouter's live `/api/v1/credits` before a build is allowed to start, using whichever key
+will actually be used for that build (the tenant's BYO key if set, else the platform's — read from
+the already-resolved child-process `env`, so it's never wrong about which account is on the hook).
+Below a configurable floor (`VIBEHARD_MIN_CREDITS_USD`, default $1 — a single planning stage costs
+cents, so this is a "don't even start" floor, not a tight budget) the build is refused up front with
+a clear message, instead of burning what's left on a build that dies mid-plan. Wired into
+`web/server.ts`'s `buildStream` BEFORE any durable "running" state is written, so a refusal never
+leaves a tenant looking like they have a stuck build (the same lesson as the concurrency-cap and
+`isBuildRunning` fixes earlier tonight). Fails OPEN if the check itself errors (network hiccup,
+malformed response) — an unrelated glitch in the balance check must never block an otherwise-healthy
+build; only a CONFIRMED low balance blocks. Verified live: with the account still at ~$0 at the time
+of writing, hitting `/api/build` now returns a clean 503 immediately instead of spawning a build that
+dies several stages in.
+
+**Also (explicit decision, 2026-07-09): local models are NOT wired into VibeHard.** Adam has a real
+local Ollama lineup (`qwen3.6:latest` 36B MoE, `gemma4:12b-mlx`, etc.) and asked whether they had a
+role — decision: no, not in this codebase. VibeHard is a live multi-tenant cloud service; a model
+running on someone's laptop can't back it without a tunnel that ties the product's uptime to that
+laptop being on and reachable. `src/config/models.ts` stays cloud-only by design (see its own doc
+comment). Local models may still have a role in the OFFLINE eval harness (#38, run on a developer's
+own machine) — that's a separate, not-yet-built question, deliberately out of scope here.
+
+**Also: split the `reason` tier into `reason` (SAD + review — compounding-risk stages, stay on
+`deepseek-v4-pro`) and a new `reason-lite` tier (intake, spec, PRD, SRS, refactor, polish — either
+bounded/fail-safe by design or self-correcting, moved to `deepseek-v3.2`).** `v3.2` prices ~49% of
+`v4-pro`'s prompt cost and ~37% of its completion cost on OpenRouter's live catalog (checked
+2026-07-09), while staying in the same model family — a same-vendor swap, not a cross-vendor jump,
+as the safer first move. **Not yet A/B'd against `v4-pro` on real output** (credits are at ~$0, so
+there's nothing to test with yet) — do that once credits are restored, before trusting this beyond
+"probably fine." A cross-vendor candidate (`qwen/qwen3-235b-a22b-2507`, cheaper still and possibly
+higher quality — it's a much larger model) was evaluated and intentionally NOT chosen for this first
+move, to avoid stacking an unvalidated model-family change on top of an unvalidated price change.
+
+Tests: `src/platform/provider-budget.test.ts` (7 cases), `src/config/models.test.ts` (new file, 9
+cases covering the tier split + override precedence). Full suite green.
