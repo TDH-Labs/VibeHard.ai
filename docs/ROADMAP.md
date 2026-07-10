@@ -187,7 +187,7 @@ the other machine.
 
 ---
 
-## Parallel workstreams overwrite shared config files (found via dogfooding, 2026-07-09) — NOT FIXED
+## Parallel workstreams overwrite shared config files (found via dogfooding, 2026-07-09) — FIXED 2026-07-09
 
 **The bug.** Codegen runs multiple workstreams CONCURRENTLY within a tier
 (`runTiers`/`src/util/pool.ts`, confirmed ≤4 at once), and each workstream's generated files get
@@ -223,17 +223,35 @@ chokepoint (`LOCKFILE_BASENAMES` guard, covers `package-lock.json`, `npm-shrinkw
 fixer, refactor) share this one write path, so the fix covers initial generation and every
 autofix pass. Tests: `src/engine/bolt/engine.test.ts` — "hallucinated-lockfile guard".
 
-**Fix directions (not scoped or built yet):**
-1. Assign ownership of shared config files (`package.json`, `package-lock.json`,
-   `tsconfig.json`) to exactly ONE workstream (or a dedicated setup step before the parallel
-   tier), never left to every workstream to independently declare.
-2. Or: merge rather than overwrite — read the existing file (if any workstream in the SAME tier
-   already wrote it), union dependencies/scripts, keep the most specific `main`/`bin`.
-3. Or: make `file-collision` detection (already exists in `reviewArchitecture` for files two
-   WORKSTREAMS both claim in their `covers`/`files` list at the ARCHITECTURE level) also catch
-   this at the actual FILE-WRITE level during codegen, not just at the planning level — the
-   architecture might legitimately not predict every file a workstream's own codegen decides to
-   touch.
+**Shipped 2026-07-09: went with fix direction #2 (merge, not overwrite).** New
+`src/engine/bolt/merge-config.ts` (pure, unit-tested) + a module-level per-absolute-path async
+mutex in `engine.ts` (`withFileLock`) at the exact same write chokepoint the lockfile guard
+already lives at. When a workstream is about to write `package.json`/`tsconfig.json` and a file
+already exists there (an earlier-finishing workstream in the same tier), it's merged
+deterministically instead of blindly overwritten:
+- dependency maps (`dependencies`/`devDependencies`/`peerDependencies`/`optionalDependencies`) +
+  `scripts`: UNION, incoming wins on an exact key collision (neither value is "more correct"
+  without semver-solving, so last-declared is as good a rule as any — the point is nothing gets
+  silently DROPPED).
+- `main`/`bin` — the exact field that regressed in the confirmed incident: EXISTING WINS on a
+  real conflict. The first workstream to establish an entry point owns it; a later, differing
+  value is dropped and surfaced as a `message` event (`merged package.json with another
+  workstream's version — "main" — kept ...`), never silently applied.
+- everything else: existing wins if present, else incoming fills the gap.
+
+The lock is REQUIRED, not optional — `mapPool` genuinely runs up to `VIBEHARD_CODEGEN_CONCURRENCY`
+(default 4) workstreams concurrently, each constructing its own `BoltSession`
+(`cli.ts`'s `streamGeneration`), so a naive check-then-write merge would itself race. Module-level
+because the race is ACROSS session instances, not within one. Verified with a genuine-concurrency
+test (`Promise.all` over two real `BoltSession`s writing the same path at once, not sequential
+awaits) — confirms both the lock and the merge hold under real concurrent execution, not just in
+a single-threaded replay. Tests: `src/engine/bolt/merge-config.test.ts` (pure merge logic,
+including the exact main-regression scenario as a named test) + `engine.test.ts` ("shared-config
+merge, not overwrite").
+
+Direction #1 (single-owner) and #3 (collision detection at the architecture level) remain
+un-built alternatives — not needed now that #2 closes the actual damage, but worth revisiting if
+a merge ever produces a genuinely wrong result for a field this policy doesn't anticipate.
 
 Also noted in passing, not investigated: one held finding's `message` field
 (`verify:build-failed`) contained literal Docker/Depot console text (`"Building image with

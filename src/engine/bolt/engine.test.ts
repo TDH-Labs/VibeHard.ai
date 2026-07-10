@@ -124,6 +124,79 @@ describe("BoltEngine / BoltSession", () => {
 import { containedPath } from "./engine.ts";
 import { existsSync } from "node:fs";
 
+describe("shared-config merge, not overwrite (2026-07-09 — real dogfooding: 2 workstreams both wrote package.json)", () => {
+  test("two file segments targeting package.json in one stream merge rather than the second clobbering the first", async () => {
+    const dir = await workspace();
+    // Mirrors the real incident: an EARLIER workstream (data-access) establishes the correct
+    // downloadable-tool entry point + a dependency; a LATER one (tui-framework) independently
+    // declares package.json again with a DIFFERENT (stale, wrong) main and its own dependency.
+    const stream =
+      '<boltArtifact id="a" title="a">' +
+      '<boltAction type="file" filePath="package.json">{"name":"app","main":"src/index.js","dependencies":{"commander":"^12"}}</boltAction>' +
+      '<boltAction type="file" filePath="package.json">{"name":"app","main":"dist/index.js","dependencies":{"zod":"^3"}}</boltAction>' +
+      "</boltArtifact>";
+    const session = await new BoltEngine(replayDriver([stream])).startSession(dir, CONFIG);
+    const events = await collect(session.prompt("build"));
+
+    const pkg = JSON.parse(await Bun.file(join(dir, "package.json")).text());
+    expect(pkg.main).toBe("src/index.js"); // the FIRST (correct) entry point survives, not silently reverted
+    expect(pkg.dependencies).toEqual({ commander: "^12", zod: "^3" }); // both workstreams' deps survive — union, not overwrite
+    expect(events.some((e) => e.type === "message" && /merged package\.json/.test((e as { text: string }).text) && /main/.test((e as { text: string }).text))).toBe(true);
+  });
+
+  test("real concurrency: two SEPARATE BoltSessions (two workstreams) writing package.json to the SAME workspace at once still merge cleanly", async () => {
+    const dir = await workspace();
+    const streamA = '<boltArtifact id="a" title="a"><boltAction type="file" filePath="package.json">{"name":"app","main":"src/index.js","scripts":{"start":"node src/index.js"}}</boltAction></boltArtifact>';
+    const streamB = '<boltArtifact id="b" title="b"><boltAction type="file" filePath="package.json">{"name":"app","scripts":{"test":"bun test"}}</boltAction></boltArtifact>';
+    const sessionA = await new BoltEngine(replayDriver([streamA])).startSession(dir, CONFIG);
+    const sessionB = await new BoltEngine(replayDriver([streamB])).startSession(dir, CONFIG);
+
+    // Genuinely concurrent, like mapPool running two workstreams at once — not sequential awaits.
+    await Promise.all([collect(sessionA.prompt("go")), collect(sessionB.prompt("go"))]);
+
+    const pkg = JSON.parse(await Bun.file(join(dir, "package.json")).text());
+    // The file must be valid JSON (no torn/interleaved write) and contain BOTH sessions'
+    // contributions — whichever finished first, nothing got silently discarded.
+    expect(pkg.name).toBe("app");
+    expect(pkg.scripts.start).toBe("node src/index.js");
+    expect(pkg.scripts.test).toBe("bun test");
+  });
+
+  test("tsconfig.json merges too — the other file named in the same finding", async () => {
+    const dir = await workspace();
+    const stream =
+      '<boltArtifact id="a" title="a">' +
+      '<boltAction type="file" filePath="tsconfig.json">{"compilerOptions":{"strict":true}}</boltAction>' +
+      '<boltAction type="file" filePath="tsconfig.json">{"compilerOptions":{"target":"es2022"}}</boltAction>' +
+      "</boltArtifact>";
+    const session = await new BoltEngine(replayDriver([stream])).startSession(dir, CONFIG);
+    await collect(session.prompt("build"));
+    const tsconfig = JSON.parse(await Bun.file(join(dir, "tsconfig.json")).text());
+    expect(tsconfig.compilerOptions).toEqual({ strict: true, target: "es2022" });
+  });
+
+  test("no pre-existing file at the path → plain write, no merge machinery, no message noise", async () => {
+    const dir = await workspace();
+    const stream = '<boltArtifact id="a" title="a"><boltAction type="file" filePath="package.json">{"name":"app"}</boltAction></boltArtifact>';
+    const session = await new BoltEngine(replayDriver([stream])).startSession(dir, CONFIG);
+    const events = await collect(session.prompt("build"));
+    expect(events.some((e) => e.type === "message" && /merged/.test((e as { text: string }).text))).toBe(false);
+    expect(events).toContainEqual({ type: "file-changed", path: "package.json", action: "create" });
+  });
+
+  test("a non-mergeable file (e.g. src/index.ts) is NOT merged — second write plainly overwrites, matching prior behavior", async () => {
+    const dir = await workspace();
+    const stream =
+      '<boltArtifact id="a" title="a">' +
+      '<boltAction type="file" filePath="src/index.ts">first</boltAction>' +
+      '<boltAction type="file" filePath="src/index.ts">second</boltAction>' +
+      "</boltArtifact>";
+    const session = await new BoltEngine(replayDriver([stream])).startSession(dir, CONFIG);
+    await collect(session.prompt("build"));
+    expect(await Bun.file(join(dir, "src/index.ts")).text()).toBe("second");
+  });
+});
+
 describe("hallucinated-lockfile guard (2026-07-09 — real dogfooding EINTEGRITY root cause)", () => {
   test("a model-authored package-lock.json is skipped, not written — legit files still land", async () => {
     const dir = await workspace();

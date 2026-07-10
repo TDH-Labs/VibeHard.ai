@@ -15,6 +15,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, resolve, sep } from "node:path";
 import type { Engine, EngineConfig, EngineEvent, EngineSession } from "../../types.ts";
 import { parseBoltStream, segmentToEvent } from "./normalizer.ts";
+import { MERGEABLE_BASENAMES, mergeConfigFile } from "./merge-config.ts";
 
 /** Lockfiles the model must never hand-author. A real lockfile is a mechanical
  *  fingerprint of what the registry actually served (npm/bun computed it from a
@@ -71,6 +72,27 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Per-absolute-path async mutex, serializing concurrent writes to the SAME file across ALL
+ *  BoltSession instances in this process — module-level (not per-session) because `runTiers`
+ *  (pool.ts) runs up to VIBEHARD_CODEGEN_CONCURRENCY (default 4) workstreams concurrently,
+ *  EACH constructing its own BoltEngine/BoltSession (cli.ts's streamGeneration), all writing
+ *  into the SAME workspace dir. Without this, two workstreams' `await mkdir` / `await Bun.write`
+ *  calls for the SAME path can genuinely interleave (this is async, not multi-threaded, but the
+ *  await points are real yield points) — a check-then-write merge would otherwise itself race.
+ *  Standard promise-chain mutex: each call chains onto whatever's already queued for that key;
+ *  `.catch(()=>{})` on the STORED continuation stops one queued failure from poisoning the next
+ *  waiter, while the promise returned to the caller still carries the real outcome. */
+const fileLocks = new Map<string, Promise<unknown>>();
+async function withFileLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prior = fileLocks.get(key) ?? Promise.resolve();
+  const result = prior.then(fn, fn);
+  fileLocks.set(
+    key,
+    result.catch(() => {}),
+  );
+  return result;
+}
+
 class BoltSession implements EngineSession {
   private readonly seen = new Set<string>();
 
@@ -124,9 +146,26 @@ class BoltSession implements EngineSession {
             };
             continue;
           }
-          await mkdir(dirname(abs), { recursive: true });
-          await Bun.write(abs, seg.content);
+          const conflicts = await withFileLock(abs, async () => {
+            await mkdir(dirname(abs), { recursive: true });
+            // Shared-config merge (ROADMAP.md "Parallel workstreams overwrite shared config
+            // files"): if another workstream in this SAME tier already wrote package.json /
+            // tsconfig.json here, don't blindly overwrite it — merge deterministically. Locked
+            // so the read-then-write itself can't race a concurrent workstream's write to the
+            // same path (mapPool runs up to 4 workstreams concurrently, each its own session).
+            if (MERGEABLE_BASENAMES.has(basename(abs)) && (await Bun.file(abs).exists())) {
+              const existing = await Bun.file(abs).text();
+              const { merged, conflicts } = mergeConfigFile(basename(abs), existing, seg.content);
+              await Bun.write(abs, merged);
+              return conflicts;
+            }
+            await Bun.write(abs, seg.content);
+            return [] as string[];
+          });
           this.seen.add(seg.filePath);
+          for (const c of conflicts) {
+            yield { type: "message", text: `merged ${seg.filePath} with another workstream's version — ${c}` };
+          }
         } catch (e) {
           yield { type: "error", message: `failed to write ${seg.filePath}: ${errMessage(e)}` };
           continue;
