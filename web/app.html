@@ -90,7 +90,30 @@ summary.adv{cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing
 summary.adv:hover{color:var(--ink)}
 .content{position:relative;z-index:1}
 /* rounded corners for panels whose other styles are set inline (from markup or JS) */
-#questions,#resume-banner,#steer-dropped,#connbanner,#connlist>div,.held-findings>div,#orchlog>div{border-radius:var(--r-s)}
+#questions,#steer-dropped,#connbanner,#connlist>div,.held-findings>div,#orchlog>div{border-radius:var(--r-s)}
+/* ── session sidebar (2026-07-09): every prompt gets its own session/project, listed here.
+     Logging in always opens a fresh "new session" — nothing from a prior session bleeds into
+     it — and every past session (running, held, live, whatever) is one click away on the left,
+     the pattern people already know from Claude Code / Goose / Hermes. ── */
+.appshell{display:flex;max-width:960px;margin:0 auto;align-items:flex-start}
+.appshell.hide{display:none}
+.appshell .wrap{margin:0;flex:1;min-width:0}
+.sidebar{width:222px;flex:none;position:sticky;top:64px;max-height:calc(100vh - 64px);overflow-y:auto;padding:36px 14px 40px 0}
+.sidebar-lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:20px 0 8px 11px}
+.sess{display:block;padding:9px 11px;margin-bottom:2px;border-radius:var(--r-s);cursor:pointer;border:1px solid transparent;text-decoration:none}
+.sess:hover{background:var(--surface)}
+.sess.active{background:var(--amber-soft);border-color:var(--amber)}
+.sess .t{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.sess .meta{font-size:10.5px;color:var(--ink-3);margin-top:2px;font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+.newsess{width:100%;justify-content:flex-start;text-align:left}
+@media (max-width:860px){
+  .appshell{flex-direction:column;max-width:680px}
+  .sidebar{width:100%;position:static;max-height:none;padding:14px 0;border-bottom:1px solid var(--line);display:flex;gap:6px;overflow-x:auto}
+  .sidebar-lbl{display:none}
+  .sess{flex:none;margin-bottom:0;white-space:nowrap}
+  .sess .t{max-width:150px}
+  .newsess{width:auto;flex:none}
+}
 </style>
 </head>
 <body>
@@ -150,8 +173,13 @@ summary.adv:hover{color:var(--ink)}
     </div>
   </div>
 
-  <!-- DASHBOARD -->
-  <div id="dash" class="hide">
+</div>
+
+  <!-- DASHBOARD — its own appshell (sidebar + wrap), OUTSIDE the auth .wrap above so its
+       width isn't constrained by the narrower single-column auth layout. -->
+  <div id="dash" class="appshell hide">
+   <div class="sidebar" id="sidebar"></div>
+   <div class="wrap">
     <div style="margin:38px 0 26px">
       <p class="lbl"><span class="led" aria-hidden="true"></span>&nbsp; BUILD FLOOR</p>
       <h1 style="margin-top:16px">Describe it <span style="font-style:italic">once.</span></h1>
@@ -160,7 +188,6 @@ summary.adv:hover{color:var(--ink)}
 
     <div class="card">
       <h2>Intake // build order</h2>
-      <div id="resume-banner" class="hide" style="background:var(--amber-soft);border:1px solid var(--line);padding:12px 15px;margin:10px 0 0;font-size:14px;line-height:1.5"></div>
       <textarea id="prompt" placeholder="A client portal where each client signs in and sees only their own files and invoices…"></textarea>
       <div style="margin-top:14px"><div class="lbl" style="font-size:10.5px;margin-bottom:8px">Look &amp; feel</div><div id="design" class="row" style="flex-wrap:wrap;gap:8px"></div></div>
       <div class="row" style="margin-top:14px"><button id="buildbtn">Build it ▸</button><button id="stopbtn" class="hide ghost">⏸ Stop</button><span class="muted" id="buildhint" style="font-size:13px"></span></div>
@@ -182,11 +209,6 @@ summary.adv:hover{color:var(--ink)}
         <div class="console" id="console"></div>
       </div>
       <div class="result" id="result"></div>
-    </div>
-
-    <div class="card">
-      <h2>Build log</h2>
-      <div class="builds" id="builds"><span class="muted" style="font-size:14px">No builds yet.</span></div>
     </div>
 
     <div class="card" id="steercard">
@@ -219,9 +241,9 @@ summary.adv:hover{color:var(--ink)}
       <div class="row" style="margin-top:12px;gap:8px"><input id="orchin" placeholder="status · why did it stop · retry · ship" style="flex:1"><button id="orchsend">Send</button></div>
       <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap" id="orchquick"></div>
     </div>
+   </div>
   </div>
 
-</div>
 </div>
 
 <script>
@@ -262,20 +284,87 @@ function keyForm(){
   $("#savekey").onclick=async()=>{const key=$("#keyin").value.trim();const {status,body}=await api("/api/key",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({key})});if(status>=400){$("#keyerr").textContent=body.error;return}await load()};
 }
 const STATUS_BADGE={live:'<span class="pill">● live</span>',blocked:'<span style="color:var(--amber-text)">⏸ held by the gates</span>',running:'⚙ running',paused:'⏸ paused','deploy-failed':'<span style="color:var(--amber-text)">deploy snag</span>',error:'<span class="bad" style="color:var(--red)">error</span>'};
-function renderBuilds(){
-  if(!me.builds||!me.builds.length){$("#builds").innerHTML='<span class="muted" style="font-size:14px">No builds yet.</span>';return}
-  $("#builds").innerHTML=me.builds.map((b,i)=>{
-    const badge=STATUS_BADGE[b.status]||b.status;
-    let action="";
-    if(b.status==="live"&&b.url)action=`<a href="${esc(b.url)}" target="_blank" style="color:var(--amber-t);font-size:13px">open →</a> <a class="lk" data-act="change" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px;margin-left:10px">request a change →</a>`;
-    else if(b.status==="blocked")action=`<a class="lk" data-act="held" data-i="${i}" style="cursor:pointer;color:var(--amber-text);font-size:13px">see what's flagged →</a>`;
-    else if(b.status==="paused"||b.status==="running")action=`<a class="lk" data-act="resume" data-i="${i}" style="cursor:pointer;color:var(--amber-t);font-size:13px">resume →</a>`;
-    return `<div class="b" style="align-items:flex-start"><div style="flex:1"><div style="font-size:13.5px">${esc((b.prompt||b.app).slice(0,64))}</div><div class="muted mono" style="font-size:11.5px;margin-top:2px">${badge}</div><div class="held-slot" data-i="${i}"></div></div>${action}</div>`;
-  }).join("");
-  document.querySelectorAll("#builds .lk").forEach(el=>el.onclick=()=>{const b=me.builds[+el.dataset.i];const slot=el.closest(".b").querySelector('.held-slot[data-i="'+el.dataset.i+'"]');
-    if(el.dataset.act==="resume")startBuild(b.prompt,b.app);
-    else if(el.dataset.act==="change")renderChangeBox(b.app,slot);
-    else renderHeld(b.app,slot)});
+let currentSessionApp=null; // null = the blank "new session" compose view; else the open app's id
+
+function fmtWhen(ts){
+  if(!ts)return"";
+  const d=new Date(ts),now=new Date();
+  return d.toDateString()===now.toDateString()?d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"}):d.toLocaleDateString(undefined,{month:"short",day:"numeric"});
+}
+
+// ── session sidebar: every prompt is its own project/session (2026-07-09, live user feedback —
+//    stale flags from a prior session were confusing to see mixed into a fresh one). Login always
+//    opens a blank new session (nothing auto-populates from an old one); every past session is one
+//    click away here, the same pattern Claude Code / Goose / Hermes use. ──
+function renderSidebar(){
+  const el=$("#sidebar");if(!el)return;
+  let html='<a class="btn newsess" id="newsess-btn">+ New session</a>';
+  if(me.builds&&me.builds.length){
+    html+='<div class="sidebar-lbl">Your projects</div>'+me.builds.map((b,i)=>{
+      const on=b.app===currentSessionApp,badge=STATUS_BADGE[b.status]||b.status;
+      return `<a class="sess${on?" active":""}" data-i="${i}"><span class="t">${esc((b.prompt||b.app).slice(0,60))}</span><span class="meta">${badge} · ${fmtWhen(b.at)}</span></a>`;
+    }).join("");
+  }
+  el.innerHTML=html;
+  $("#newsess-btn").onclick=newSession;
+  el.querySelectorAll(".sess").forEach(a=>a.onclick=()=>openSession(me.builds[+a.dataset.i].app));
+}
+
+/** Clear the main panel back to blank — no build's state (console, result, questions, gates)
+ *  lingers when switching sessions or starting a new one. Does NOT touch the prompt textarea or
+ *  currentSessionApp — callers set those themselves for their specific case. */
+function resetMainPanel(){
+  if(curES){curES.close();curES=null}
+  clearInterval(buildTimer);clearTimeout(stuckTimer);
+  $("#progress").classList.add("hide");
+  $("#console").innerHTML="";$("#console").style.display="none";
+  $("#result").style.display="none";$("#result").innerHTML="";$("#result").className="result";
+  $("#questions").classList.add("hide");
+  $("#buildbtn").disabled=false;$("#stopbtn").classList.add("hide");$("#buildhint").textContent="";
+  gateState={};$("#gatelist").classList.add("hide");$("#gatelist").innerHTML="";
+}
+function newSession(){
+  currentSessionApp=null;resetMainPanel();$("#prompt").value="";renderSidebar();$("#prompt").focus();
+}
+function openSession(app){
+  const b=me.builds&&me.builds.find(x=>x.app===app);if(!b)return;
+  currentSessionApp=app;resetMainPanel();$("#prompt").value=b.prompt||"";renderSidebar();
+  if(b.status==="paused"){startBuild(b.prompt,b.app);return} // genuinely resumes — not blocked by the running-build guard
+  if(b.status==="running"){
+    // No reattach endpoint exists (by design — /api/build 409s while one is already running, to
+    // stop a dropped connection's auto-reconnect from spawning a duplicate). Switching here can't
+    // watch it live, but the server keeps it running regardless of whether this tab is looking.
+    const res=$("#result");res.className="result held";
+    res.innerHTML='<h3>⚙ Still working.</h3><span class="muted">This session is running in the background right now — this tab can\'t watch it live after switching, but it\'s safely making progress on the server. Check back, or stop it to pause.</span><div style="margin-top:12px"><button id="res-stop" class="ghost">⏸ Stop &amp; pause it</button></div>';
+    res.style.display="block";
+    const sb=$("#res-stop");if(sb)sb.onclick=async()=>{sb.disabled=true;sb.textContent="pausing…";await api("/api/build/stop",{method:"POST"});await load(true);openSession(app)};
+    return;
+  }
+  renderBuildResult(b.status,b);
+}
+
+/** Render the terminal-state result panel for a build — paused/live/blocked/deploy-failed/error.
+ *  Shared by the live SSE "done" handler and openSession() (viewing a past session with no active
+ *  stream), so both paths produce the identical panel. */
+function renderBuildResult(status,b,lastUrl){
+  const res=$("#result");res.className="result";res.innerHTML="";
+  if(status==="paused"){
+    res.className="result held";res.innerHTML='<h3>⏸ Build paused.</h3><span class="muted">Your finished stages are saved. Resume any time and it continues from here — no work repeated.</span><div style="margin-top:12px"><button id="res-resume">Resume →</button></div>';
+    res.style.display="block";const rb=$("#res-resume");if(rb)rb.onclick=()=>startBuild(b.prompt,b.app);
+    return;
+  }
+  if(status==="live"){const url=lastUrl||b.url;res.className="result live";res.innerHTML=`<h3>✓ Shipped — safe to go live.</h3>${url?`<a href="${esc(url)}" target="_blank">${esc(url)}</a>`:'<span class="muted">deployed</span>'}`}
+  else if(status==="blocked"){res.className="result held";res.innerHTML='<h3>Held by the gates.</h3><span class="muted">A security check flagged something the fix loop couldn\'t safely close, so the build stopped before shipping — nothing unsafe went live. Here\'s exactly what was flagged:</span>'}
+  else if(status==="deploy-failed"){res.className="result held";res.innerHTML='<h3>Gates passed; deploy hit a snag.</h3><span class="muted">The build itself is safe; the provisioning/deploy step needs attention (often credentials). See the live log.</span>'}
+  else{res.className="result held";res.innerHTML='<h3>The build hit an error.</h3><span class="muted">Open the live log to see what happened.</span>'}
+  res.style.display="block";
+  if(status==="blocked")renderHeld(b.app,res);
+  if(status==="live"||status==="blocked"||status==="deploy-failed"){renderFunctest(b.app,res);renderCredentials(b.app,res);}
+  if(status==="live"&&b.deployTarget==="downloadable-tool"){renderDownload(b.app,res);return}
+  if(status==="live"){
+    const pb=document.createElement("button");pb.textContent="✨ Polish the look";pb.className="ghost";pb.style.cssText="margin-top:12px;margin-right:8px";pb.onclick=()=>startBuild(null,b.app,"polish");res.appendChild(pb);
+    const cb=document.createElement("a");cb.textContent="request a change →";cb.style.cssText="cursor:pointer;color:var(--amber-t);font-size:13px";cb.onclick=()=>renderChangeBox(b.app,res);res.appendChild(cb);
+  }
 }
 function renderChangeBox(app,el){
   if(!el)return;
@@ -397,7 +486,7 @@ function startBuild(prompt,resumeApp,mode){
   if(!prompt&&mode==="build"){return}
   if(!me.hasKey&&!me.turnkey){$("#buildhint").textContent="add your own AI key under Advanced below, or upgrade your plan";return}
   const con=$("#console"),res=$("#result");
-  $("#resume-banner").classList.add("hide");
+  if(!resumeApp){currentSessionApp=null;renderSidebar()} // a genuinely new build — no session id yet
   $("#progress").classList.remove("hide");con.innerHTML="";con.style.display="block";res.style.display="none";res.className="result";
   $("#toggle-log").textContent="▾ Hide live log";
   gateState={};$("#gatelist").classList.add("hide");$("#gatelist").innerHTML="";
@@ -423,15 +512,15 @@ function startBuild(prompt,resumeApp,mode){
   es.addEventListener("done",e=>{
     es.close();curES=null;clearInterval(buildTimer);clearTimeout(stuckTimer);$("#buildbtn").disabled=false;$("#stopbtn").classList.add("hide");$("#stage-desc").textContent="";
     const r=JSON.parse(e.data);
-    if(r==="paused"){finishStages(stageIdx);res.className="result held";res.innerHTML='<h3>⏸ Build paused.</h3><span class="muted">Your finished stages are saved. Resume any time and it continues from here — no work repeated.</span>';res.style.display="block";notify("Build paused","Resume any time — your work is saved.");load(true);return}
-    if(r==="live"){finishStages(STAGES.length-1);res.className="result live";res.innerHTML=`<h3>✓ Shipped — safe to go live.</h3>${lastUrl?`<a href="${lastUrl}" target="_blank">${lastUrl}</a>`:'<span class="muted">deployed</span>'}`;notify("Build shipped ✓",lastUrl||"Your app is live.")}
-    else{finishStages(stageIdx);
-      if(r==="blocked"){res.className="result held";res.innerHTML='<h3>Held by the gates.</h3><span class="muted">A security check flagged something the fix loop couldn\'t safely close, so the build stopped before shipping — nothing unsafe went live. Here\'s exactly what was flagged:</span>';notify("Held by the gates","A gate stopped the build — nothing unsafe shipped.")}
-      else if(r==="deploy-failed"){res.className="result held";res.innerHTML='<h3>Gates passed; deploy hit a snag.</h3><span class="muted">The build itself is safe; the provisioning/deploy step needs attention (often credentials). See the live log.</span>';notify("Deploy hit a snag","Gates passed; the deploy step needs attention.")}
-      else{res.className="result held";res.innerHTML='<h3>The build hit an error.</h3><span class="muted">Open the live log to see what happened.</span>';notify("Build error","Open the build to see what happened.")}
-    }
-    res.style.display="block";
-    load(true).then(()=>{const b=me.builds&&me.builds[0];if(!b)return;if(r==="blocked")renderHeld(b.app,res);if(r==="live"||r==="blocked"||r==="deploy-failed"){renderFunctest(b.app,res);renderCredentials(b.app,res);}if(r==="live"&&b.deployTarget==="downloadable-tool"){renderDownload(b.app,res);return}if(r==="live"){const pb=document.createElement("button");pb.textContent="✨ Polish the look";pb.className="ghost";pb.style.marginTop="12px";pb.onclick=()=>startBuild(null,b.app,"polish");res.appendChild(pb);}});
+    finishStages(r==="live"?STAGES.length-1:stageIdx);
+    const NOTE={paused:["Build paused","Resume any time — your work is saved."],live:["Build shipped ✓",lastUrl||"Your app is live."],blocked:["Held by the gates","A gate stopped the build — nothing unsafe shipped."],"deploy-failed":["Deploy hit a snag","Gates passed; the deploy step needs attention."],error:["Build error","Open the build to see what happened."]};
+    const n=NOTE[r]||NOTE.error;notify(n[0],n[1]);
+    load(true).then(()=>{
+      const b=resumeApp?(me.builds&&me.builds.find(x=>x.app===resumeApp)):(me.builds&&me.builds[0]);
+      if(!b)return;
+      currentSessionApp=b.app;renderSidebar();
+      renderBuildResult(r,b,lastUrl);
+    });
   });
 }
 const MAX_Q=7;
@@ -440,6 +529,12 @@ const MAX_Q=7;
 async function beginBuild(prompt){
   if(!prompt)return;
   if(!me.hasKey&&!me.turnkey){$("#buildhint").textContent="add your own AI key under Advanced below, or upgrade your plan";return}
+  // Clear whatever's on screen FIRST — if the user was viewing an old session's held findings
+  // or shipped-URL panel and then types a fresh prompt, that stale panel must not sit behind
+  // the interview questions until startBuild() finally clears it (only runs after the whole
+  // interview finishes) — the exact "old session bleeding into a new one" confusion this
+  // sidebar rework exists to fix.
+  currentSessionApp=null;resetMainPanel();renderSidebar();
   // Ask for notification permission HERE, before the interview — not just in startBuild(), which
   // only runs after the interview finishes. Without this, a question that arrives while the user
   // has tabbed away can never notify: permission would still be "default" at that point.
@@ -488,20 +583,6 @@ function finishInterview(prompt,turns){
 }
 $("#buildbtn").onclick=()=>beginBuild($("#prompt").value.trim());
 $("#stopbtn").onclick=async()=>{$("#stopbtn").disabled=true;$("#stopbtn").textContent="pausing…";await api("/api/build/stop",{method:"POST"})};
-
-function renderResume(){
-  const ab=me.activeBuild,b=$("#resume-banner");
-  if(ab&&ab.status==="paused"){
-    b.classList.remove("hide");
-    b.innerHTML='⏸ You have a paused build: <b>'+esc(ab.prompt).slice(0,70)+'…</b><br><a id="do-resume" style="cursor:pointer;color:var(--amber-t);font-weight:600">Resume — continues where it left off →</a><a id="do-discard" style="cursor:pointer;color:var(--muted);margin-left:14px;font-size:13px">discard</a>';
-    $("#do-resume").onclick=()=>startBuild(ab.prompt,ab.app);
-    $("#do-discard").onclick=()=>b.classList.add("hide");
-  }else if(ab&&ab.status==="running"&&!curES){
-    b.classList.remove("hide");
-    b.innerHTML='⚙ A build is running in the background. <a id="do-stop" style="cursor:pointer;color:var(--amber-t);font-weight:600">Stop &amp; pause it</a> to resume later.';
-    $("#do-stop").onclick=async()=>{await api("/api/build/stop",{method:"POST"});setTimeout(()=>load(),900)};
-  }else b.classList.add("hide");
-}
 
 // ── connectors: Supabase (validated key-import) + Stripe (Connect OAuth) ────────
 const CONN_MSG={"stripe-ok":["ok","Stripe connected — your apps can now take payments on your account."],"stripe-ok-test":["ok","Stripe connected in test mode — switch to a live account when you're ready to charge."],"stripe-not-configured":["warn","Stripe Connect isn't set up on this server yet."],"stripe-denied":["warn","You declined the Stripe connection — nothing was saved."],"stripe-state":["warn","That Stripe link expired. Try Connect again."],"stripe-failed":["warn","Couldn't finish the Stripe connection. Try again."],"signin-first":["warn","Sign in first, then connect Stripe."]};
@@ -578,7 +659,7 @@ async function load(keep){
   $("#auth").classList.add("hide");$("#dash").classList.remove("hide");
   if(window.__CLERK&&window.Clerk){$("#who").innerHTML=`<span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2)">${me.email} · ${me.plan}</span> <span id="clerk-userbtn"></span>`;try{window.Clerk.mountUserButton(document.getElementById("clerk-userbtn"))}catch{}}
   else{$("#who").innerHTML=`<span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2)">${me.email} · ${me.plan}</span> <a id="logout" style="cursor:pointer">log out</a>`;$("#logout").onclick=async()=>{await api("/api/logout",{method:"POST"});await load()};}
-  renderKey();renderConnections();renderBuilds();renderResume();renderDesignPicker();renderOrch();renderSteering();
+  renderKey();renderConnections();renderSidebar();renderDesignPicker();renderOrch();renderSteering();
   // The landing hero ("Engage ignition") stashes the visitor's idea so it survives the signup wall.
   try{const idea=localStorage.getItem("vh.idea");if(idea&&!$("#prompt").value){$("#prompt").value=idea;localStorage.removeItem("vh.idea")}}catch{}
   // The pricing page stashes the clicked plan when a signed-out visitor picks Starter/Pro, the same
