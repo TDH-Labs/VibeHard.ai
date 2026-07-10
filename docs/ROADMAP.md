@@ -579,3 +579,46 @@ This is the actual proactive move: a mechanical sweep for the WHOLE bug class in
 promise to "build an eval harness eventually." Still not verified end-to-end — same caveat as the
 `CLEAN_TIMEOUT_MS` fix: correcting a timeout is not evidence it's the ONLY thing wrong, only that
 it's no longer the thing MOST likely to produce a false block. Full suite green.
+
+## The real root cause wasn't a timeout — a truncated error hid a genuine bug from the fixer itself (2026-07-10)
+
+**A live re-verification run (Adam: "complete your work, then do a test run yourself") still didn't
+pass** after the timeout fixes above — same two HIGH findings recurred: `clean-verify-failed` and
+`sandbox-boot-failed`. Rather than guess again, reproduced both by hand on the exact failing
+workspace, the same discipline as the `CLEAN_TIMEOUT_MS` fix:
+
+- **`npm install`**: 226-256s across two independent runs — comfortably inside the already-fixed
+  300s budget. Not the problem anymore.
+- **`npm run build`**: **570s** — nearly double the 300s ceiling the FIRST timeout fix (raising
+  `CLEAN_TIMEOUT_MS` uniformly) still left in place. One fix, still not enough — a single shared
+  constant can't fit both phases when their real durations differ this much.
+- **A real `fly deploy`**: only **51 seconds**, and it failed on a genuine bug — a real TypeScript
+  compile error in the generated code (`app/actions/category.ts:66:18: Type 'string | ActionFailure'
+  is not assignable to type 'object'`). Not a timeout at all.
+
+**The actual root cause, found by tracing why the error was invisible:** `src/substrate/fly.ts`'s
+deploy-failure message did `(res.stderr || res.stdout).slice(0, 400)` — the FIRST 400 characters of
+a Docker build log, which is nothing but early BuildKit progress noise ("#1 [internal] load build
+definition from Dockerfile"). The real compile error was dozens of lines later, past the cutoff,
+and simply never appeared in the held finding OR in whatever the autofix loop's own fixer LLM reads
+as its repair context. That is very likely the actual explanation for the oscillation pattern
+observed across every held build tonight (verify findings flipping 1→2→2, sast/prod-readiness
+toggling in and out): **the fixer was never shown the real problem, so it couldn't fix it.**
+`src/substrate/fly-exec-sandbox.ts` already had this right (`slice(-2000)`, the TAIL); `fly.ts` and
+`src/substrate/vercel.ts` had the backwards head-slice. Both fixed to match. Regression tests added
+to `fly.test.ts` and `vercel.test.ts` proving a long log's real (tail) error survives truncation.
+
+**Also split `CLEAN_TIMEOUT_MS` into three evidence-sized budgets** instead of one shared number:
+`CLEAN_INSTALL_TIMEOUT_MS` (300s, ~1.2x the 226-256s observed), `CLEAN_BUILD_TIMEOUT_MS` (900s,
+~1.6x the 570s observed), `CLEAN_DOCKER_TIMEOUT_MS` (1200s — the docker-build path runs install AND
+build inside the Dockerfile, ~800s observed combined, plus image-layer overhead). `runCliOnce` (a
+one-shot script execution, not an install/build) uses the smaller install budget, generous for that
+job.
+
+**Honest state, not spun:** the todo-app corpus prompt STILL has not produced a clean pass tonight.
+What changed is that the pipeline can now actually SEE its own real failures instead of a truncated
+one, which is a precondition for the autofix loop (or a human) fixing them at all — not a fix for
+this specific TypeScript error, which is a real generation-quality issue in `kimi-k2.7-code`'s
+output, tracked separately (not yet re-run live; credits are getting low). All work here is disposable-
+resource-tested only (a scratch Fly app created and destroyed for the deploy timing) — no user data
+touched. Full suite green (1148 pass).

@@ -63,6 +63,13 @@ describe("VercelHostProvider.deploy", () => {
     await expect(new VercelHostProvider({ token: "t", runner }).deploy("/w/app", {}, null)).rejects.toThrow(/build blew up/);
   });
 
+  test("a long deploy log keeps the REAL error at the end, not early progress noise (same fix as fly.ts, 2026-07-10)", async () => {
+    const noise = "Uploading build artifacts...\n".repeat(50); // > 400 chars of pure progress lines
+    const realError = "Error: the actual failure reason lives here";
+    const { runner } = capturingRunner({ exitCode: 1, stderr: noise + realError });
+    await expect(new VercelHostProvider({ token: "t", runner }).deploy("/w/app", {}, null)).rejects.toThrow(new RegExp(realError.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+
   test("a deploy with no URL in the output throws", async () => {
     const { runner } = capturingRunner({ stdout: "nothing useful here" });
     await expect(new VercelHostProvider({ token: "t", runner }).deploy("/w/app", {}, null)).rejects.toThrow(/no deployment URL/);

@@ -116,7 +116,14 @@ export class FlyHostProvider implements HostProvider {
         await this.runner.run([...this.flyBin, "secrets", "set", "--app", app, "--stage", ...pairs], { cwd: workspacePath, env: flyEnv });
       }
       const res = await this.runner.run([...this.flyBin, "deploy", "--app", app, "--remote-only", "--ha=false"], { cwd: workspacePath, env: flyEnv });
-      if (res.exitCode !== 0) throw new Error(`fly deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(0, 400)}`);
+      // Found live 2026-07-10: a real Docker build failure (a genuine TS compile error in the
+      // generated code) was invisible in the held finding AND to the autofix loop's own fixer —
+      // both only ever saw this message, and slice(0, 400) captured nothing but early BuildKit
+      // progress noise ("[internal] load build definition from Dockerfile"), never the actual
+      // error dozens of lines later. That's very likely why fix attempts kept oscillating without
+      // resolving: the fixer was never shown the real problem. fly-exec-sandbox.ts already got
+      // this right (slice(-2000), the TAIL) — aligned to match.
+      if (res.exitCode !== 0) throw new Error(`fly deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(-2000)}`);
       return { url: `https://${app}.fly.dev`, hostRef: app };
     } finally {
       try {

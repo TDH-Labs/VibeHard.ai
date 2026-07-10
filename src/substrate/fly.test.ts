@@ -88,6 +88,18 @@ describe("FlyHostProvider.deploy", () => {
     }
   });
 
+  test("a long deploy log keeps the REAL error at the end, not early BuildKit progress noise (found live 2026-07-10: a genuine TS compile error was invisible to both the human reviewer and the autofix loop's own fixer because the old slice(0, 400) only ever captured the head)", async () => {
+    const dir = workspaceWithDockerfile();
+    try {
+      const noise = "#1 [internal] load build definition from Dockerfile\n".repeat(50); // > 400 chars of pure progress lines
+      const realError = "Type error: Type 'string | ActionFailure' is not assignable to type 'object'.";
+      const { runner } = capturingRunner({ exitCode: 1, stderr: noise + realError });
+      await expect(new FlyHostProvider({ token: "t", runner }).deploy(dir, {}, null)).rejects.toThrow(new RegExp(realError.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("reuses a prior hostRef (idempotent redeploy)", async () => {
     const dir = workspaceWithDockerfile();
     try {

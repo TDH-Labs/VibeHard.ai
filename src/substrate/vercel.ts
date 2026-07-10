@@ -102,7 +102,10 @@ export class VercelHostProvider implements HostProvider {
       args.push("--build-env", `${k}=${v}`);
     }
     const res = await this.runner.run(args, { cwd: workspacePath, env: { VERCEL_TOKEN: this.token } });
-    if (res.exitCode !== 0) throw new Error(`vercel deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(0, 400)}`);
+    // Same fix as fly.ts (found live 2026-07-10): the head of a deploy log is progress noise, the
+    // real error is near the end. slice(0, 400) hid real failures from both the human reviewer and
+    // the autofix loop's own fixer. Aligned to the tail, matching fly-exec-sandbox.ts's slice(-2000).
+    if (res.exitCode !== 0) throw new Error(`vercel deploy failed (exit ${res.exitCode}): ${(res.stderr || res.stdout).slice(-2000)}`);
     const url = firstVercelUrl(res.stdout, res.stderr);
     if (!url) throw new Error(`vercel deploy: no deployment URL in output: ${(res.stdout || res.stderr).slice(0, 200)}`);
     return { url, hostRef: project };

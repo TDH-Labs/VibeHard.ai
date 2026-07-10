@@ -41,16 +41,18 @@ const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
 const PROBE_INTERVAL_MS = 100;
 const CONTAINER_PORT = 8080; // our Dockerfile convention: the app reads PORT, default 8080
 const SHUTDOWN_GRACE_MS = 5000; // §18: a served app must exit on SIGTERM within this
-// §18: clean-env install/build under a portable timeout. Was 120_000 — found live 2026-07-10:
-// a real, correctly-generated app's `npm install` (Next.js 15 + React 19 + Supabase + Tailwind +
-// fast-check) took 226s on a real host and was SIGTERM-killed at the 120s mark, producing a false
-// "clean-verify-failed"/"sandbox-boot-failed" HIGH-severity block on a build that would have passed
-// given real time — confirmed by re-running the exact same install by hand with no timeout (226s,
-// exit 0, "added 32 packages"). A CLEAN install has strictly MORE work than a warm one (no cache to
-// reuse), so it makes no sense for it to get a TIGHTER budget than SUBPROCESS_TIMEOUT_MS (300_000,
-// used elsewhere in this file for the warm install/build path) — raised to match. This is a timeout
-// correction, not a loosened check: the install/build still has to actually succeed to pass.
-const CLEAN_TIMEOUT_MS = 300_000;
+// §18: clean-env install/build under a portable timeout. Split into separate install/build/docker
+// budgets 2026-07-10 after direct measurement showed ONE shared number can't fit all three: a real
+// `npm install` for a realistic Next.js+Supabase+Tailwind app took 226-256s across two independent
+// runs (a single CLEAN_TIMEOUT_MS=120_000 — the original value — SIGTERM-killed it well short); a
+// real `npm run build` for the same app took 570s, nearly double what a single "raise it to match
+// SUBPROCESS_TIMEOUT_MS (300_000)" fix (the first attempt at this) still allowed. Both measured by
+// reproducing the exact failing workspace's install/build by hand with no timeout, not guessed.
+// Install and docker-build (which runs BOTH phases inside the Dockerfile, so needs at least their
+// sum: ~800s observed) get correspondingly larger margins.
+const CLEAN_INSTALL_TIMEOUT_MS = 300_000; // ~1.2x the 226-256s observed
+const CLEAN_BUILD_TIMEOUT_MS = 900_000; // ~1.6x the 570s observed
+const CLEAN_DOCKER_TIMEOUT_MS = 1_200_000; // covers install+build (~800s observed) + image-layer overhead
 /** Probe order: the conventional health route first, then root. The first to
  *  return an "up" status wins — an app serving either has booted. */
 const PROBE_PATHS = ["/health", "/"] as const;
@@ -558,12 +560,12 @@ async function cleanEnvVerify(projectPath: string, env: Record<string, string | 
         const cmd = existsSync(join(tmp, "package-lock.json"))
           ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"]
           : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"];
-        const install = Bun.spawnSync(cmd, { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+        const install = Bun.spawnSync(cmd, { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_INSTALL_TIMEOUT_MS });
         if ((install.exitCode ?? 1) !== 0) {
           return [cleanFinding("install", `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`)];
         }
         if (pkg.scripts?.build) {
-          const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS });
+          const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_BUILD_TIMEOUT_MS });
           if ((build.exitCode ?? 1) !== 0) {
             const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`;
             // localize against projectPath (the source the fixer edits) — the same relative
@@ -640,12 +642,11 @@ function cliRunFinding(entry: string, exitCode: number, log: string): Finding[] 
 /** Run a downloadable-tool's entry point ONCE, to completion — no port probe. This is the inverse
  *  of the server paths above: there, the process staying up (serving) is success; here, a CLI/script
  *  RUNNING TO COMPLETION and exiting 0 is success — the process exiting is the expected outcome, not
- *  a crash. Bounded by CLEAN_TIMEOUT_MS, the same from-scratch operation budget install/build/container
- *  builds already use in this file (a CLI run is a one-shot operation like those, not a quick boot
- *  probe like PROBE_ATTEMPTS × PROBE_INTERVAL_MS). `env` carries the same dummy/safe env every other
- *  path uses (safeToolEnv) — never the host's real secrets. */
+ *  a crash. Bounded by CLEAN_INSTALL_TIMEOUT_MS — a one-shot script run, not a full install/build,
+ *  so the smaller of the from-scratch budgets already gives it generous headroom. `env` carries the
+ *  same dummy/safe env every other path uses (safeToolEnv) — never the host's real secrets. */
 async function runCliOnce(projectPath: string, entry: string, env: Record<string, string | undefined>): Promise<Finding[]> {
-  const run = await withHostLock(() => Bun.spawnSync(["node", entry], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS }), { note: hostLockNote });
+  const run = await withHostLock(() => Bun.spawnSync(["node", entry], { cwd: projectPath, env, stdout: "pipe", stderr: "pipe", timeout: CLEAN_INSTALL_TIMEOUT_MS }), { note: hostLockNote });
   const exitCode = run.exitCode ?? 1;
   const log = `${run.stdout?.toString() ?? ""}${run.stderr?.toString() ?? ""}`;
   return cliRunFinding(entry, exitCode, log);
@@ -693,7 +694,7 @@ export function dockerTag(projectPath: string): string {
  *  Only reached when no Fly sandbox host is configured (see `resolveSandboxHost`) — the local
  *  fallback, so a docker build competing for host CPU is exactly the EPIC #32 lock's job. */
 async function buildContainerImage(projectPath: string, tag: string): Promise<Finding | null> {
-  const build = await withHostLock(() => Bun.spawnSync(["docker", "build", "-t", tag, "."], { cwd: projectPath, stdout: "pipe", stderr: "pipe", timeout: CLEAN_TIMEOUT_MS }), { note: hostLockNote });
+  const build = await withHostLock(() => Bun.spawnSync(["docker", "build", "-t", tag, "."], { cwd: projectPath, stdout: "pipe", stderr: "pipe", timeout: CLEAN_DOCKER_TIMEOUT_MS }), { note: hostLockNote });
   if ((build.exitCode ?? 1) === 0) return null;
   const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`.trim();
   return {
