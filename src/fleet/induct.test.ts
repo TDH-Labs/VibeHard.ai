@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { approveConvention, coerceConvention, isAbstract, pendingConventions, runInduction, sanitizeUntrusted } from "./induct.ts";
+import { approveConvention, coerceConvention, isAbstract, llmInductor, pendingConventions, runInduction, sanitizeUntrusted } from "./induct.ts";
 import { loadConventions, recordCandidate, recordResolution, type Candidate } from "./fleet.ts";
+import type { EngineConfig } from "../types.ts";
 
 describe("sanitizeUntrusted — audit2: build-error text can't inject the induction LLM", () => {
   test("neutralizes instruction-injection cues", () => {
@@ -57,6 +58,20 @@ afterEach(() => {
 });
 
 const cand = (over: Partial<Candidate> = {}): Candidate => ({ key: "next-supabase::verify:x", stack: "next-supabase", signal: "verify:x", builds: 3, apps: [], resolutions: [], ...over });
+
+describe("llmInductor — fails open on a broken model call (2026-07-09: closing the class of bug review.ts had)", () => {
+  const config: EngineConfig = { provider: "opencode", model: "does-not-exist" };
+
+  test("a modelFactory that throws → skips this candidate (null), never crashes induction", async () => {
+    const inductor = llmInductor({
+      config,
+      modelFactory: () => {
+        throw new Error("model factory blew up");
+      },
+    });
+    expect(await inductor(cand())).toBeNull();
+  });
+});
 
 describe("coerceConvention (trust boundary)", () => {
   test("valid proposal → a Convention scoped/addressed from the candidate", () => {

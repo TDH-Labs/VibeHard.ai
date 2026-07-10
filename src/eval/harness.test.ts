@@ -64,15 +64,82 @@ describe("runEval — scoring + aggregation (fake build/gate, zero tokens)", () 
       passed: 1,
       successRate: 1 / 3,
       results: [
-        { id: "a", built: true, passed: true, blockingGates: [] },
-        { id: "b", built: true, passed: false, blockingGates: ["rls"] },
-        { id: "c", built: false, passed: false, blockingGates: [], error: "spec not ready" },
+        { id: "a", built: true, passed: true, blockingGates: [], missingFeatures: [], partialFeatures: [] },
+        { id: "b", built: true, passed: false, blockingGates: ["rls"], missingFeatures: [], partialFeatures: [] },
+        { id: "c", built: false, passed: false, blockingGates: [], missingFeatures: [], partialFeatures: [], error: "spec not ready" },
       ],
     });
     expect(text).toContain("1/3 (33%)");
     expect(text).toContain("✅ a");
     expect(text).toContain("blocked by: rls");
     expect(text).toContain("did not build — spec not ready");
+  });
+});
+
+describe("runEval — mustImplement feature-coverage scoring (2026-07-09: was declared, never wired)", () => {
+  const baseDeps = (): Pick<EvalDeps, "build" | "gate"> => ({
+    build: async (_p, id) => ({ dir: `/built/${id}` }),
+    gate: async () => ({ passed: true, blockingGates: [] }),
+  });
+
+  test("gates pass but a mustImplement feature is missing → the case fails, feature named", async () => {
+    const deps: EvalDeps = {
+      ...baseDeps(),
+      functionalCheck: async () => [{ feature: "per-user tasks", status: "missing", note: "no auth check on the tasks query" }],
+    };
+    const r = await runEval([{ id: "todo", prompt: "p", mustImplement: ["per-user tasks"] }], deps);
+    expect(r.results[0]).toMatchObject({ passed: false, missingFeatures: ["per-user tasks"] });
+    expect(r.successRate).toBe(0);
+  });
+
+  test("a 'partial' feature is surfaced but does NOT block passed", async () => {
+    const deps: EvalDeps = {
+      ...baseDeps(),
+      functionalCheck: async () => [{ feature: "notes", status: "partial", note: "notes exist but can't be edited" }],
+    };
+    const r = await runEval([{ id: "crm", prompt: "p", mustImplement: ["notes"] }], deps);
+    expect(r.results[0]).toMatchObject({ passed: true, partialFeatures: ["notes"], missingFeatures: [] });
+  });
+
+  test("no mustImplement declared → functionalCheck is never called, gate result alone decides", async () => {
+    let called = false;
+    const deps: EvalDeps = { ...baseDeps(), functionalCheck: async () => ((called = true), []) };
+    const r = await runEval([{ id: "x", prompt: "p" }], deps);
+    expect(called).toBe(false);
+    expect(r.results[0]?.passed).toBe(true);
+  });
+
+  test("a gate-blocked app never runs the functional check (nothing worth reading)", async () => {
+    let called = false;
+    const deps: EvalDeps = {
+      build: async (_p, id) => ({ dir: `/built/${id}` }),
+      gate: async () => ({ passed: false, blockingGates: ["sast"] }),
+      functionalCheck: async () => ((called = true), []),
+    };
+    const r = await runEval([{ id: "x", prompt: "p", mustImplement: ["a"] }], deps);
+    expect(called).toBe(false);
+    expect(r.results[0]?.passed).toBe(false);
+  });
+
+  test("the functional check's OWN failure fails OPEN — never blocks the case, surfaced separately", async () => {
+    const deps: EvalDeps = {
+      ...baseDeps(),
+      functionalCheck: async () => {
+        throw new Error("reviewer model unavailable");
+      },
+    };
+    const r = await runEval([{ id: "x", prompt: "p", mustImplement: ["a"] }], deps);
+    expect(r.results[0]).toMatchObject({ passed: true, missingFeatures: [], featureCheckError: "reviewer model unavailable" });
+  });
+
+  test("formatReport names missing features and flags a feature-check error distinctly", () => {
+    const text = formatReport({
+      total: 1,
+      passed: 0,
+      successRate: 0,
+      results: [{ id: "todo", built: true, passed: false, blockingGates: [], missingFeatures: ["per-user tasks"], partialFeatures: [], featureCheckError: undefined }],
+    });
+    expect(text).toContain("missing: per-user tasks");
   });
 });
 
