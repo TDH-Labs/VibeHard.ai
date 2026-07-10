@@ -543,3 +543,39 @@ as reasonable elsewhere.
 **Not yet re-verified live** — the timeout fix hasn't been proven against a fresh end-to-end run yet
 (that costs more credits + time; do it next). The escalated build (`esc-11w8arv`) is still queued for
 human review and was NOT force-resolved or reset.
+
+## Proactive timeout audit (2026-07-10) — sweeping the whole class, not waiting for each to fail live
+
+Adam's pushback after the `CLEAN_TIMEOUT_MS` fix: finding and fixing one thing per live run is still
+reactive, even when the fix itself is solid. Answer: grep every timeout constant in the gate/autofix
+pipeline and check EACH for the same miscalibration category (a magic number, disconnected from the
+codebase's own shared budget, that's tighter than the real work it bounds) — before another live run
+finds the next one the expensive way.
+
+Found and fixed two more, same family:
+- **`src/autofix/missingdeps.ts`**: a per-package `npm install` (deterministic dependency-add
+  strategy) had a local `120_000` — the EXACT value that just failed for a full clean install. This
+  install can run on a cold workspace (no `node_modules` yet), so it's exposed to the identical
+  cold-network risk. The file's own doc comment already records a prior live incident with the
+  symptom signature of a silent partial failure ("added 3 of 4 missing deps, missed one... the loop
+  oscillated to a hold") — consistent with, though not proven to be, this same timeout being hit
+  intermittently. Aligned to `SUBPROCESS_TIMEOUT_MS` (300s, the codebase's own established budget).
+- **`src/autofix/fixer.ts`**: `npx tsc --noEmit` (the batched typecheck the LLM fixer reads) had a
+  local `180_000`, disconnected from the shared constant. `npx` resolves/downloads `typescript` over
+  the network if it isn't already local — the same cold-network exposure class. Aligned to
+  `SUBPROCESS_TIMEOUT_MS`.
+
+Checked and left alone, WITH reasoning recorded (not just skipped silently):
+- `gate/migrate.ts`'s `APPLY_TIMEOUT_MS` (30s) — bounds an in-process pglite/Postgres statement, no
+  network/registry dependency, not the same risk class.
+- `verify.ts`'s `PROBE_ATTEMPTS × PROBE_INTERVAL_MS` (~3s boot-health probe) — bounds a running
+  production server responding to HTTP after it's already started, not a cold install; no direct
+  evidence of failure. Not touched without evidence, same discipline as the fix itself.
+- `SUBPROCESS_TIMEOUT_MS` (300s) itself — now the value 4 different call sites share. No direct
+  failure evidence against it yet (unlike the 120s/180s numbers above, which had either a live
+  incident or a documented prior incident). Worth the same scrutiny the moment one does fail.
+
+This is the actual proactive move: a mechanical sweep for the WHOLE bug class in one pass, not a
+promise to "build an eval harness eventually." Still not verified end-to-end — same caveat as the
+`CLEAN_TIMEOUT_MS` fix: correcting a timeout is not evidence it's the ONLY thing wrong, only that
+it's no longer the thing MOST likely to produce a false block. Full suite green.

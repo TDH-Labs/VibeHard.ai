@@ -95,7 +95,13 @@ export async function applyMissingDeps(workspacePath: string, packages: string[]
           env: safeToolEnv(workspacePath),
           stdout: "pipe",
           stderr: "pipe",
-          timeout: 120_000,
+          // Was a local 120_000 magic number — the same value CLEAN_TIMEOUT_MS used before a real
+          // clean install measured at 226s got SIGTERM-killed by it (found live 2026-07-10, see
+          // verify.ts). This install can run on a cold workspace too (no node_modules yet), so it's
+          // exposed to the identical risk. Aligned to the shared budget instead of re-guessing a
+          // number — a proactive sweep of every timeout in the pipeline, not a wait for this one to
+          // fail live the same way.
+          timeout: SUBPROCESS_TIMEOUT_MS,
         }),
       { note: (m) => console.error(`[missingdeps] ${m}`) },
     );

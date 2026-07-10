@@ -25,6 +25,7 @@ import { detectUndeclaredImports } from "../diagnose/diagnose.ts";
 import { parseBuildErrors } from "../gate/build-errors.ts";
 import { readJournal } from "../journal/journal.ts";
 import { withHostLock } from "../util/host-lock.ts";
+import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
 /** Run `tsc --noEmit` to surface EVERY type error at once (the BATCHED view). `next build`
  *  stops at the first error, so a big app's tail is discovered one-per-rebuild and exhausts
@@ -33,7 +34,11 @@ import { withHostLock } from "../util/host-lock.ts";
 async function collectTypeErrors(workspacePath: string): Promise<Finding[]> {
   if (!existsSync(join(workspacePath, "tsconfig.json"))) return [];
   const r = await withHostLock(
-    () => Bun.spawnSync(["npx", "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe", timeout: 180_000 }),
+    // `npx` resolves/downloads `typescript` over the network if it's not already local — the same
+    // cold-network exposure that made CLEAN_TIMEOUT_MS's 120_000 too tight for a real install
+    // (found live 2026-07-10). Was a local 180_000 magic number, disconnected from the codebase's
+    // own shared budget; aligned instead of re-guessing.
+    () => Bun.spawnSync(["npx", "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS }),
     { note: (m) => console.error(`[fixer] ${m}`) },
   );
   if ((r.exitCode ?? 0) === 0) return [];
