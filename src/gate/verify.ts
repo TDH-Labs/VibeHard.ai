@@ -41,7 +41,16 @@ const PROBE_ATTEMPTS = 30; // ~3s: PROBE_ATTEMPTS × PROBE_INTERVAL_MS
 const PROBE_INTERVAL_MS = 100;
 const CONTAINER_PORT = 8080; // our Dockerfile convention: the app reads PORT, default 8080
 const SHUTDOWN_GRACE_MS = 5000; // §18: a served app must exit on SIGTERM within this
-const CLEAN_TIMEOUT_MS = 120_000; // §18: clean-env install/build under a portable timeout
+// §18: clean-env install/build under a portable timeout. Was 120_000 — found live 2026-07-10:
+// a real, correctly-generated app's `npm install` (Next.js 15 + React 19 + Supabase + Tailwind +
+// fast-check) took 226s on a real host and was SIGTERM-killed at the 120s mark, producing a false
+// "clean-verify-failed"/"sandbox-boot-failed" HIGH-severity block on a build that would have passed
+// given real time — confirmed by re-running the exact same install by hand with no timeout (226s,
+// exit 0, "added 32 packages"). A CLEAN install has strictly MORE work than a warm one (no cache to
+// reuse), so it makes no sense for it to get a TIGHTER budget than SUBPROCESS_TIMEOUT_MS (300_000,
+// used elsewhere in this file for the warm install/build path) — raised to match. This is a timeout
+// correction, not a loosened check: the install/build still has to actually succeed to pass.
+const CLEAN_TIMEOUT_MS = 300_000;
 /** Probe order: the conventional health route first, then root. The first to
  *  return an "up" status wins — an app serving either has booted. */
 const PROBE_PATHS = ["/health", "/"] as const;

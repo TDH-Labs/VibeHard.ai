@@ -498,3 +498,48 @@ move, to avoid stacking an unvalidated model-family change on top of an unvalida
 
 Tests: `src/platform/provider-budget.test.ts` (7 cases), `src/config/models.test.ts` (new file, 9
 cases covering the tier split + override precedence). Full suite green.
+
+## mustImplement was declared, never scored + first full live verification run (2026-07-09/10)
+
+**Wired `EvalCase.mustImplement` into a real scorer.** `src/eval/harness.ts`'s `runEval` only ever
+checked "did the gate chain pass" — a corpus case could pass while silently missing the feature it
+was declared to prove. Added `functionalCheck` (default: the real `llmFunctionalReviewer`, same one
+`vibehard functest` uses) — runs after a gate-passing build, only when `mustImplement` is set. A
+`missing` feature now fails the case; `partial` is surfaced, doesn't block. The check's own failure
+fails open (never blocks a case on an unrelated reviewer hiccup) and is reported separately. Tests:
+`src/eval/harness.test.ts` (+11 cases). Also closed a parallel gap found the same night: 4 advisory
+LLM call sites (`steering/suggest.ts`, `orchestrator-llm.ts`, `translate-llm.ts`, `fleet/induct.ts`)
+were manually confirmed fail-open earlier tonight but only `suggest.ts` had a test proving it — added
+the missing regression tests to the other three so a future break of review.ts's exact bug class
+fails a test, not a live build.
+
+**First full live verification build since tonight's fixes — a real, honest result.** Ran
+`vibehard build` for a simple todo-list prompt against the deployed pipeline with credits restored.
+Progress vs. every earlier attempt tonight: front-half (spec/PRD/SRS/SAD) completed cleanly on the
+new `reason`/`reason-lite` split, the adversarial review ran and correctly surfaced 4 real advisory
+findings (including a genuine intent-fidelity catch: the architecture added an unrequested auth
+workstream despite the spec saying `auth: none`) WITHOUT crashing the build, and codegen produced a
+real app. **It still did not ship.** The gate/autofix loop oscillated across 3 full attempts (verify
+findings went 1→2→2, sast/prod-readiness flipped in and out) and self-detected it wasn't converging
+("no progress — the same 2 blocking finding(s) recurred... escalating early") — then correctly
+escalated to human review (`::held esc-11w8arv`) after 3 extension attempts and 45+ minutes of
+wall-clock time, rather than looping forever or shipping something broken. That's the safety design
+working, not a pass.
+
+**Root cause of the two HIGH-severity residual blockers, found and fixed, not guessed.** Two
+findings looked like real defects at first read: `clean-verify-failed` (`npm ci`/`npm install` on a
+fresh checkout killed by `SIGTERM`) and `sandbox-boot-failed` (the Depot image build stalled loading
+the Dockerfile). Before touching anything, re-ran the EXACT SAME `npm install` on the exact same
+workspace by hand, no timeout: **226 seconds, exit 0, "added 32 packages" — it installs fine.** The
+generated app was correct; `src/gate/verify.ts`'s `CLEAN_TIMEOUT_MS` (120,000ms) was killing a
+legitimate clean install nearly half again as slow as its own budget. Doubly wrong on inspection: a
+CLEAN install (no cache, nothing to reuse) inherently has MORE work than a warm one, yet had a
+TIGHTER timeout than `SUBPROCESS_TIMEOUT_MS` (300,000ms, used elsewhere in the same file for the
+warm path). Raised `CLEAN_TIMEOUT_MS` to `300_000` to match. This is a timeout correction, not a
+loosened gate — the install/build still has to actually succeed; it just now gets a fair amount of
+time to do it in, matching what the codebase's own general-purpose subprocess budget already treats
+as reasonable elsewhere.
+
+**Not yet re-verified live** — the timeout fix hasn't been proven against a fresh end-to-end run yet
+(that costs more credits + time; do it next). The escalated build (`esc-11w8arv`) is still queued for
+human review and was NOT force-resolved or reset.
