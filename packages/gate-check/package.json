@@ -1,0 +1,13 @@
+{
+  "name": "@vibehard/gate-check",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Standalone security/quality gate chain — sast, secrets, dependency vulns, RLS, migrations, and a clean-room build+boot verify, runnable against any codebase.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "gate-check": "./bin/gate-check.ts"
+  }
+}

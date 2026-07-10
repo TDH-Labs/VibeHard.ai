@@ -48,7 +48,12 @@ RUN curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v0.72.0/
   | tar xz -C /usr/local/bin trivy
 
 # Install deps first (better layer caching): only re-runs when package.json/bun.lock change.
+# The workspace packages' own manifests must be present before install — `bun install
+# --frozen-lockfile` resolves "workspace:*" deps by reading packages/*/package.json, and fails
+# outright ("Workspace dependency not found") if only the root manifest has been copied in yet.
 COPY package.json bun.lock ./
+COPY packages/gate-check/package.json packages/gate-check/
+COPY packages/orchestrator/package.json packages/orchestrator/
 RUN bun install --frozen-lockfile --production
 
 COPY . .

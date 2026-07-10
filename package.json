@@ -8,6 +8,7 @@
   "engines": {
     "bun": ">=1.1.0"
   },
+  "workspaces": ["packages/*"],
   "bin": {
     "vibehard": "./src/cli.ts"
   },
@@ -17,6 +18,7 @@
     "start": "bun web/server.ts"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "^3.0.10",
     "@types/bun": "^1.1.14",
     "fast-check": "^4.8.0",
     "typescript": "^5.7.2"
@@ -26,6 +28,8 @@
     "@ai-sdk/openai-compatible": "^2.0.51",
     "@clerk/backend": "^3.8.4",
     "@electric-sql/pglite": "^0.5.3",
+    "@vibehard/gate-check": "workspace:*",
+    "@vibehard/orchestrator": "workspace:*",
     "ai": "^6.0.208",
     "postgres": "^3.4.9"
   }
