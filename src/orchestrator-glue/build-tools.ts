@@ -1,5 +1,9 @@
 /**
- * The production `BuildTools` — the orchestrator's hands, backed by the real pipeline.
+ * The production `BuildTools` — the orchestrator's hands, backed by the real pipeline. This is
+ * VibeHard's own implementation of `@vibehard/orchestrator`'s `BuildTools` interface (2026-07-10
+ * extraction: the orchestrator's brain moved to the package; this glue — which reaches into
+ * `diagnose/`, `gate/`, `.vibehard/` state, and spawns the CLI directly — stays here since it's
+ * VibeHard-specific, not portable orchestrator code).
  * status/why are INSTANT (the static `diagnose`), so a "what's up?" is answered immediately;
  * retry spawns the actual auto-fix loop (detached, like a real build) and acks; ship runs
  * the DEPLOY gate to report shippability (the orchestrator already gated the human confirm).
@@ -7,7 +11,7 @@
  */
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import type { BuildTools } from "./orchestrator.ts";
+import type { BuildTools } from "@vibehard/orchestrator";
 import { diagnose, formatDiagnosis } from "../diagnose/diagnose.ts";
 import { deployGate } from "../gate/index.ts";
 

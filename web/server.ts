@@ -21,16 +21,16 @@ import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/pla
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
 import { coerceSpec, decideRigor, llmInterviewer, llmIntake, reviewSpec, type DeployTarget, type InterviewTurn } from "../src/spec/index.ts";
 import { isBlocking } from "../src/types.ts";
-import { byoModelFactory } from "../src/engine/bolt/driver.ts";
+import { byoModelFactory, defaultModelFactory } from "../src/engine/bolt/driver.ts";
+import { configForStage } from "../src/config/models.ts";
 import { applyBillingDecision, decideBillingEvent, parseStripeEvent, verifyStripeSignature } from "../src/platform/billing-webhook.ts";
 import { LocalEscalationSink } from "../src/escalation/index.ts";
 import { translateFindings, llmTranslator } from "../src/translate/index.ts";
 import { requiredCredentialsForApp } from "../src/credentials/index.ts";
 import { verifySentinel } from "../src/gate/index.ts";
 import { llmFunctionalReviewer, summarize } from "../src/functest/functest.ts";
-import { Orchestrator, type Channel, type OutboundMessage } from "../src/orchestrator/orchestrator.ts";
-import { realBuildTools } from "../src/orchestrator/build-tools.ts";
-import { llmClassifier } from "../src/orchestrator/orchestrator-llm.ts";
+import { Orchestrator, llmClassifier, type Channel, type OutboundMessage } from "@vibehard/orchestrator";
+import { realBuildTools } from "../src/orchestrator-glue/build-tools.ts";
 import { validateSupabaseConnection, supabaseKeychainEntries, stripeConnectAuthUrl, exchangeStripeConnectCode, stripeKeychainEntries } from "../src/connectors/index.ts";
 import { isSafeAppName } from "../src/util/safe-path.ts";
 import { normalizeSteering, STEERING_FILE, MAX_STEERING_BYTES } from "../src/steering/steering.ts";
@@ -604,7 +604,7 @@ async function getOrchestrator(tenantId: string, app: string): Promise<Orchestra
       onRetryHeartbeat: (_dir, minutes) =>
         channel.send({ kind: "info", text: `Still working — the fix loop has been running about ${minutes} minute(s). I'll message you the moment it lands.` }),
     });
-    o = new Orchestrator(tools, channel, llmClassifier({ modelFactory }));
+    o = new Orchestrator(tools, channel, llmClassifier({ modelFactory: modelFactory ?? defaultModelFactory, config: configForStage("functest") }));
     orchestrators.set(key, o);
   }
   return o;

@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { coerceClassification, llmClassifier } from "./orchestrator-llm.ts";
-import type { EngineConfig } from "../types.ts";
+import { coerceClassification, llmClassifier, type LlmConfig } from "./orchestrator-llm.ts";
 
 describe("llmClassifier — fails open on a broken model call (2026-07-09: closing the class of bug review.ts had)", () => {
-  const config: EngineConfig = { provider: "opencode", model: "does-not-exist" };
+  const config: LlmConfig = { provider: "opencode", model: "does-not-exist" };
 
   test("a modelFactory that throws → falls back to a friendly 'chat' reply, never crashes the orchestrator", async () => {
     const classifier = llmClassifier({
