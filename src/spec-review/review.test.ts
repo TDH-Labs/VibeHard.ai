@@ -52,6 +52,18 @@ describe("reviewFrontHalf — deterministic disposes, the adversary surfaces", (
     expect(r.adversarial).toHaveLength(2);
     expect(r.needsHuman).toHaveLength(1); // only the high one routes to a human
   });
+
+  test("adversary throws (provider hiccup) → fails OPEN, not blocked, front-half work survives (2026-07-09 crash)", async () => {
+    const adversary: Adversary = async () => {
+      throw new Error("whitespace-only model response");
+    };
+    const r = await reviewFrontHalf(bundle, { adversary });
+    expect(r.blocked).toBe(false); // cross-checks alone decide `blocked` — a dead adversary can't block either
+    expect(r.needsHuman).toHaveLength(0); // the failure note is low severity — never routes to a human
+    expect(r.adversarial).toHaveLength(1);
+    expect(r.adversarial[0]!.ruleId).toBe("adversary-unavailable");
+    expect(r.adversarial[0]!.message).toContain("whitespace-only model response");
+  });
 });
 
 describe("coerceAdversarialFindings — trust boundary on the red-team's JSON", () => {

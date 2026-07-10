@@ -420,3 +420,34 @@ needs the account owner's explicit decision, not an agent's. If tighter scoping 
 minting a new deploy-scoped token via `fly tokens create deploy` (or an org token restricted to just
 this app) and swapping `FLY_API_TOKEN` in `fly secrets set` — a five-minute change for Adam to make
 or explicitly authorize.
+
+## An "advisory, never blocks" LLM check crashed the whole build anyway (found live by Adam, 2026-07-09) — FIXED 2026-07-09
+
+**Confirmed live.** A resumed build (spec/PRD/SRS/SAD already restored from saved work) died at
+"reviewing the plan for risks (adversarial)" with an uncaught `whitespace-only model response` error
+and dumped a raw Bun stack trace — internal file paths, line numbers, `Bun v1.3.14 (Linux x64
+baseline)` — straight into the user-facing build log. The review-stage model (deepseek-v4-pro via
+OpenRouter) returned empty/whitespace text on all `generateTextResilient` attempts (the same
+degeneration mode first seen 2026-07-04, now recurring).
+
+**Root cause:** `reviewFrontHalf` (`src/spec-review/review.ts`) called `await opts.adversary(bundle)`
+with no error handling at all, despite its own doc comment being explicit that this check is
+advisory-only: "an LLM finding never blocks — only objective checks do" (§11). The design intent was
+that the red-team pass can never stop a build; in practice, an *exception* from that same call could
+kill the build outright — a bigger hazard than the thing it was designed not to have. Nothing in
+`cli.ts`'s `main()` caught it either, so it propagated all the way to Bun's own crash reporter, and
+because build subprocesses stream their raw stdout/stderr straight into the SSE log (`runStep`'s
+`pump()` in `web/server.ts`), that internal crash trace became the last thing the user saw.
+
+**Fixed, two layers:**
+1. `reviewFrontHalf` now wraps the adversary call in try/catch. On failure it fails OPEN — treats the
+   run as zero adversarial findings plus one `adversary-unavailable` (low severity, never routes to
+   `needsHuman`) note explaining the reviewer model failed — instead of losing the whole build. This
+   makes the code match the behavior the doc comment already promised.
+2. `cli.ts`'s `main()` invocation gained a last-resort top-level try/catch: any *other* future
+   uncaught exception now prints one clean `build failed: <message>` line and exits nonzero, instead
+   of a raw internal stack trace reaching the user's log. Exit code semantics are unchanged, so
+   `web/server.ts`'s existing blocked/error status handling (keyed on exit code, not log content) is
+   unaffected — this only changes what the human watching the log actually sees.
+
+Tests: `src/spec-review/review.test.ts` (adversary-throws case), full suite green (1120 pass).

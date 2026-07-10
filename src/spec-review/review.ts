@@ -36,7 +36,21 @@ export interface FrontHalfReview {
 
 export async function reviewFrontHalf(bundle: FrontHalfBundle, opts: { adversary?: Adversary } = {}): Promise<FrontHalfReview> {
   const crossChecks = crossCheck(bundle.spec, bundle.prd, bundle.architecture);
-  const adversarial = opts.adversary ? await opts.adversary(bundle) : [];
+  let adversarial: Finding[] = [];
+  if (opts.adversary) {
+    try {
+      adversarial = await opts.adversary(bundle);
+    } catch (e) {
+      // The adversary is advisory by design — "an LLM finding never blocks" (§11, see the
+      // `blocked` field below). A transient provider hiccup in the red-team call (exhausted
+      // retries on a whitespace-degenerate response, a timeout) must not be able to crash the
+      // WHOLE build over a check that was never allowed to block it in the first place — that
+      // would throw away spec/PRD/SRS/SAD work that already finished (observed live 2026-07-09:
+      // 3 exhausted retries on the review-stage model killed a resumed build past that point).
+      // Fail open: skip the red-team pass for this run and say so, rather than say nothing.
+      adversarial = [{ tool: "spec-review", ruleId: "adversary-unavailable", severity: "low", file: "front-half", message: `adversarial review skipped — the reviewer model failed: ${e instanceof Error ? e.message : String(e)}` }];
+    }
+  }
   return {
     crossChecks,
     adversarial,

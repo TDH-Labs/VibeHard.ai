@@ -1598,5 +1598,16 @@ export async function main(argv: string[]): Promise<number> {
 }
 
 if (import.meta.main) {
-  process.exit(await main(process.argv.slice(2)));
+  try {
+    process.exit(await main(process.argv.slice(2)));
+  } catch (e) {
+    // Last-resort safety net. Every stage this CLI runs is spawned as a subprocess by web/server.ts
+    // and its stdout/stderr are streamed live into the end user's build log (runStep's pump()) — an
+    // uncaught exception here previously meant Bun's own crash reporter (a raw internal stack trace,
+    // file paths, line numbers) got dumped straight into that user-facing stream. The exit code is
+    // still nonzero either way, so server.ts's own outcome handling (blocked/error) is unaffected —
+    // this only changes what the human watching the log actually sees.
+    console.error(`build failed: ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
 }
