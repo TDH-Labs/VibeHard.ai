@@ -17,6 +17,7 @@ import { ensureUserSchema } from "./user-store.ts";
 import { ensureTenantKvSchema } from "./tenant-kv.ts";
 import { ensureBuildLogSchema } from "../build-substrate/build-log-store.ts";
 import { ensureSecretsTokenSchema } from "../build-substrate/secrets-token-store.ts";
+import { ensureDispatchTokenSchema } from "../build-substrate/dispatch-token-store.ts";
 
 export interface Db {
   sql: Sql;
@@ -40,6 +41,7 @@ async function ensureAllSchema(sql: Sql): Promise<void> {
   await ensureTenantKvSchema(sql);
   await ensureBuildLogSchema(sql);
   await ensureSecretsTokenSchema(sql);
+  await ensureDispatchTokenSchema(sql);
 }
 
 /**

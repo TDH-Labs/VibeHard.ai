@@ -17,6 +17,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync }
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
+import { PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
 import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
@@ -116,6 +117,9 @@ const seenBillingEvents = new Set<string>(); // processed Stripe event ids → d
 // below. Not yet minted or dispatched from anywhere (that's W4's dispatcher); this is the seam +
 // callback endpoint it will call, wired now so W4 has something real to mint against.
 const secretsTokenStore = new PgSecretsTokenStore(platformDb.sql);
+// build-substrate W5a/W6: the reusable per-dispatch token a BuildWorker's checkpoint script pings
+// once per autofix round — refreshes the heartbeat and reports whether a stop was requested.
+const dispatchTokenStore = new PgDispatchTokenStore(platformDb.sql);
 
 // ── tiny encrypted store for the per-tenant LLM key (AES-256-GCM) ───────────────
 function encrypt(plain: string): string {
@@ -185,6 +189,31 @@ async function sweepStaleRunning(): Promise<void> {
       }
     } catch {
       /* skip a tenant we can't read */
+    }
+  }
+}
+
+// build-substrate W6: heartbeat-based staleness detection for a BuildWorker-dispatched build —
+// distinct from sweepStaleRunning's boot-time "this process just started" inference, which
+// becomes wrong in both directions once the build subprocess isn't the web process's own child
+// (a worker can die silently while the web tier keeps running for weeks; a web-tier redeploy no
+// longer implies anything about a live worker). Runs periodically, not just at boot. ONLY applies
+// to builds that actually set workerHeartbeatAt (i.e. dispatched via BuildWorker) — a locally-
+// spawned build (today's default path) never sets it and is correctly exempted, unaffected.
+const ORPHAN_HEARTBEAT_STALE_MS = 10 * 60_000; // no ping in 10min ⇒ the worker is presumed dead
+async function sweepOrphanedWorkers(): Promise<void> {
+  for (const id of await buildStore.listTenantIds()) {
+    try {
+      const ab = await buildStore.getActive(id);
+      if (ab?.status !== "running" || !ab.workerHeartbeatAt) continue;
+      const age = Date.now() - new Date(ab.workerHeartbeatAt).getTime();
+      if (age > ORPHAN_HEARTBEAT_STALE_MS) {
+        await buildStore.setActive(id, { ...ab, status: "error" });
+        await buildStore.patchBuild(id, ab.app, { status: "error" });
+        console.error(`  orphan sweep: tenant ${id} app ${ab.app} — no worker heartbeat in ${Math.round(age / 60_000)}min, marked error`);
+      }
+    } catch {
+      /* skip a tenant we can't read — never let one bad record wedge the sweep */
     }
   }
 }
@@ -675,6 +704,30 @@ const server = Bun.serve({
       const env = await secretsTokenStore.consume(token);
       if (!env) return json({ error: "not found" }, 404);
       return json({ env });
+    }
+
+    // build-substrate W5a/W6: a BuildWorker's checkpoint script calls this once per autofix
+    // round via its (reusable, non-single-use) dispatch token — refreshes the durable heartbeat
+    // and reports whether the operator asked to stop. Same "bad token → bare 404" posture as
+    // build-env above; same reasoning (opaque token IS the credential, no session cookie).
+    if (path === "/api/internal/build-checkpoint-ping" && req.method === "POST") {
+      let token: unknown;
+      try {
+        ({ token } = await req.json());
+      } catch {
+        return json({ error: "invalid request body" }, 400);
+      }
+      if (typeof token !== "string" || !token) return json({ error: "invalid request body" }, 400);
+      const resolved = await dispatchTokenStore.resolve(token);
+      if (!resolved) return json({ error: "not found" }, 404);
+      const active = await buildStore.getActive(resolved.tenantId);
+      // No active build for this (tenantId, app) anymore, or it's since moved on to a DIFFERENT
+      // app — the platform no longer considers this dispatch's build "the one running" (e.g. a
+      // previous crash already flipped it via sweepOrphanedWorkers below). Nothing to keep this
+      // worker running for — tell it to stop rather than silently doing nothing.
+      if (!active || active.app !== resolved.app) return json({ stopRequested: true });
+      await buildStore.patchActive(resolved.tenantId, { workerHeartbeatAt: new Date().toISOString() });
+      return json({ stopRequested: active.stopRequested === true });
     }
 
     // Public: tells the frontend whether to render Clerk's UI (+ the publishable key, which is
@@ -1339,6 +1392,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
 }
 
 await sweepStaleRunning(); // resolve any builds left "running" by a previous server stop
+setInterval(() => void sweepOrphanedWorkers(), 5 * 60_000); // build-substrate W6, periodic (not just at boot)
 // One-time import of a surviving legacy users.json into the durable store (Pg rows always win).
 const importedUsers = await migrateLegacyUsersFile(userStore, USERS);
 if (importedUsers) console.log(`  imported ${importedUsers} account(s) from legacy users.json into platform_users`);

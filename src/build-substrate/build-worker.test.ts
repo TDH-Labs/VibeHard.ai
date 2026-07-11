@@ -166,6 +166,65 @@ describe("E2BBuildWorker.dispatch — live output streaming into BuildLogStore",
   });
 });
 
+describe("E2BBuildWorker.dispatch — cooperative stop-check ping (build-substrate W5a/W6)", () => {
+  test("no stopCheckToken and/or no platformBaseUrl → the checkpoint script has no ping at all (unchanged default behavior)", async () => {
+    const sandbox = new FakeSandbox("sbx-10");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      // platformBaseUrl deliberately unset
+    });
+    await worker.dispatch({ ...baseOpts, stopCheckToken: "ping-tok" });
+    expect(sandbox.files.get("/home/user/checkpoint.sh")).not.toContain("build-checkpoint-ping");
+  });
+
+  test("both stopCheckToken and platformBaseUrl set → the checkpoint script pings the platform, token never in the command text", async () => {
+    const sandbox = new FakeSandbox("sbx-11");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      platformBaseUrl: "https://vibehard.example",
+    });
+    await worker.dispatch({ ...baseOpts, stopCheckToken: "ping-tok-xyz" });
+    const script = sandbox.files.get("/home/user/checkpoint.sh")!;
+    expect(script).toContain("https://vibehard.example/api/internal/build-checkpoint-ping");
+    expect(script).toContain("ping-tok-xyz"); // present in the script body (curl -d payload), which is expected/necessary
+    expect(script).toContain('"stopRequested":true');
+  });
+
+  test("the cli subprocess exiting via STOP_EXIT_CODE is reported as stopped:true, distinct from a real failure", async () => {
+    const sandbox = new FakeSandbox("sbx-12", (cmd) => (cmd.includes("bun src/cli.ts") ? 42 : 0));
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      platformBaseUrl: "https://vibehard.example",
+    });
+    const result = await worker.dispatch({ ...baseOpts, stopCheckToken: "ping-tok" });
+    expect(result.exitCode).toBe(42);
+    expect(result.stopped).toBe(true);
+    expect(result.finalPushOk).toBe(true); // the checkpoint itself still succeeded — stopping isn't an infra failure
+    expect(sandbox.killed).toBe(true); // still torn down cleanly, same as any other terminal outcome
+  });
+
+  test("a normal exit code (0) is reported as stopped:false", async () => {
+    const sandbox = new FakeSandbox("sbx-13");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    const result = await worker.dispatch(baseOpts);
+    expect(result.stopped).toBe(false);
+  });
+});
+
 describe("E2BBuildWorker.dispatch — checkpoint-push-then-destroy contract (SPEC decision #4)", () => {
   test("a final push that keeps failing means the sandbox is NEVER killed, and finalPushOk is false", async () => {
     const sandbox = new FakeSandbox("sbx-7", (cmd) => (cmd === "/home/user/checkpoint.sh" ? 1 : 0)); // checkpoint always fails

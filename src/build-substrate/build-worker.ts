@@ -15,6 +15,7 @@
  */
 import type { BuildLogStore } from "./build-log-store.ts";
 import type { TigrisWorkspaceStore } from "./workspace-store.ts";
+import { STOP_EXIT_CODE } from "./stop-signal.ts";
 
 export type BuildMode = "build" | "fix" | "ship" | "polish" | "change" | "rollback";
 
@@ -28,6 +29,12 @@ export interface DispatchOptions {
    *  at dispatch time (build-substrate W5b; the callback endpoint itself is a separate,
    *  not-yet-built workstream — this seam is what it will sit behind). */
   secretsToken: string;
+  /** Opaque, reusable token (build-substrate W5a/W6) the checkpoint script pings once per
+   *  autofix round to refresh the durable heartbeat and learn whether a stop was requested —
+   *  minted by the dispatcher via DispatchTokenStore. Optional: when unset (e.g. every existing
+   *  test in this file), the checkpoint script skips the ping entirely — same checkpoint.sh as
+   *  before this workstream, zero behavior change for a caller that doesn't opt in. */
+  stopCheckToken?: string;
 }
 
 export interface BuildWorkerResult {
@@ -37,6 +44,18 @@ export interface BuildWorkerResult {
    *  was deliberately left alive (never destroyed with unsaved state) rather than torn down.
    *  Always true once teardown actually happens. */
   finalPushOk: boolean;
+  /** True iff the cli subprocess exited via the cooperative-stop sentinel (build-substrate
+   *  W5a) — a stop was requested and honored, NOT a build failure. `exitCode` will equal
+   *  STOP_EXIT_CODE in this case; callers should treat that combination as "paused", not
+   *  "blocked"/"error". */
+  stopped: boolean;
+  /** Wall-clock milliseconds the sandbox was alive for, start to teardown (build-substrate W6,
+   *  "minimal cost tracking" — SPEC decision #10). Deliberately just a duration, not a dollar
+   *  figure: E2B bills by sandbox-seconds × its CPU/memory tier, so this is an honest, cheap
+   *  proxy without calling any billing API. Real cost governance/alerting is EPIC #37, out of
+   *  scope here — the dispatcher (W4) is responsible for persisting this wherever build history
+   *  is tracked; BuildWorker itself has no BuildProgressStore dependency. */
+  wallMs: number;
 }
 
 export interface BuildWorker {
@@ -98,11 +117,19 @@ function lineTee(scope: string, store: BuildLogStore): { onChunk: (chunk: string
   };
 }
 
+const CHECKPOINT_PING_PATH = "/api/internal/build-checkpoint-ping";
+
 export interface E2BBuildWorkerOptions {
   createSandbox: CreateSandbox;
   workspaceStore: TigrisWorkspaceStore; // needs .presign() — narrower than the generic WorkspaceStore contract
   buildLogStore: BuildLogStore;
   fetchEnv: FetchEnv;
+  /** Public base URL the sandbox calls back to for the checkpoint ping (build-substrate
+   *  W5a/W6) — the sandbox is a separate machine, not localhost, so this must be the
+   *  platform's real public URL (e.g. `https://vibehard.ai`), matching `BASE_URL` in
+   *  web/server.ts. Optional: when unset, or when a dispatch has no `stopCheckToken`, the
+   *  checkpoint script skips the ping entirely (same behavior as before this workstream). */
+  platformBaseUrl?: string;
   /** The pre-built custom template ID (ARCHITECTURE.md W3 decision #2: the platform's own
    *  image, built once as an E2B template, NOT E2B's stock "base" template — "base" has neither
    *  VibeHard's source nor its toolchain baked in and so cannot actually run `cli.ts`). Built
@@ -122,6 +149,7 @@ export class E2BBuildWorker implements BuildWorker {
   async dispatch(d: DispatchOptions): Promise<BuildWorkerResult> {
     const scope = `${d.tenantId}:${d.app}`;
     const timeoutMs = this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const startedAt = Date.now();
     const sandbox = await this.opts.createSandbox({ templateId: this.opts.templateId, timeoutMs });
 
     let finalPushOk = false;
@@ -129,6 +157,8 @@ export class E2BBuildWorker implements BuildWorker {
       const { pullUrl, pushUrl } = await this.opts.workspaceStore.presign(d.tenantId, d.app);
       const env = await this.opts.fetchEnv(d.secretsToken);
 
+      const canPing = Boolean(d.stopCheckToken && this.opts.platformBaseUrl);
+      const pingUrl = canPing ? `${this.opts.platformBaseUrl}${CHECKPOINT_PING_PATH}` : undefined;
       await sandbox.writeFile(
         CHECKPOINT_SCRIPT,
         [
@@ -137,6 +167,16 @@ export class E2BBuildWorker implements BuildWorker {
           `tar -cf /tmp/checkpoint.tar -C ${WORKSPACE_DIR} .`,
           `curl -sf -T /tmp/checkpoint.tar ${shQuote(pushUrl)}`,
           "rm -f /tmp/checkpoint.tar",
+          // build-substrate W5a/W6: refresh the heartbeat + learn whether a stop was requested,
+          // once per checkpoint. A ping failure (network blip) is tolerated — it just means this
+          // one round's heartbeat/stop-check is skipped, not that the checkpoint itself failed;
+          // the push above (the actual durability guarantee) already succeeded by this point.
+          ...(canPing
+            ? [
+                `RESP=$(curl -sf -X POST -H 'content-type: application/json' -d ${shQuote(JSON.stringify({ token: d.stopCheckToken }))} ${shQuote(pingUrl!)} || echo '{}')`,
+                `case "$RESP" in *'"stopRequested":true'*) exit ${STOP_EXIT_CODE} ;; esac`,
+              ]
+            : []),
         ].join("\n"),
       );
       await sandbox.runCommand(`chmod +x ${CHECKPOINT_SCRIPT}`);
@@ -163,7 +203,13 @@ export class E2BBuildWorker implements BuildWorker {
       await tee.flush();
 
       finalPushOk = await this.finalPush(sandbox);
-      return { workerId: sandbox.sandboxId, exitCode: run.exitCode, finalPushOk };
+      return {
+        workerId: sandbox.sandboxId,
+        exitCode: run.exitCode,
+        finalPushOk,
+        stopped: run.exitCode === STOP_EXIT_CODE,
+        wallMs: Date.now() - startedAt,
+      };
     } finally {
       if (finalPushOk) {
         await sandbox.kill();

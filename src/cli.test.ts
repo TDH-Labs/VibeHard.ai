@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VERSION, teeToLogFile, checkpointHook } from "./cli.ts";
+import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
 // M1 replaces/expands this with real gate tests (PROJECT_BRIEF.md §8–9).
@@ -135,5 +136,27 @@ describe("checkpointHook — build-substrate W3 checkpoint wiring", () => {
     const hook = checkpointHook(d)!;
     await hook(7);
     expect(readFileSync(join(d, "calls.log"), "utf8")).toContain("round=7");
+  });
+
+  test("build-substrate W5a: STOP_EXIT_CODE throws BuildStoppedError specifically, not the generic checkpoint-failure error", async () => {
+    const d = dir2();
+    process.env.VIBEHARD_CHECKPOINT_CMD = scriptThatExits(d, STOP_EXIT_CODE);
+    const hook = checkpointHook(d)!;
+    await expect(hook(3)).rejects.toThrow(BuildStoppedError);
+    await expect(hook(3)).rejects.toThrow(/stopped cooperatively after round 3/);
+  });
+
+  test("any OTHER nonzero exit still throws the generic checkpoint-failure error, not BuildStoppedError", async () => {
+    const d = dir2();
+    process.env.VIBEHARD_CHECKPOINT_CMD = scriptThatExits(d, 1);
+    const hook = checkpointHook(d)!;
+    let caught: unknown;
+    try {
+      await hook(1);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).not.toBeInstanceOf(BuildStoppedError);
+    expect(String(caught)).toMatch(/checkpoint command failed \(exit 1\)/);
   });
 });

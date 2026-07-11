@@ -63,6 +63,7 @@ import { refine } from "./refine/refine.ts";
 import { runTiers } from "./util/pool.ts";
 import { requiredCredentialsForApp } from "./credentials/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
+import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 export const VERSION = "0.0.0";
 
@@ -446,41 +447,59 @@ export function checkpointHook(target: string): ((round: number) => Promise<void
   if (!cmd) return undefined;
   return async (round: number) => {
     const res = Bun.spawnSync([cmd, String(round)], { cwd: target, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
-    if ((res.exitCode ?? 1) !== 0) {
+    const code = res.exitCode ?? 1;
+    // build-substrate W5a: the checkpoint script itself decides whether to stop (it's the thing
+    // with network access to ping the platform's stop-check) — this sentinel is how it tells us
+    // "the operator asked to stop" apart from every other nonzero exit, which stays a hard
+    // checkpoint-push failure (SPEC decision #4, unchanged).
+    if (code === STOP_EXIT_CODE) throw new BuildStoppedError(round);
+    if (code !== 0) {
       const log = `${res.stdout?.toString() ?? ""}${res.stderr?.toString() ?? ""}`;
-      throw new Error(`checkpoint command failed (exit ${res.exitCode}) after round ${round}: ${log.slice(-500)}`);
+      throw new Error(`checkpoint command failed (exit ${code}) after round ${round}: ${log.slice(-500)}`);
     }
   };
 }
 
 /** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human
  *  review on exhaustion (§24). Returns the exit code. Shared by `fix` and `build`. */
-async function runAutoFixAndReport(target: string): Promise<number> {
-  // No live human layer is wired yet (only the async local queue — no synchronous
-  // reviewer), so no human is "available" → the loop runs its extra no-human attempts
-  // before holding, rather than parking a stuck build for an absent human. When the
-  // GitHub/Slack adapter lands (§24), this becomes a real availability check.
-  const result = await autoFix(target, {
-    onStep: (m) => console.log(`  … ${m}`),
-    gate: (p) => runGate(p, undefined, printGateVerdict), // emit each gate's pass/fail live
-    humanAvailable: async () => false,
-    onRoundComplete: checkpointHook(target),
-  });
-  if (result.fixed) {
-    console.log(`\n✅ gate green after ${result.attempts} auto-fix attempt(s) — deploy-ready.`);
-    return 0;
+export async function runAutoFixAndReport(target: string): Promise<number> {
+  try {
+    // No live human layer is wired yet (only the async local queue — no synchronous
+    // reviewer), so no human is "available" → the loop runs its extra no-human attempts
+    // before holding, rather than parking a stuck build for an absent human. When the
+    // GitHub/Slack adapter lands (§24), this becomes a real availability check.
+    const result = await autoFix(target, {
+      onStep: (m) => console.log(`  … ${m}`),
+      gate: (p) => runGate(p, undefined, printGateVerdict), // emit each gate's pass/fail live
+      humanAvailable: async () => false,
+      onRoundComplete: checkpointHook(target),
+    });
+    if (result.fixed) {
+      console.log(`\n✅ gate green after ${result.attempts} auto-fix attempt(s) — deploy-ready.`);
+      return 0;
+    }
+    console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
+    if (result.escalation) {
+      const ticket = await localSink().open(result.escalation);
+      await notifier().notifyOpened(ticket); // best-effort reviewer ping
+      console.log(`  ::held ${ticket.id}`); // machine-parseable: links this build to its review ticket
+      console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
+      console.log(`   queued at ${queuePath()} — list with: vibehard queue`);
+    }
+    console.log("\n   residual blocking findings:");
+    for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
+    return 1;
+  } catch (e) {
+    // build-substrate W5a: a cooperative stop is NOT a crash — report it distinctly (its own
+    // machine-parseable marker, mirroring ::held) rather than falling through to main()'s
+    // generic top-level catch, which would print it as an undifferentiated "build failed".
+    if (e instanceof BuildStoppedError) {
+      console.log(`\n  ::stopped`);
+      console.log(`   ⏸ ${e.message} — a stop was requested; progress up to the last checkpoint is saved.`);
+      return STOP_EXIT_CODE;
+    }
+    throw e;
   }
-  console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
-  if (result.escalation) {
-    const ticket = await localSink().open(result.escalation);
-    await notifier().notifyOpened(ticket); // best-effort reviewer ping
-    console.log(`  ::held ${ticket.id}`); // machine-parseable: links this build to its review ticket
-    console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
-    console.log(`   queued at ${queuePath()} — list with: vibehard queue`);
-  }
-  console.log("\n   residual blocking findings:");
-  for (const v of result.finalVerdicts) for (const f of v.findings) explainFinding(f);
-  return 1;
 }
 
 /** Print a finding the way a non-technical operator reads it: plain-English first
