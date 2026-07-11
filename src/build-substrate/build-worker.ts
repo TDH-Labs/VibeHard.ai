@@ -260,12 +260,32 @@ export class E2BBuildWorker implements BuildWorker {
  *  and never touch this function or the real SDK at all. */
 export function realE2BSandboxFactory(apiKey: string): CreateSandbox {
   return async ({ templateId, timeoutMs }) => {
-    const { Sandbox } = await import("e2b");
+    const { Sandbox, CommandExitError } = await import("e2b");
     const sandbox = await Sandbox.create({ apiKey, template: templateId, timeoutMs });
     return {
       sandboxId: sandbox.sandboxId,
       writeFile: (path, content) => sandbox.files.write(path, content).then(() => undefined),
-      runCommand: (cmd, opts) => sandbox.commands.run(cmd, opts),
+      // REAL BUG found live 2026-07-11 (a real production dispatch, not a unit test): the E2B SDK
+      // docs this explicitly ("If the command exits with a non-zero exit code, it throws a
+      // CommandExitError") — but SandboxHandle.runCommand's own contract (and every test in
+      // build-worker.test.ts's "checkpoint-push-then-destroy" describe block, e.g. "a real build
+      // failure (nonzero cli exit) is distinct from an infra failure and still tears down
+      // cleanly") assumes it ALWAYS resolves to `{exitCode}`, never throws for a mere nonzero
+      // exit. Without this catch, EVERY gate-blocked build (a completely normal, common outcome
+      // — not rare) would have thrown out of dispatch() before finalPush() ever ran, orphaning
+      // the sandbox (never checkpointed, never torn down) instead of hitting the
+      // checkpoint-push-then-destroy path SPEC decision #4 exists for. CommandExitError carries
+      // the real CommandResult (exitCode/stdout/stderr) on the error itself — unwrap it back into
+      // a normal resolved result; anything else (a genuine infra/network failure, not "the
+      // command ran and returned nonzero") still propagates as a thrown error, unchanged.
+      runCommand: async (cmd, opts) => {
+        try {
+          return await sandbox.commands.run(cmd, opts);
+        } catch (e) {
+          if (e instanceof CommandExitError) return { exitCode: e.exitCode };
+          throw e;
+        }
+      },
       kill: () => sandbox.kill().then(() => undefined),
     };
   };
