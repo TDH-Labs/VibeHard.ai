@@ -116,6 +116,40 @@ describe("autoFix loop", () => {
     expect(r.escalation).toBeNull();
   });
 
+  test("build-substrate W3: onRoundComplete fires once per completed round, awaited, not on the final passing round", async () => {
+    const cf = countingFixer();
+    const rounds: number[] = [];
+    let resolveOrder: string[] = [];
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([blockN(3), blockN(2), blockN(1), PASS]),
+      fixer: cf.fixer,
+      budget: 5,
+      onRoundComplete: async (round) => {
+        resolveOrder.push(`start-${round}`);
+        await new Promise((res) => setTimeout(res, 0)); // prove it's genuinely awaited, not fire-and-forget
+        resolveOrder.push(`end-${round}`);
+        rounds.push(round);
+      },
+    });
+    expect(r.fixed).toBe(true);
+    expect(rounds).toEqual([1, 2, 3]); // once per real fix round; NOT called for the round that found PASS
+    expect(resolveOrder).toEqual(["start-1", "end-1", "start-2", "end-2", "start-3", "end-3"]); // awaited in order
+  });
+
+  test("build-substrate W3: a rejected checkpoint (onRoundComplete throws) stops the loop, matching the fail-closed contract", async () => {
+    const cf = countingFixer();
+    await expect(
+      autoFix("/ws", {
+        gate: scriptedGate([blockN(3), blockN(2), blockN(1), PASS]),
+        fixer: cf.fixer,
+        budget: 5,
+        onRoundComplete: async (round) => {
+          if (round === 2) throw new Error("checkpoint push failed");
+        },
+      }),
+    ).rejects.toThrow("checkpoint push failed");
+  });
+
   test("no progress — the SAME findings recur → escalates EARLY (cycle), does NOT burn the budget", async () => {
     const cf = countingFixer();
     const r = await autoFix("/ws", { gate: scriptedGate([BLOCK]), fixer: cf.fixer, budget: 5, now: ts });

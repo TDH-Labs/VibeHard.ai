@@ -124,6 +124,12 @@ export interface AutoFixOptions {
   maxDurationMs?: number;
   now?: string;
   onStep?: (msg: string) => void;
+  /** build-substrate W3: called (and awaited) once per completed autofix iteration — the
+   *  checkpoint boundary a BuildWorker uses to push workspace state to durable storage before
+   *  continuing. Not called on the final round that reaches "gate green" (nothing left to
+   *  checkpoint mid-loop at that point; the caller's own post-`autoFix` push covers it).
+   *  Unset by every existing caller — a no-op, zero behavior change. */
+  onRoundComplete?: (round: number) => void | Promise<void>;
 }
 
 export interface AutoFixResult {
@@ -295,6 +301,12 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       note(`${stopReason}; escalating (a gate made green by removing protected code is not a fix)`);
       break;
     }
+    // build-substrate W3: one autofix iteration just completed (fix applied, anti-tamper
+    // passed) — the natural checkpoint boundary for a BuildWorker running this loop inside an
+    // isolated sandbox. Awaited: a checkpoint push failure must hold the round here, not let
+    // the loop silently continue past unsaved progress (PRD AC1.2 / SPEC decision #4). A
+    // no-op when nothing is injected (every existing caller of autoFix — unchanged).
+    await opts.onRoundComplete?.(attempts);
   }
 
   // A TAMPERED round never gets to claim a pass — skip the re-gate (the tamper may have greened it) and
