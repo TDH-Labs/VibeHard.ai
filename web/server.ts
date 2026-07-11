@@ -18,6 +18,10 @@ import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/i
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
 import { PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
+import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
+import { E2BBuildWorker, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
+import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
+import { localSpawnPipeline, e2bPipeline, type RunPipeline } from "../src/build-substrate/build-dispatcher.ts";
 import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
@@ -306,6 +310,40 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${Number(process.env.
 const ALLOWED_ORIGINS: string[] = [BASE_URL, ...(process.env.VIBEHARD_EXTRA_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean)];
 const ALLOWED_HOSTS = new Set(ALLOWED_ORIGINS.map((o) => { try { return new URL(o).host; } catch { return ""; } }).filter(Boolean));
 
+// build-substrate W4: the ONE place that decides where a build's actual compute runs. Local
+// subprocess by default (today's exact behavior, unchanged) — VIBEHARD_BUILD_WORKER=e2b is the
+// deliberate opt-in switch to dispatch onto an E2B BuildWorker sandbox instead. Fails CLOSED
+// (loud, at boot) rather than silently falling back to local if e2b is requested but
+// misconfigured — the same posture as this codebase's other fail-closed config (e.g.
+// VIBEHARD_SECRETS_KEY having no hardcoded default).
+const buildLogStore = new PgBuildLogStore(platformDb.sql);
+function buildRunPipeline(): RunPipeline {
+  if (process.env.VIBEHARD_BUILD_WORKER !== "e2b") return localSpawnPipeline(join(import.meta.dir, ".."));
+  const apiKey = process.env.E2B_API_KEY;
+  const bucket = process.env.BUCKET_NAME;
+  if (!apiKey || !bucket) {
+    throw new Error("VIBEHARD_BUILD_WORKER=e2b requires E2B_API_KEY and BUCKET_NAME to both be set");
+  }
+  return e2bPipeline({
+    worker: new E2BBuildWorker({
+      createSandbox: realE2BSandboxFactory(apiKey),
+      workspaceStore: new TigrisWorkspaceStore(bucket),
+      buildLogStore,
+      // In-process: secretsTokenStore lives in THIS same server, so fetchEnv reads it directly
+      // rather than making a self-referential HTTP call to /api/internal/build-env — that
+      // endpoint exists for a future dispatcher that runs as a separate process/service; here,
+      // going through it would just be an unnecessary network hop to itself.
+      fetchEnv: async (token) => (await secretsTokenStore.consume(token)) ?? {},
+      templateId: "vibehard-build-worker",
+      platformBaseUrl: BASE_URL,
+    }),
+    buildLogStore,
+    mintSecretsToken: (env) => secretsTokenStore.mint(env),
+    mintStopCheckToken: (tenantId, app) => dispatchTokenStore.mint(tenantId, app),
+  });
+}
+const runPipeline: RunPipeline = buildRunPipeline();
+
 // ── Clerk auth (EPIC #34) — ENV-GATED. Active iff CLERK_SECRET_KEY + CLERK_PUBLISHABLE_KEY are set.
 //    With them, Clerk verifies the session and the legacy hand-rolled auth is disabled; without them,
 //    nothing changes (legacy auth stays). Adding the two keys is the single switch that flips it on. ──
@@ -535,7 +573,11 @@ async function notifyOperatorHeld(info: { tenantId: string; app: string; prompt:
 // ── build control: track the running subprocess per tenant (for Stop) + persist the active build
 //    so a stopped build can be resumed, even across a page reload — durably (EPIC #33), via
 //    `buildStore` above, not local files (ActiveBuild/BuildRecord types live in build-store.ts) ──
-const running = new Map<string, Bun.Subprocess>();
+// build-substrate W4: widened from Map<string, Bun.Subprocess> to a minimal kill()-only shape —
+// a Bun.Subprocess still satisfies this structurally, so every existing read site (isBuildRunning's
+// .has(), /api/build/stop's .get()?.kill()) is unchanged; only runStep's own local-path write
+// site (registerKill) needed a shape that doesn't require a real Bun.Subprocess.
+const running = new Map<string, { kill: () => void }>();
 const stopFlags = new Set<string>();
 const tenantDir = (tenantId: string) => join(ROOT, "tenants", tenantId.replace(/[^a-zA-Z0-9_-]/g, "_"));
 
@@ -649,7 +691,9 @@ async function getOrchestrator(tenantId: string, app: string): Promise<Orchestra
     const channel: Channel = { send: (m) => appendInbox(tenantId, app, m) };
     const byo = await loadKey(tenantId);
     const modelFactory = byo ? byoModelFactory(byo.startsWith("sk-ant-") ? { anthropicKey: byo } : { openaiKey: byo }) : undefined;
-    const tools = realBuildTools(workspace, {
+    const tools = realBuildTools(workspace, runPipeline, {
+      tenantId,
+      app,
       onRetryDone: (ok) =>
         channel.send(ok ? { kind: "done", text: '✅ The build landed clean — all gates pass. Say "ship" when you want to deploy.' } : { kind: "error", text: '🛑 It stopped again. Say "why" and I\'ll tell you the blocker.' }),
       onRetryHeartbeat: (_dir, minutes) =>
@@ -1130,7 +1174,12 @@ const server = Bun.serve({
     if (path === "/api/build/stop" && req.method === "POST") {
       if (!auth) return json({ error: "sign in first" }, 401);
       stopFlags.add(auth.user.tenantId);
-      running.get(auth.user.tenantId)?.kill(); // the running build sees the flag → finishes as "paused"
+      running.get(auth.user.tenantId)?.kill(); // LOCAL path: the running build sees the flag → finishes as "paused"
+      // E2B path (build-substrate W5a): no local process to kill — set the durable flag instead,
+      // read back by the sandbox's own checkpoint-ping on its next round. Harmless no-op for a
+      // local build (nothing ever reads this field on that path). A no-op if there's no active
+      // build for this tenant (patchActive's own contract).
+      await buildStore.patchActive(auth.user.tenantId, { stopRequested: true });
       return json({ ok: true });
     }
 
@@ -1291,42 +1340,45 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
           clearInterval(heartbeat);
         }
       }, 20_000);
-      const runStep = async (label: string, args: string[]): Promise<number> => {
+      // build-substrate W4: runStep now goes through the ONE runPipeline seam instead of
+      // spawning `bun src/cli.ts ...` inline — local subprocess by default (byte-for-byte the
+      // same spawn+line-tee this replaced), or an E2B BuildWorker sandbox when
+      // VIBEHARD_BUILD_WORKER=e2b. Marker-scanning (::held/LIVE →) and the SSE `send("log", …)`
+      // relay are UNCHANGED, just moved into the onLog callback runPipeline calls per line.
+      let lastStopped = false; // true only when the E2B path's cooperative stop was honored (W5a)
+      const runStep = async (label: string, mode: BuildMode, args: string[] = []): Promise<number> => {
         send("step", label);
-        const proc = Bun.spawn(["bun", CLI, ...args], { cwd: join(import.meta.dir, ".."), env, stdout: "pipe", stderr: "pipe" });
-        running.set(tenantId, proc);
-        const pump = async (rs: ReadableStream<Uint8Array>) => {
-          const reader = rs.getReader();
-          let buf = "";
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += new TextDecoder().decode(value);
-            const lines = buf.split("\n");
-            buf = lines.pop() || "";
-            for (const ln of lines) {
-              if (!ln.trim()) continue;
-              const h = ln.match(/::held (\S+)/);
-              if (h) {
-                heldTicket = h[1]; // internal marker → capture, don't show
-                continue;
-              }
-              const u = ln.match(/LIVE → (\S+)/);
-              if (u) liveUrl = u[1];
-              send("log", ln);
+        const result = await runPipeline({
+          tenantId,
+          app,
+          mode,
+          args,
+          workspace,
+          env,
+          onLog: (ln) => {
+            const h = ln.match(/::held (\S+)/);
+            if (h) {
+              heldTicket = h[1]; // internal marker → capture, don't show
+              return;
             }
-          }
-          if (buf.trim()) send("log", buf);
-        };
-        await Promise.all([pump(proc.stdout), pump(proc.stderr)]);
-        const code = await proc.exited;
-        running.delete(tenantId);
-        return code;
+            const u = ln.match(/LIVE → (\S+)/);
+            if (u) liveUrl = u[1];
+            send("log", ln);
+          },
+          registerKill: (kill) => running.set(tenantId, { kill }),
+          unregisterKill: () => running.delete(tenantId),
+        });
+        lastStopped = result.stopped;
+        return result.exitCode;
       };
-      const stopped = () => stopFlags.has(tenantId);
+      // stopFlags is the LOCAL-path signal (this same machine handled /api/build/stop AND is
+      // streaming this build) — lastStopped is the E2B-path signal (authoritative regardless of
+      // which machine handled /api/build/stop, since it's read back off the durable flag via the
+      // sandbox's own checkpoint-ping, W5a). Either one means "yes, a stop was honored."
+      const stopped = () => stopFlags.has(tenantId) || lastStopped;
       try {
         if (mode === "build") {
-          const buildCode = await runStep("Building + gating your app…", ["build", prompt, workspace]);
+          const buildCode = await runStep("Building + gating your app…", "build", [prompt]);
           if (stopped()) {
             stopFlags.delete(tenantId);
             await finish("paused");
@@ -1337,11 +1389,11 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
             return send("done", "blocked");
           }
         } else if (mode === "polish") {
-          await runStep("Polishing the design…", ["polish", workspace]); // reverts itself if it would break; then we re-ship
+          await runStep("Polishing the design…", "polish"); // reverts itself if it would break; then we re-ship
         } else if (mode === "change") {
           // EPIC #52: `prompt` here is the CHANGE REQUEST. The CLI runs delta → scoped regen →
           // the full gate line + auto-fix; a nonzero exit means blocked/held, same as build.
-          const changeCode = await runStep("Applying your change + re-checking everything…", ["change", prompt, workspace]);
+          const changeCode = await runStep("Applying your change + re-checking everything…", "change", [prompt]);
           if (stopped()) {
             stopFlags.delete(tenantId);
             await finish("paused");
@@ -1352,7 +1404,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
             return send("done", "blocked");
           }
         } else if (mode === "rollback") {
-          const rbCode = await runStep("Restoring the previous version…", ["rollback", workspace]);
+          const rbCode = await runStep("Restoring the previous version…", "rollback");
           if (rbCode !== 0) {
             await finish("error");
             return send("done", "error");
@@ -1364,7 +1416,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
           : mode === "change" ? "Deploying the updated app…"
           : mode === "rollback" ? "Re-deploying the restored version…"
           : "Re-deploying with your saved keys…";
-        const shipCode = await runStep(shipLabel, ["ship", workspace]);
+        const shipCode = await runStep(shipLabel, "ship");
         if (stopped()) {
           stopFlags.delete(tenantId);
           await finish("paused");

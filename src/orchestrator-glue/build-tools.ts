@@ -2,33 +2,34 @@
  * The production `BuildTools` — the orchestrator's hands, backed by the real pipeline. This is
  * VibeHard's own implementation of `@vibehard/orchestrator`'s `BuildTools` interface (2026-07-10
  * extraction: the orchestrator's brain moved to the package; this glue — which reaches into
- * `diagnose/`, `gate/`, `.vibehard/` state, and spawns the CLI directly — stays here since it's
- * VibeHard-specific, not portable orchestrator code).
+ * `diagnose/`, `gate/`, `.vibehard/` state — stays here since it's VibeHard-specific, not
+ * portable orchestrator code).
  * status/why are INSTANT (the static `diagnose`), so a "what's up?" is answered immediately;
- * retry spawns the actual auto-fix loop (detached, like a real build) and acks; ship runs
+ * retry dispatches the actual auto-fix loop through the SAME RunPipeline seam buildStream() uses
+ * (build-substrate W4 — local subprocess by default, an E2B BuildWorker sandbox when
+ * VIBEHARD_BUILD_WORKER=e2b) and acks immediately, not blocking the chat; ship runs
  * the DEPLOY gate to report shippability (the orchestrator already gated the human confirm).
  * setModel sets the per-stage override env for subsequent runs.
  */
-import { spawn } from "node:child_process";
-import { join } from "node:path";
 import type { BuildTools } from "@vibehard/orchestrator";
 import { diagnose, formatDiagnosis } from "../diagnose/diagnose.ts";
 import { deployGate } from "../gate/index.ts";
+import type { RunPipeline } from "../build-substrate/build-dispatcher.ts";
 
-const CLI = join(import.meta.dir, "..", "cli.ts");
 const HEARTBEAT_MS = 5 * 60 * 1000;
-const MAX_HEARTBEATS = 6; // ~30 minutes of periodic pings, then we stop nagging (still watching for exit/error)
+const MAX_HEARTBEATS = 6; // ~30 minutes of periodic pings, then we stop nagging (still watching for completion/failure)
 
 export interface BuildToolsOptions {
-  /** invoked when a spawned retry finishes (so the web layer can push a proactive message). */
+  tenantId: string;
+  app: string;
+  /** invoked when a dispatched retry finishes (so the web layer can push a proactive message). */
   onRetryDone?: (ok: boolean, dir: string) => void;
   /** invoked every few minutes while a retry is still running, so a long fix loop never leaves
-   *  the user in total silence (a spawn failure alone used to hang forever — no error handler,
-   *  no signal until `exit`, which never fires on a launch failure). Never implies failure. */
+   *  the user in total silence. Never implies failure. */
   onRetryHeartbeat?: (dir: string, minutesElapsed: number) => void;
 }
 
-export function realBuildTools(dir: string, opts: BuildToolsOptions = {}): BuildTools {
+export function realBuildTools(dir: string, runPipeline: RunPipeline, opts: BuildToolsOptions): BuildTools {
   return {
     async status() {
       const d = diagnose(dir);
@@ -44,13 +45,12 @@ export function realBuildTools(dir: string, opts: BuildToolsOptions = {}): Build
     },
 
     async retry() {
-      // spawn the real loop detached; report progress via onRetryDone, not by blocking the chat.
-      // A spawn failure (bad PATH, OOM, etc.) fires "error" but NEVER "exit" — without an error
-      // handler that left the orchestrator's promise to "message you when it lands" permanently
-      // unkept. The heartbeat covers the other silent failure mode: a child that neither exits
-      // nor errors (hung / orphaned) leaves the user with zero signal for the life of the build.
-      const child = spawn("bun", [CLI, "fix", dir], { detached: true, stdio: "ignore" });
-      child.unref();
+      // Dispatch through runPipeline; report progress via onRetryDone, not by blocking the chat —
+      // deliberately NOT awaited here (matches the old detached-spawn semantics: retry() acks
+      // immediately, the actual work continues in the background). A pipeline rejection (e.g. a
+      // dispatch-time infra failure) is caught and reported as a failed retry, same as any other
+      // nonzero exit — the orchestrator's promise to "message you when it lands" must always be
+      // kept, never left hanging on an unhandled rejection.
       let settled = false;
       let heartbeats = 0;
       const timer = opts.onRetryHeartbeat
@@ -65,8 +65,9 @@ export function realBuildTools(dir: string, opts: BuildToolsOptions = {}): Build
         if (timer) clearInterval(timer);
         opts.onRetryDone?.(ok, dir);
       };
-      child.on("exit", (code) => finish(code === 0));
-      child.on("error", () => finish(false));
+      runPipeline({ tenantId: opts.tenantId, app: opts.app, mode: "fix", workspace: dir, env: process.env as Record<string, string> })
+        .then((result) => finish(result.exitCode === 0))
+        .catch(() => finish(false));
       return "On it — re-running the gate → fix → re-gate loop. I'll message you when it lands.";
     },
 

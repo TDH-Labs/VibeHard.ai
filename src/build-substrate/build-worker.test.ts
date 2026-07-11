@@ -96,6 +96,20 @@ describe("E2BBuildWorker.dispatch — happy path", () => {
     expect(cliCall!.opts?.envs?.VIBEHARD_CHECKPOINT_CMD).toBe("/home/user/checkpoint.sh");
   });
 
+  test("THE BUG THIS CLOSES: VIBEHARD_HOST_LOCK_DIR points at a writable path — @vibehard/gate-check's default (/root/...) EACCESs as the sandbox's non-root user (live-confirmed 2026-07-11)", async () => {
+    const sandbox = new FakeSandbox("sbx-2b");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    await worker.dispatch(baseOpts);
+    const cliCall = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"))!;
+    expect(cliCall.opts?.envs?.VIBEHARD_HOST_LOCK_DIR).toBe("/home/user/.vibehard/.host-lock");
+    expect(cliCall.opts?.envs?.VIBEHARD_HOST_LOCK_DIR).not.toContain("/root");
+  });
+
   test("presigned pull/push URLs are quoted into the script/commands, never leaked into env or logs", async () => {
     const sandbox = new FakeSandbox("sbx-3");
     const worker = new E2BBuildWorker({

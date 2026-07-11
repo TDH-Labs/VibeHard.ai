@@ -92,6 +92,14 @@ const CHECKPOINT_SCRIPT = "/home/user/checkpoint.sh";
 const CLI_PATH = "src/cli.ts"; // relative to the template image's own baked-in VibeHard checkout
 const DEFAULT_TIMEOUT_MS = 60 * 60_000; // 1h — real builds run 45+ min (docs/ROADMAP.md observed)
 const FINAL_PUSH_ATTEMPTS = 3;
+// REAL BUG found live 2026-07-11 (first real end-to-end dispatch, not just a fake-sandbox unit
+// test): @vibehard/gate-check's host-lock.ts hardcodes DEFAULT_LOCK_DIR = "/root/.vibehard/
+// .host-lock" — fine on the platform's own Fly deployment (runs as root), but the sandbox here
+// runs as the non-root `user` E2B provisions by default, so every gate that takes the host lock
+// (sast/secrets/depvuln) crashed with EACCES trying to mkdir under /root. host-lock.ts already
+// has an escape hatch for exactly this (VIBEHARD_HOST_LOCK_DIR) — no need to touch the shared
+// package; just point it at a writable path inside the sandbox.
+const HOST_LOCK_DIR = "/home/user/.vibehard/.host-lock";
 
 function shQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -208,7 +216,7 @@ export class E2BBuildWorker implements BuildWorker {
       const cliArgs = [d.mode, ...cliPositionalArgs(d.mode, WORKSPACE_DIR, d.args ?? [])].map(shQuote).join(" ");
       const run = await sandbox.runCommand(`bun ${CLI_PATH} ${cliArgs}`, {
         timeoutMs,
-        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT },
+        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT, VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR },
         onStdout: tee.onChunk,
         onStderr: tee.onChunk,
       });
