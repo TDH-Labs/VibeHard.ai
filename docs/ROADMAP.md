@@ -301,6 +301,15 @@ doesn't hold the build. `src/gate/compliance.ts`, tests in `compliance.test.ts`.
 
 ## Tenant workspace storage isn't durable or machine-consistent (found via dogfooding, 2026-07-08) — ACUTE PART FIXED 2026-07-09
 
+**Update 2026-07-10.** This section (and the "EPIC #32" section below it) is now the journal;
+the actual design lives in `docs/build-substrate/{SPEC,PRD,ARCHITECTURE}.md` — a full
+spec→PRD→architecture doc set, same discipline `docs/runtime-substrate/` got for a different
+feature. It closes this AND the build-compute-isolation gap below together (they turned out
+to be coupled, not separate problems) via an ephemeral `BuildWorker` per build + object
+storage (Tigris) as the workspace source of truth, replacing local disk entirely. Read that
+doc set before touching this area again — these journal entries stay as the incident history,
+not the design.
+
 **Update 2026-07-09.** This wasn't just a risk — it materialized: a routine deploy wiped an
 in-progress dogfooding build the same night this was written (ephemeral local disk, no
 volume, no shared storage). Fixed the acute failure mode immediately: a durable Fly Volume
@@ -343,6 +352,12 @@ work should settle this as part of defining where a build's workspace actually l
 ---
 
 ## EPIC #32 — concurrent builds starve each other on shared host CPU (found via dogfooding, 2026-07-09) — PARTIALLY CLOSED
+
+**Update 2026-07-10.** See the pointer at the top of the "Tenant workspace storage" section
+above — `docs/build-substrate/{SPEC,PRD,ARCHITECTURE}.md` is now the design of record for
+EPIC #32's remaining scope (the platform's own build compute still isn't isolated; this
+section's host-lock mutex and concurrency cap are the contention-management stopgaps that
+design replaces with real per-build isolation, not the isolation itself).
 
 **Confirmed live.** Running two real `vibehard fix`/`build` pipelines at once on the single shared
 Fly machine caused semgrep to fail to even start (`"SAST scan did not run (exit -1)"`) and an
