@@ -56,6 +56,29 @@ export type Classifier = (message: string, context: string) => Promise<Classific
 /** Consequential verbs need an explicit confirm before they run. */
 const CONSEQUENTIAL: ReadonlySet<Intent> = new Set<Intent>(["ship"]);
 
+/** Where the pending-confirm slot lives. Injected so a host application can back it with
+ *  durable, cross-process storage — without this, "ship" then "yes" only works if BOTH
+ *  messages land on the same process (a real bug on a multi-machine web tier: the confirm
+ *  and its "yes" can be routed to different machines, each with its own in-memory
+ *  Orchestrator instance, and the "yes" gets silently reclassified as a fresh message). */
+export interface ConfirmStore {
+  get(): Promise<Intent | null>;
+  set(intent: Intent | null): Promise<void>;
+}
+
+/** Default: in-process only, exactly today's behavior. Correct for a single-process host
+ *  (tests, a standalone CLI) — a host with a multi-machine web tier must inject a durable
+ *  implementation (e.g. backed by the same per-tenant store used for the outbound Channel). */
+export class InMemoryConfirmStore implements ConfirmStore {
+  private value: Intent | null = null;
+  async get(): Promise<Intent | null> {
+    return this.value;
+  }
+  async set(intent: Intent | null): Promise<void> {
+    this.value = intent;
+  }
+}
+
 const AFFIRM = /^(y|yes|yep|yeah|do it|confirm|go|ship it|proceed|ok|okay)\b/i;
 const DENY = /^(n|no|nope|cancel|stop|wait|don'?t|abort)\b/i;
 
@@ -100,14 +123,14 @@ export function proactiveMessage(e: BuildEvent): OutboundMessage | null {
   }
 }
 
-/** The conversational brain. Stateless except for a single pending-confirm slot. */
+/** The conversational brain. Stateless except for a single pending-confirm slot, which lives
+ *  behind the injected `ConfirmStore` (durable by default in a host that supplies one). */
 export class Orchestrator {
-  private pendingConfirm: Intent | null = null;
-
   constructor(
     private readonly tools: BuildTools,
     private readonly channel: Channel,
     private readonly classify: Classifier,
+    private readonly confirmStore: ConfirmStore = new InMemoryConfirmStore(),
   ) {}
 
   /** Push a proactive message for a build event, if it warrants one. */
@@ -119,18 +142,19 @@ export class Orchestrator {
   /** Handle an inbound human message; returns the reply (also useful for tests). */
   async onMessage(text: string): Promise<OutboundMessage> {
     // 1) resolve a pending confirmation first
-    if (this.pendingConfirm) {
-      const verb = this.pendingConfirm;
+    const pendingConfirm = await this.confirmStore.get();
+    if (pendingConfirm) {
+      const verb = pendingConfirm;
       if (AFFIRM.test(text.trim())) {
-        this.pendingConfirm = null;
+        await this.confirmStore.set(null);
         return this.run({ intent: verb });
       }
       if (DENY.test(text.trim())) {
-        this.pendingConfirm = null;
+        await this.confirmStore.set(null);
         return { kind: "info", text: "Okay, holding off." };
       }
       // not a yes/no → drop the pending action and treat as a new message
-      this.pendingConfirm = null;
+      await this.confirmStore.set(null);
     }
 
     // 2) deterministic keyword routing, else the LLM maps it to a verb
@@ -138,7 +162,7 @@ export class Orchestrator {
 
     // 3) consequential verbs require an explicit confirm before running
     if (CONSEQUENTIAL.has(routed.intent)) {
-      this.pendingConfirm = routed.intent;
+      await this.confirmStore.set(routed.intent);
       return { kind: "decision", text: `You want me to ${routed.intent} this build. That's not reversible from here — confirm? (yes/no)` };
     }
     return this.run(routed);

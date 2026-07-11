@@ -7,6 +7,7 @@ export {
   Orchestrator,
   routeKeyword,
   proactiveMessage,
+  InMemoryConfirmStore,
   type OutboundKind,
   type OutboundMessage,
   type Channel,
@@ -15,6 +16,7 @@ export {
   type Intent,
   type Classification,
   type Classifier,
+  type ConfirmStore,
 } from "./orchestrator.ts";
 
 export { llmClassifier, coerceClassification, type LlmConfig, type ModelFactory } from "./orchestrator-llm.ts";

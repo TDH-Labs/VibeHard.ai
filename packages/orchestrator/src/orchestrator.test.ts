@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Orchestrator, proactiveMessage, routeKeyword, type BuildTools, type Channel, type Classifier, type OutboundMessage } from "./orchestrator.ts";
+import { Orchestrator, proactiveMessage, routeKeyword, InMemoryConfirmStore, type BuildTools, type Channel, type Classifier, type ConfirmStore, type Intent, type OutboundMessage } from "./orchestrator.ts";
 
 function fakeTools(over: Partial<BuildTools> = {}): BuildTools {
   return {
@@ -113,5 +113,81 @@ describe("Orchestrator outbound", () => {
     const o = new Orchestrator(fakeTools(), channel, neverClassify);
     await o.onEvent({ type: "gate", gate: "rls", status: "pass" });
     expect(sent).toHaveLength(0);
+  });
+});
+
+/** A store backed by a plain object, standing in for "a real durable store shared across
+ *  process boundaries" — exercises the SAME cross-instance behavior a Postgres-backed
+ *  ConfirmStore would give in production, without needing a real database in this test. */
+function sharedStore(): ConfirmStore {
+  const box: { value: Intent | null } = { value: null };
+  return {
+    get: async () => box.value,
+    set: async (intent) => {
+      box.value = intent;
+    },
+  };
+}
+
+describe("Orchestrator — durable ConfirmStore (W7)", () => {
+  test("default (no store injected) behaves exactly as before: in-process only", async () => {
+    let shipped = false;
+    const { channel } = capture();
+    const o = new Orchestrator(fakeTools({ ship: async () => ((shipped = true), "shipped") }), channel, neverClassify);
+    const first = await o.onMessage("ship it");
+    expect(first.kind).toBe("decision");
+    expect(shipped).toBe(false);
+    const confirm = await o.onMessage("yes");
+    expect(shipped).toBe(true);
+    expect(confirm.text).toBe("shipped");
+  });
+
+  test("an explicit InMemoryConfirmStore behaves identically to the default", async () => {
+    let shipped = false;
+    const { channel } = capture();
+    const o = new Orchestrator(fakeTools({ ship: async () => ((shipped = true), "shipped") }), channel, neverClassify, new InMemoryConfirmStore());
+    await o.onMessage("ship it");
+    await o.onMessage("yes");
+    expect(shipped).toBe(true);
+  });
+
+  test("THE BUG THIS CLOSES: a confirm proposed on one Orchestrator instance is honored by a DIFFERENT instance sharing the same durable store — simulating the 'yes' landing on a different machine", async () => {
+    let shipped = false;
+    const store = sharedStore();
+    const { channel: channelA } = capture();
+    const { channel: channelB } = capture();
+    // Two separate Orchestrator instances — exactly what web/server.ts's getOrchestrator
+    // constructs fresh on a cache miss (a different process, or this process restarted) —
+    // sharing only the durable store, not any in-memory state.
+    const machineA = new Orchestrator(fakeTools({ ship: async () => ((shipped = true), "shipped") }), channelA, neverClassify, store);
+    const machineB = new Orchestrator(fakeTools({ ship: async () => ((shipped = true), "shipped") }), channelB, neverClassify, store);
+
+    const proposal = await machineA.onMessage("ship it");
+    expect(proposal.kind).toBe("decision");
+    expect(shipped).toBe(false);
+
+    // "yes" is handled by a DIFFERENT Orchestrator instance (machineB) — with the OLD
+    // in-memory-only design this would silently reclassify "yes" as a fresh, unrelated
+    // message instead of executing the previously-proposed ship.
+    const confirmed = await machineB.onMessage("yes");
+    expect(shipped).toBe(true);
+    expect(confirmed.text).toBe("shipped");
+  });
+
+  test("declining on a different instance than the one that proposed also works, via the shared store", async () => {
+    let shipped = false;
+    const store = sharedStore();
+    const { channel: channelA } = capture();
+    const { channel: channelB } = capture();
+    const machineA = new Orchestrator(fakeTools({ ship: async () => ((shipped = true), "shipped") }), channelA, neverClassify, store);
+    const machineB = new Orchestrator(fakeTools({ ship: async () => ((shipped = true), "shipped") }), channelB, neverClassify, store);
+
+    await machineA.onMessage("ship it");
+    const declined = await machineB.onMessage("no");
+    expect(shipped).toBe(false);
+    expect(declined.text).toContain("holding off");
+
+    // and the pending state is genuinely cleared in the shared store, not just on machineB
+    expect(await store.get()).toBeNull();
   });
 });

@@ -29,7 +29,7 @@ import { translateFindings, llmTranslator } from "../src/translate/index.ts";
 import { requiredCredentialsForApp } from "../src/credentials/index.ts";
 import { verifySentinel } from "../src/gate/index.ts";
 import { llmFunctionalReviewer, summarize } from "../src/functest/functest.ts";
-import { Orchestrator, llmClassifier, type Channel, type OutboundMessage } from "@vibehard/orchestrator";
+import { Orchestrator, llmClassifier, type Channel, type OutboundMessage, type ConfirmStore, type Intent } from "@vibehard/orchestrator";
 import { realBuildTools } from "../src/orchestrator-glue/build-tools.ts";
 import { validateSupabaseConnection, supabaseKeychainEntries, stripeConnectAuthUrl, exchangeStripeConnectCode, stripeKeychainEntries } from "../src/connectors/index.ts";
 import { isSafeAppName } from "../src/util/safe-path.ts";
@@ -588,7 +588,23 @@ async function appendInbox(tenantId: string, app: string, m: OutboundMessage): P
   list.push({ at: Date.now(), kind: m.kind, text: m.text });
   await tenantKv.put(tenantId, `inbox:${app}`, JSON.stringify(list.slice(-200)));
 }
-// one orchestrator per (tenant, app) so the confirm-state survives across requests
+// Durable via tenantKv rows `confirm:<app>` (closes a real bug on the multi-machine web tier:
+// a "ship" proposal and its "yes" confirmation can be routed to different machines, each with
+// its own in-process Orchestrator — without this, the second machine's fresh instance has no
+// memory of the pending confirm and silently reclassifies "yes" as an unrelated message).
+class TenantKvConfirmStore implements ConfirmStore {
+  constructor(private readonly tenantId: string, private readonly app: string) {}
+  async get(): Promise<Intent | null> {
+    const raw = await tenantKv.get(this.tenantId, `confirm:${this.app}`);
+    return (raw as Intent | null) || null;
+  }
+  async set(intent: Intent | null): Promise<void> {
+    await tenantKv.put(this.tenantId, `confirm:${this.app}`, intent ?? "");
+  }
+}
+// one orchestrator per (tenant, app), cached per-process purely as a perf/object-reuse
+// optimization — NOT relied on for correctness: the confirm state itself is durable (above),
+// so a cache miss (different machine, or this process restarted) still behaves correctly.
 const orchestrators = new Map<string, Orchestrator>();
 async function getOrchestrator(tenantId: string, app: string): Promise<Orchestrator> {
   const key = `${tenantId}:${app}`;
@@ -604,7 +620,12 @@ async function getOrchestrator(tenantId: string, app: string): Promise<Orchestra
       onRetryHeartbeat: (_dir, minutes) =>
         channel.send({ kind: "info", text: `Still working — the fix loop has been running about ${minutes} minute(s). I'll message you the moment it lands.` }),
     });
-    o = new Orchestrator(tools, channel, llmClassifier({ modelFactory: modelFactory ?? defaultModelFactory, config: configForStage("functest") }));
+    o = new Orchestrator(
+      tools,
+      channel,
+      llmClassifier({ modelFactory: modelFactory ?? defaultModelFactory, config: configForStage("functest") }),
+      new TenantKvConfirmStore(tenantId, app),
+    );
     orchestrators.set(key, o);
   }
   return o;
