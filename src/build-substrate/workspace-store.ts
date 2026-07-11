@@ -11,6 +11,7 @@
  * dispatcher's own code, not inside the sandbox being provisioned.
  */
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,16 @@ import { join } from "node:path";
 export interface WorkspaceStore {
   pull(tenantId: string, app: string): Promise<string>;
   push(tenantId: string, app: string, localDir: string): Promise<void>;
+}
+
+/** Time-limited PUT/GET URLs a BuildWorker's sandbox uses to pull/push the workspace directly
+ *  (plain `curl`, no S3 SDK needed inside the sandbox) — the exact mechanism live-confirmed
+ *  2026-07-10 (PRD spike item 1: byte-identical round-trip via presigned URLs from inside a
+ *  real E2B sandbox). Provider-specific (presigning is an S3 concept), so this is its own
+ *  interface rather than part of the generic `WorkspaceStore` contract. */
+export interface PresignedWorkspaceUrls {
+  pullUrl: string;
+  pushUrl: string;
 }
 
 const TAR_TIMEOUT_MS = 120_000;
@@ -101,6 +112,20 @@ export class TigrisWorkspaceStore implements WorkspaceStore {
     } finally {
       rmSync(tmpTarDir, { recursive: true, force: true });
     }
+  }
+
+  /** PUT/GET URLs for `curl`-based pull/push from inside a sandbox, valid for `expiresInSec`
+   *  (default 1h — generous for a build that can run 45+ minutes; a checkpoint mid-build
+   *  should never hit an expired URL). A GET on the pull URL 404s if there's no prior
+   *  workspace (first-ever build) — the caller's script must tolerate that, same as `pull()`
+   *  itself tolerates a missing object. */
+  async presign(tenantId: string, app: string, expiresInSec = 3600): Promise<PresignedWorkspaceUrls> {
+    const key = objectKey(tenantId, app);
+    const [pullUrl, pushUrl] = await Promise.all([
+      getSignedUrl(this.s3, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: expiresInSec }),
+      getSignedUrl(this.s3, new PutObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: expiresInSec }),
+    ]);
+    return { pullUrl, pushUrl };
   }
 }
 

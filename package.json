@@ -27,11 +27,13 @@
     "@ai-sdk/anthropic": "^3.0.85",
     "@ai-sdk/openai-compatible": "^2.0.51",
     "@aws-sdk/client-s3": "^3.1085.0",
+    "@aws-sdk/s3-request-presigner": "^3.1085.0",
     "@clerk/backend": "^3.8.4",
     "@electric-sql/pglite": "^0.5.3",
     "@vibehard/gate-check": "workspace:*",
     "@vibehard/orchestrator": "workspace:*",
     "ai": "^6.0.208",
+    "e2b": "^2.32.0",
     "postgres": "^3.4.9"
   }
 }
