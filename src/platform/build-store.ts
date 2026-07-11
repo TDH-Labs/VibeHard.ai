@@ -22,6 +22,18 @@ export type ActiveBuild = {
   app: string;
   prompt: string;
   status: "running" | "paused" | "live" | "blocked" | "deploy-failed" | "error";
+  /** Durable cooperative stop-flag (build-substrate W5). The worker polls this between
+   *  internal steps (gate runs, autofix iterations) and yields when set — replacing the old
+   *  SIGKILL-based `/api/build/stop`, which has no meaning once the build isn't a local
+   *  `Bun.Subprocess` handle. */
+  stopRequested?: boolean;
+  /** Durable heartbeat (build-substrate W6), ISO timestamp — the worker refreshes this on an
+   *  interval. A periodic sweep flags a build stale after no heartbeat for N minutes, instead
+   *  of `sweepStaleRunning()`'s old "the web process just booted" inference — that inference
+   *  becomes wrong in both directions once the build subprocess isn't the web process's own
+   *  child (a worker can die silently while the web tier keeps running for weeks; a web-tier
+   *  redeploy no longer implies anything about a live worker). */
+  workerHeartbeatAt?: string;
 };
 export type BuildRecord = {
   app: string;
@@ -36,6 +48,10 @@ export type BuildRecord = {
 export interface BuildProgressStore {
   getActive(tenantId: string): Promise<ActiveBuild | null>;
   setActive(tenantId: string, build: ActiveBuild): Promise<void>;
+  /** Merge `patch` into the current active build (e.g. bumping just `workerHeartbeatAt`, or
+   *  setting `stopRequested`) without the caller needing to hold the full current record.
+   *  A no-op if there's no active build for this tenant (nothing to patch). */
+  patchActive(tenantId: string, patch: Partial<ActiveBuild>): Promise<void>;
   listBuilds(tenantId: string): Promise<BuildRecord[]>;
   appendBuild(tenantId: string, rec: BuildRecord): Promise<void>;
   patchBuild(tenantId: string, app: string, patch: Partial<BuildRecord>): Promise<void>;
@@ -80,6 +96,12 @@ export class FileBuildProgressStore implements BuildProgressStore {
   async setActive(tenantId: string, b: ActiveBuild): Promise<void> {
     mkdirSync(this.tenantDir(tenantId), { recursive: true });
     writeFileSync(this.activePath(tenantId), JSON.stringify(b, null, 2));
+  }
+
+  async patchActive(tenantId: string, patch: Partial<ActiveBuild>): Promise<void> {
+    const current = await this.getActive(tenantId);
+    if (!current) return;
+    await this.setActive(tenantId, { ...current, ...patch });
   }
 
   async listBuilds(tenantId: string): Promise<BuildRecord[]> {
@@ -160,6 +182,12 @@ export class PgBuildProgressStore implements BuildProgressStore {
        on conflict (scope) do update set data = excluded.data`,
       [tenantId, JSON.stringify(b)],
     );
+  }
+
+  async patchActive(tenantId: string, patch: Partial<ActiveBuild>): Promise<void> {
+    const current = await this.getActive(tenantId);
+    if (!current) return;
+    await this.setActive(tenantId, { ...current, ...patch });
   }
 
   async listBuilds(tenantId: string): Promise<BuildRecord[]> {

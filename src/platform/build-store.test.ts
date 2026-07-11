@@ -85,6 +85,33 @@ function contractTests(name: string, makeStore: () => Promise<BuildProgressStore
       expect(await store.listBuilds("nobody")).toEqual([]);
     });
 
+    test("patchActive merges into the current active build, leaving other fields untouched (build-substrate W5/W6)", async () => {
+      const store = await makeStore();
+      await store.setActive("t-1", active({ status: "running" }));
+      await store.patchActive("t-1", { workerHeartbeatAt: "2026-07-11T00:00:00.000Z" });
+      expect(await store.getActive("t-1")).toEqual(active({ status: "running", workerHeartbeatAt: "2026-07-11T00:00:00.000Z" }));
+
+      await store.patchActive("t-1", { stopRequested: true });
+      expect(await store.getActive("t-1")).toEqual(
+        active({ status: "running", workerHeartbeatAt: "2026-07-11T00:00:00.000Z", stopRequested: true }),
+      );
+    });
+
+    test("patchActive with no active build for that tenant is a no-op, not an error", async () => {
+      const store = await makeStore();
+      await store.patchActive("nobody", { stopRequested: true });
+      expect(await store.getActive("nobody")).toBeNull();
+    });
+
+    test("patchActive on one tenant never touches another tenant's active build", async () => {
+      const store = await makeStore();
+      await store.setActive("t-1", active({ app: "app-a" }));
+      await store.setActive("t-2", active({ app: "app-b" }));
+      await store.patchActive("t-1", { stopRequested: true });
+      expect((await store.getActive("t-1"))?.stopRequested).toBe(true);
+      expect((await store.getActive("t-2"))?.stopRequested).toBeUndefined();
+    });
+
     test("appendBuild prepends (most recent first)", async () => {
       const store = await makeStore();
       await store.appendBuild("t-1", record({ app: "first", at: 1 }));
