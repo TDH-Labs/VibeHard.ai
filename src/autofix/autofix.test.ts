@@ -283,6 +283,29 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /extra attempt 5\/5/.test(l))).toBe(true);
   });
 
+  test("THE BUG THIS CLOSES: onRoundComplete ALSO fires during the no-human extension phase, not just the main loop", async () => {
+    const rounds: number[] = [];
+    const r = await autoFix("/ws", {
+      gate: scriptedGate([BLOCK]), // same signature every round → main loop's cycle-detector exits after round 1
+      fixer: countingFixer().fixer,
+      budget: 10,
+      humanAvailable: async () => false,
+      extraBudgetNoHuman: 5,
+      now: ts,
+      onRoundComplete: async (round) => {
+        rounds.push(round);
+      },
+    });
+    expect(r.fixed).toBe(false);
+    expect(r.attempts).toBe(6); // 1 main-loop round + 5 extension rounds
+    // Before this fix, `rounds` would have been [1] — the extension's 5 rounds silently
+    // unchecked. A BuildWorker relying on this for per-round checkpointing (build-substrate
+    // W3) would push to Tigris and check for a stop request exactly once, then run 5 more
+    // rounds with neither — found live 2026-07-12 while verifying multi-round behavior before
+    // a real test.
+    expect(rounds).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
   test("an EXTENSION-round fix that shrinks protected surface is rejected as tampering (found live 2026-07-05)", async () => {
     // The no-human extension used to apply fixes with NO anti-tamper check — a fixer could
     // delete a property test there and a green re-gate would be ACCEPTED. This pins the fix:

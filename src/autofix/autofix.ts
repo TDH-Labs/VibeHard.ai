@@ -366,6 +366,16 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       // Same deterministic normalization the main loop applies before every gate look (the
       // extension skipping it left fixer-rewritten Dockerfiles unpinned through final verdicts).
       await normalizeDockerfile(workspacePath, note);
+      // build-substrate W3: this extension phase used to be the ONE place in the whole loop
+      // that never checkpointed — found live 2026-07-12 while verifying multi-round behavior
+      // before a real test, not by a failure. A BuildWorker running a build that reaches here
+      // (main budget exhausted, no human available) would go up to 5 more rounds with no
+      // incremental Tigris push and no stop-check ping — a stop wouldn't be honored until the
+      // whole extension phase finished, and a sandbox death mid-extension would lose those
+      // rounds' progress (though never the LAST successfully-checkpointed state — finalPush()
+      // still runs regardless of where the loop exits). Same call, same placement as the main
+      // loop's, so the extension is checkpointed exactly as strictly as everywhere else.
+      await opts.onRoundComplete?.(attempts);
       final = await gateConfirmed(workspacePath);
       if (final.passed) {
         note(`gate green after ${attempts} fix attempt(s) (no-human extension)`);
