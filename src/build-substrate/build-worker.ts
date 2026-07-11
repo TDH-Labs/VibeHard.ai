@@ -97,6 +97,18 @@ function shQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** cli.ts's own positional-arg order is NOT uniform across modes — confirmed by reading its
+ *  argv destructuring directly, not inferred: `build`/`change` take `<prompt> <dir>` (prompt
+ *  FIRST — `usage: vibehard build "<prompt>" <dir>` / `"<request>" <dir>`), while
+ *  `fix`/`ship`/`polish`/`rollback` take only `<dir>`. Getting this backwards silently breaks
+ *  every build/change dispatch: cli.ts would try to resolve the workspace path as the prompt
+ *  and the prompt text as a directory. Shared by both BuildWorker implementations and
+ *  build-dispatcher.ts's localSpawnPipeline so this ordering lives in exactly one place. */
+export function cliPositionalArgs(mode: BuildMode, workspaceDir: string, args: string[]): string[] {
+  if (mode === "build" || mode === "change") return [...args, workspaceDir];
+  return [workspaceDir, ...args];
+}
+
 /** Buffers partial chunks into complete lines before appending to the durable log — matching
  *  web/server.ts's existing `pump()` line-buffering discipline for the SAME reason: E2B's
  *  onStdout/onStderr deliver arbitrary chunks, not necessarily line-aligned. `flush()` must be
@@ -193,7 +205,7 @@ export class E2BBuildWorker implements BuildWorker {
       }
 
       const tee = lineTee(scope, this.opts.buildLogStore);
-      const cliArgs = [d.mode, WORKSPACE_DIR, ...(d.args ?? [])].map(shQuote).join(" ");
+      const cliArgs = [d.mode, ...cliPositionalArgs(d.mode, WORKSPACE_DIR, d.args ?? [])].map(shQuote).join(" ");
       const run = await sandbox.runCommand(`bun ${CLI_PATH} ${cliArgs}`, {
         timeoutMs,
         envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT },

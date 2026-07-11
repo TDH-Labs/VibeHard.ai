@@ -112,7 +112,7 @@ describe("E2BBuildWorker.dispatch — happy path", () => {
     expect(pullCmd!.cmd).toContain("PULL_TOKEN");
   });
 
-  test("mode and extra args are passed positionally to cli.ts", async () => {
+  test("THE BUG THIS CLOSES: build's prompt comes BEFORE the workspace dir (cli.ts: `build \"<prompt>\" <dir>`) — workspace-first silently breaks every build", async () => {
     const sandbox = new FakeSandbox("sbx-4");
     const worker = new E2BBuildWorker({
       createSandbox: fakeCreateSandbox(sandbox),
@@ -124,8 +124,35 @@ describe("E2BBuildWorker.dispatch — happy path", () => {
     await worker.dispatch({ ...baseOpts, mode: "build", args: ["a tutoring app for kids"] });
 
     const cliCall = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"))!;
-    expect(cliCall.cmd).toContain("'build'");
-    expect(cliCall.cmd).toContain("'a tutoring app for kids'");
+    // exact positional order, not just containment — a containment-only check would have missed
+    // the real bug this closes (workspace and prompt swapped)
+    expect(cliCall.cmd).toContain("bun src/cli.ts 'build' 'a tutoring app for kids' '/home/user/workspace'");
+  });
+
+  test("change's request text ALSO comes before the workspace dir (cli.ts: `change \"<request>\" <dir>`)", async () => {
+    const sandbox = new FakeSandbox("sbx-4b");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    await worker.dispatch({ ...baseOpts, mode: "change", args: ["add a dark mode toggle"] });
+    const cliCall = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"))!;
+    expect(cliCall.cmd).toContain("bun src/cli.ts 'change' 'add a dark mode toggle' '/home/user/workspace'");
+  });
+
+  test("fix/ship/polish/rollback take ONLY the workspace dir (cli.ts: `fix <dir>`, no prompt) — dir comes right after the mode", async () => {
+    const sandbox = new FakeSandbox("sbx-4c");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    await worker.dispatch({ ...baseOpts, mode: "ship" });
+    const cliCall = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"))!;
+    expect(cliCall.cmd).toContain("bun src/cli.ts 'ship' '/home/user/workspace'");
   });
 
   test("templateId is threaded through to sandbox creation", async () => {
