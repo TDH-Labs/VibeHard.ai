@@ -211,3 +211,30 @@ confirmed via a post-test API list call on both providers).
    real lockfile, not freshly `npm install`ed inside a live sandbox on every run — the
    non-determinism that caused this was an artifact of the spike's own test methodology
    (live install for a one-off check), not something the production design would ever hit.
+5. **The real custom `BuildWorker` template — BUILT, REGISTERED, AND LIVE-CONFIRMED, 2026-07-11**
+   (closing item 4's last caveat — the SDK is now genuinely baked in, not a hypothetical).
+   `e2b.Dockerfile` (repo root) is a single-stage twin of the platform's own `Dockerfile`,
+   forked for two real, E2B-specific incompatibilities discovered live (neither documented
+   anywhere obvious beforehand):
+   - **E2B's template builder rejects multi-stage Dockerfiles outright** (`Error: Multi-stage
+     Dockerfiles are not supported`) — the platform `Dockerfile`'s `FROM flyio/flyctl:latest AS
+     flyctl` / `COPY --from=flyctl` pattern for getting the `fly` binary had to become a
+     single-stage `curl -L https://fly.io/install.sh | sh` instead.
+   - **E2B's `COPY` doesn't auto-create destination directories the way Docker's does** — the
+     platform Dockerfile's layer-caching trick (`COPY packages/gate-check/package.json
+     packages/gate-check/` before the full `COPY . .`, so `bun install` isn't invalidated by
+     unrelated source edits) failed with `failed to move files in sandbox: exit status 1`
+     because `packages/gate-check/` didn't exist yet. Irrelevant for a template built once, not
+     per-CI-run — collapsed to one `COPY . .` before `bun install`, sidestepping it entirely.
+
+   Registered as template `vibehard-build-worker` (id `c9iv75vaji3nmn6opx4g`, E2B account
+   `adammatar1982@gmail.com` / Default Team). **Live smoke test** (one real sandbox, created
+   from this exact template, killed immediately after): confirmed `pwd` → `/app` and `whoami`
+   → `user` (the sandbox's default cwd/user match the template's Docker `WORKDIR`/default user
+   with zero extra wiring), `/app/src/cli.ts` present, `bun`/`node`/`npm`/`npx`/`flyctl`/`fly`/
+   `semgrep`/`gitleaks`/`trivy` all resolve on `PATH`, and — the actual question this test
+   existed to answer — the EXACT command `E2BBuildWorker` issues today, `bun src/cli.ts
+   --version` (a **relative** path, per `CLI_PATH` in build-worker.ts), ran with exit 0 and
+   printed the version. **Zero code changes needed to `build-worker.ts`** — its existing
+   relative-path assumption was correct against the real template. Sandbox confirmed killed;
+   zero orphaned sandboxes on the account afterward (`e2b sandbox list` → "No sandboxes found").

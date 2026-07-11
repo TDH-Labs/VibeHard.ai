@@ -104,11 +104,14 @@ export interface E2BBuildWorkerOptions {
   buildLogStore: BuildLogStore;
   fetchEnv: FetchEnv;
   /** The pre-built custom template ID (ARCHITECTURE.md W3 decision #2: the platform's own
-   *  Dockerfile, built once as an E2B template, NOT E2B's stock "base" template). Undefined
-   *  falls back to "base" — which has neither VibeHard's source nor its toolchain baked in and
-   *  so cannot actually run `cli.ts`. Building + registering the real template needs `e2b auth
-   *  login` (interactive browser OAuth) — a genuine credential gap flagged, not worked around;
-   *  see this workstream's commit message for the concrete follow-up. */
+   *  image, built once as an E2B template, NOT E2B's stock "base" template — "base" has neither
+   *  VibeHard's source nor its toolchain baked in and so cannot actually run `cli.ts`). Built
+   *  and live-confirmed 2026-07-11 from `e2b.Dockerfile` (repo root — a single-stage twin of
+   *  the platform's own Dockerfile; see that file's header for the two E2B-specific
+   *  incompatibilities it works around) as template name `vibehard-build-worker`
+   *  (id `c9iv75vaji3nmn6opx4g`) — pass that name/id here in the real dispatcher (W4). Live
+   *  smoke test confirmed the sandbox's default cwd/user (`/app`, `user`) and every tool this
+   *  module depends on resolve with zero extra wiring (docs/build-substrate/PRD.md spike item 5). */
   templateId?: string;
   timeoutMs?: number;
 }
