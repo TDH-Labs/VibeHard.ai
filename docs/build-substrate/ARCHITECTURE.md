@@ -4,7 +4,8 @@
 > the dependency graph that orders the build, and the v1-vs-later split. Mirrors VibeHard's
 > existing patterns (the `HostProvider`/`SecretsStore`/`BackendProvider` seams in
 > `src/substrate/types.ts`; the gate sentinel precondition; `fly-exec-sandbox.ts`'s proven
-> ephemeral-machine-always-torn-down mechanism, extended in scope not replaced).
+> always-torn-down teardown discipline, applied to a new provider — see SPEC's "Provider
+> note" for why `BuildWorker`'s v1 implementation targets E2B rather than Fly Machines).
 
 ## Shape
 A dispatcher replaces two existing local-spawn call sites; each build runs on its own
@@ -18,28 +19,33 @@ dispatch(tenantId, app, mode)                        ← THE dispatcher (new; re
   1. isBuildRunning(tenantId)?  → refuse/queue          buildStream()'s inline spawn AND
   2. atBuildCapacity()?         → 503, unchanged          realBuildTools().retry()'s spawn)
   3. mint a scoped, single-use, expiring secrets token
-  4. BuildWorker.dispatch(tenantId, app, mode, token)  ← ephemeral Fly machine, platform's
-                                                           own pre-built image (NOT a
-                                                           per-invocation image build)
-        ▼  (on the worker, inside its own machine)
+  4. BuildWorker.dispatch(tenantId, app, mode, token)  ← ephemeral E2B sandbox, platform's
+                                                           own pre-built custom-template
+                                                           image (NOT a per-invocation
+                                                           image build)
+        ▼  (on the worker, inside its own sandbox)
   5. WorkspaceStore.pull(tenantId, app) → local tmpdir  ← whole-tree tar from Tigris
-  6. fetch env via the one-time token                  ← R6; never fly secrets set/--env
+  6. fetch env via the one-time token                  ← R6; never passed as sandbox-
+                                                           creation env vars directly
   7. run `bun src/cli.ts build/fix <dir>` UNMODIFIED    ← same pipeline as today, same LLM
      — per AUTOFIX-ITERATION (not per stage, not per      calls, same gates (incl. nested
-       whole loop):                                       runInFlyExecSandbox — needs
-       a. tee build-log lines → build_log_lines table      FLY_API_TOKEN threaded here too)
-       b. write heartbeat
+       whole loop):                                       sandboxed exec — needs
+       a. tee build-log lines → build_log_lines table      E2B_API_KEY threaded here too,
+       b. write heartbeat                                  CONFIRMED WORKING live 2026-07-10)
        c. check stop-flag → cooperative yield if set
        d. WorkspaceStore.push(checkpoint tar)            ← retried w/ backoff; FAILS CLOSED
                                                              (hold the build, do NOT destroy)
   8. on terminal state (done/held/stopped/error):
        final WorkspaceStore.push() → MUST succeed before step 9
-  9. BuildWorker teardown (always — win, lose, or die)   ← same as fly-exec-sandbox.ts today
+  9. BuildWorker teardown (always — win, lose, or die)   ← same discipline as
+                                                             fly-exec-sandbox.ts today,
+                                                             backstopped by E2B's own
+                                                             timeoutMs auto-expiry
 
 [independently, always running]
 heartbeat sweep       → flags a worker stale after N minutes of silence (R7)
-orphan sweep          → destroys a Fly app whose worker went stale with no clean teardown
-cost tracker          → machine-seconds per build, incl. nested exec-sandbox spend (R8)
+orphan sweep          → destroys a sandbox whose worker went stale with no clean teardown
+cost tracker          → compute-seconds per build, incl. nested sandbox spend (R8)
 ```
 
 The **web tier's SSE endpoint never spawns or pipes anything** post-migration — it polls
@@ -61,13 +67,21 @@ for free (R3.1) and what removes the co-location assumption `pump()` has today.
   blob-overwrite shape (`PgTenantKvStore`'s `insert ... on conflict (scope, k) do update`) —
   that pattern is correct for the outbound inbox (a handful of proactive messages) and wrong
   for a growing multi-hundred-line log.
-- **W3 `BuildWorker` (seam) + ephemeral-Fly impl.** `dispatch(tenantId, app, mode, secretsToken)
+- **W3 `BuildWorker` (seam) + E2B sandbox impl.** `dispatch(tenantId, app, mode, secretsToken)
   → workerId`; internally: pull workspace (W1), fetch env via the token (W5), run the
   unmodified `cli.ts build/fix` pipeline, tee to W2, checkpoint per autofix iteration,
-  push-then-destroy (never the reverse order). Runs the **platform's own root `Dockerfile`
-  image**, not a fresh per-call image build — the one deliberate mechanical difference from
-  `fly-exec-sandbox.ts`'s existing pattern, which stays exactly as-is for its own job
-  (sandboxing the *generated app's* boot/build check inside `packages/gate-check`).
+  push-then-destroy (never the reverse order). Runs the **platform's own root `Dockerfile`,
+  built once as an E2B custom template**, not a fresh per-call image build — the one
+  deliberate mechanical difference from `fly-exec-sandbox.ts`'s existing pattern, which stays
+  exactly as-is for its own job (sandboxing the *generated app's* boot/build check inside
+  `packages/gate-check`) and on its own provider (Fly). **Nested sandbox creation confirmed
+  live 2026-07-10**: code running inside an E2B sandbox, given the API key in its own env,
+  created a second sandbox via a plain `fetch()` POST to `https://api.e2b.app/sandboxes`
+  and deleted it via `DELETE .../sandboxes/{id}` — no SDK, no CLI, just the raw REST contract
+  the SDK itself wraps (confirmed by reading the SDK's own source: `POST /sandboxes`, header
+  `X-API-Key`, default `templateID: "base"`). Zero orphaned sandboxes after. This is exactly
+  the mechanism the platform's own `verify` gate needs when its sandboxed-exec call runs from
+  inside a `BuildWorker`.
 - **W4 The dispatcher.** The single new entry point both `web/server.ts`'s `buildStream()`
   and `src/orchestrator-glue/build-tools.ts`'s `realBuildTools().retry()` call instead of
   their current independent `Bun.spawn(["bun", CLI, ...])` calls. Carries the
@@ -88,9 +102,10 @@ for free (R3.1) and what removes the co-location assumption `pump()` has today.
   interval (durable, e.g. alongside `BuildProgressStore`'s existing per-tenant record); a
   periodic sweep (independent of any one machine, e.g. a scheduled job or a check-on-read
   pattern matching `sweepStaleRunning()`'s existing role) flags/destroys stale workers and
-  their Fly apps. Cost: at minimum, machine-seconds per build, attributing nested
-  exec-sandbox spend (the `verify` gate's own `runInFlyExecSandbox` calls, now running
-  *inside* a worker) to the same build's record — not a second, invisible spend layer.
+  their sandboxes — backstopped, not replaced, by E2B's own `timeoutMs` auto-expiry on the
+  sandbox itself. Cost: at minimum, compute-seconds per build, attributing nested sandbox
+  spend (the `verify` gate's own sandboxed-exec calls, now running *inside* a worker) to the
+  same build's record — not a second, invisible spend layer.
 - **W7 `Orchestrator.pendingConfirm` durability.** Move the private `pendingConfirm` field
   (`packages/orchestrator/src/orchestrator.ts:105`) into the same durable per-tenant store
   pattern already proven for the outbound inbox. **Parallel workstream — no dependency on
@@ -99,11 +114,15 @@ for free (R3.1) and what removes the co-location assumption `pump()` has today.
 ## Dependency graph → build order (topological tiers)
 
 ```
-Tier 0 (SPIKE, before any build):  Tigris read/write/list from a real Fly machine · confirm
-                                   nested `fly machine run` works from inside an already-
-                                   ephemeral machine · confirm DATABASE_URL is actually set
-                                   in production (before ANY later change to
-                                   min_machines_running, out of this epic's own scope)
+Tier 0 (SPIKE, before any build):  Tigris read/write/list from a real E2B sandbox (NOT YET
+                                   DONE) · nested E2B sandbox creation from inside an
+                                   already-ephemeral sandbox — CONFIRMED 2026-07-10, live ·
+                                   DATABASE_URL actually set in production — CONFIRMED
+                                   2026-07-10 (relevant to the web tier's own Fly hosting,
+                                   unrelated to the BuildWorker provider swap; still gates
+                                   any later change to min_machines_running, out of this
+                                   epic's own scope) · running an actual command inside a
+                                   nested sandbox, not just create+delete (NOT YET DONE)
 
 Tier 1 (independent foundations,   WorkspaceStore(W1) · build_log_lines table(W2) ·
         parallel):                 stop-flag + heartbeat fields on BuildProgressStore(part
@@ -136,10 +155,10 @@ used for its own tiers.
 Building the thinnest thing that proves "a build survives the machine it started on"
 end-to-end, behind clean seams, before hardening further:
 
-- **In v1:** the seam *interfaces* + **single happy-path impls** — Tigris only, one
-  ephemeral-Fly `BuildWorker` impl, whole-tree tar (no incremental sync), one active build
-  per tenant (no concurrent-writer coordination), checkpoint per autofix iteration, minimal
-  (not full) cost tracking.
+- **In v1:** the seam *interfaces* + **single happy-path impls** — Tigris only, one E2B
+  `BuildWorker` impl, whole-tree tar (no incremental sync), one active build per tenant (no
+  concurrent-writer coordination), checkpoint per autofix iteration, minimal (not full) cost
+  tracking.
 - **"Thin" applies to the COMMODITY assembly — NOT the safety guarantees.** The
   checkpoint-push-then-destroy ordering (decision #4/AC2.3), cooperative stop (never a
   signal), and the scoped single-use secrets token are real and non-negotiable even in the
@@ -157,9 +176,11 @@ end-to-end, behind clean seams, before hardening further:
   dispatch/checkpoint/teardown.
 - **Two swappable seams** (`WorkspaceStore`, `BuildWorker`) — same discipline as
   `HostProvider`/`SecretsStore`/`BackendProvider` in `src/substrate/types.ts`: one impl each
-  for v1, a second only on concrete need, unit-tested with fakes (no real Tigris/Fly calls
+  for v1, a second only on concrete need, unit-tested with fakes (no real Tigris/E2B calls
   in the test suite — matching how `fly-sandbox.ts`/`fly-exec-sandbox.ts` are already tested
-  today).
+  today). The seam is what made the Fly→E2B provider swap cheap: only W3's implementation
+  and the handful of Fly-specific mentions in this doc set changed — the shape of every other
+  workstream (W1, W2, W4, W5, W6, W7) was untouched by the swap.
 - **Idempotency is keyed on the checkpoint**, not on probing the worker — a `retry` after a
   dead worker resumes from the last successfully pushed tar, the same idempotency shape
   `runtime-substrate`'s `DeploymentRecord` already established for a different resource.
@@ -178,7 +199,7 @@ end-to-end, behind clean seams, before hardening further:
   secret stores (`SecretsStore` in `src/substrate/`, `tenantKv`'s encrypted values). Adjacent
   surface, separate epic.
 - **EPIC #37 (Cost governance + observability)** — this epic ships only R8's minimal
-  machine-seconds tracking, not budgets, alerting, or per-tenant cost attribution to billing.
+  compute-seconds tracking, not budgets, alerting, or per-tenant cost attribution to billing.
 - **Relaxing `fly.toml`'s single-machine pin for the web tier** — a real, separate follow-on
   decision once this epic's workspace-off-local-disk change actually lands, gated on
   confirming the `DATABASE_URL`/embedded-pglite dependency on the same volume mount is clear

@@ -27,11 +27,25 @@ defining where a build's workspace actually lives."
 EPIC #32 already shipped real, live, production-proven sandboxing (`src/substrate/
 fly-sandbox.ts`, `fly-exec-sandbox.ts` — confirmed via a real SSH smoke test the same night
 this doc was written) — but only for the **verify gate's check of the generated app's own
-boot/build**. The platform's **own** `bun src/cli.ts build/fix` invocation — the thing that
-actually needs isolating — still runs as a raw `Bun.spawn` directly inside `web/server.ts`'s
-request handler, on the same machine serving web traffic. Everything shipped since (the
-cross-process host-lock mutex, the whole-platform concurrency cap) is contention management
-on ONE shared box, not isolation.
+boot/build**, and it shells out to the `fly` CLI as a subprocess rather than calling an SDK.
+The platform's **own** `bun src/cli.ts build/fix` invocation — the thing that actually needs
+isolating — still runs as a raw `Bun.spawn` directly inside `web/server.ts`'s request handler,
+on the same machine serving web traffic. Everything shipped since (the cross-process host-lock
+mutex, the whole-platform concurrency cap) is contention management on ONE shared box, not
+isolation.
+
+**Provider note (2026-07-10):** a live spike attempting to validate nested ephemeral-machine
+creation against Fly's Machines API hit repeated, largely self-inflicted CLI-layer friction
+(a convenience image's baked-in `ENTRYPOINT` silently swallowing command overrides, `exit_code
+=-1` restart-loops, `--detach`/`--no-tail` not behaving as documented) — not evidence the
+underlying mechanism doesn't work (it does; that's exactly what `fly-exec-sandbox.ts` already
+proves live), but evidence that *scripting a CLI* is inherently more brittle than *calling an
+SDK*. **`BuildWorker`'s v1 implementation targets E2B (e2b.dev) instead of Fly Machines** —
+purpose-built for exactly this ephemeral spin-up/execute/teardown pattern, with an official
+TypeScript SDK (no CLI-shell-out class of bugs at all). This is a swap of the `BuildWorker`
+seam's v1 implementation only — VibeHard's *existing* Fly usage (the platform's own hosting,
+and `runtime-substrate`'s `FlyHostProvider` for deploying *finished, gated* generated apps to
+production) is unrelated and untouched by this decision.
 
 Separately, VibeHard is scoping a Phase II "Enterprise Agent Builder" direction (`docs/
 ROADMAP.md`) that reuses this same orchestrator/build substrate for **long-running agents**,
@@ -46,22 +60,25 @@ by one HTTP request.
   built here is exactly what a long-running agent needs; not built for Phase II directly.
 
 ## Decisions from review (load-bearing — each closes a specific failure mode found during research)
-1. **Object storage (Tigris — Fly's native S3-compatible store) is the workspace source of
-   truth**, not a shared/synced Fly Volume, not sticky routing, not a pool of pinned
-   long-lived workers. An ephemeral build machine is by definition not sticky to anything —
+1. **Object storage (Tigris — a well-understood, S3-compatible store) is the workspace source
+   of truth**, not a shared/synced Fly Volume, not sticky routing, not a pool of pinned
+   long-lived workers. An ephemeral build worker is by definition not sticky to anything —
    sticky routing solves a *different*, now-moot problem (pinning HTTP requests to one web
    machine). The **pinned-long-lived-worker pool was explicitly considered and rejected**:
    it reuses more existing code untouched, but it doesn't decouple compute from state — the
-   opposite of what Phase II needs — and it's new, unproven infrastructure in this codebase
-   versus Tigris's well-understood S3 API. Same "buy" shape as `runtime-substrate`'s
-   "frontend hosting → buy."
-2. **The build worker runs the platform's own pre-built image** (the root `Dockerfile` — bun,
-   node22, flyctl, semgrep/gitleaks/trivy already baked in), with the tenant workspace pulled
-   in as **data** at startup — NOT `fly-exec-sandbox.ts`'s existing mechanism of building a
-   fresh Docker image from the target workspace on every call. That mechanism is correct for
-   its actual job (sandboxing a small, arbitrary *generated app's* build) and stays
-   unchanged; it is the wrong shape for running the platform's own large, stable toolchain
-   repeatedly.
+   opposite of what Phase II needs. E2B sandboxes have outbound internet access by default, so
+   Tigris is reachable from the worker regardless of compute provider — this decision no
+   longer carries a same-cloud/zero-egress rationale (that was Fly-specific), just "well-
+   understood S3 API, buy don't build," the same shape as `runtime-substrate`'s "frontend
+   hosting → buy."
+2. **The build worker runs the platform's own pre-built image, as an E2B custom template**
+   (built once from the root `Dockerfile` — bun, node22, semgrep/gitleaks/trivy already baked
+   in — via E2B's Dockerfile-based template system), with the tenant workspace pulled in as
+   **data** at startup — NOT `fly-exec-sandbox.ts`'s existing mechanism of building a fresh
+   Docker image from the target workspace on every call. That mechanism is correct for its
+   actual job (sandboxing a small, arbitrary *generated app's* build) and stays unchanged; it
+   would be the wrong shape for running the platform's own large, stable toolchain repeatedly
+   even if it were reused as-is.
 3. **Checkpoint granularity is per autofix iteration**, not per pipeline stage and not per
    whole autofix loop. A real build runs 45+ minutes across multiple gate→fix→re-gate
    iterations burning real LLM spend (confirmed via the ROADMAP's own dogfooding logs) —
@@ -94,10 +111,11 @@ by one HTTP request.
    history — last-seen-position replay falls out of the same design for free.
 8. **Secrets reach the worker via a scoped, single-use, expiring token minted at dispatch
    time** — the worker calls back to an internal platform endpoint to fetch its env, rather
-   than tenant secrets (a Supabase service-role key, a BYO LLM key) ever appearing in `fly
-   machine run --env` or `fly secrets set`, both of which leave a trace in Fly's own
-   machine-config/audit surface. This is a materially higher-stakes secret than the single
-   `FLY_API_TOKEN` the existing exec-sandbox pattern already handles — it needs its own
+   than tenant secrets (a Supabase service-role key, a BYO LLM key) ever being passed directly
+   as sandbox creation env vars (E2B's `Sandbox.create({ envs })`), which — like Fly's `--env`/
+   `fly secrets set` — isn't confirmed to avoid leaving a trace in the provider's own
+   dashboard/audit surface. This is a materially higher-stakes secret than the single
+   `E2B_API_KEY` the nested-sandbox mechanism itself needs (decision below) — it needs its own
    explicit answer, not the same treatment by default.
 9. **Heartbeat-based staleness/orphan detection**, not `sweepStaleRunning()`'s current
    inference ("the web process just booted, so any 'running' record must be stale") — that
@@ -105,15 +123,16 @@ by one HTTP request.
    process's own child: a worker can die silently while the web tier runs for weeks
    (nothing ever notices, the tenant's admission-control slot stays permanently occupied),
    and a web-tier redeploy no longer implies anything about a live worker. Plus an
-   independent periodic sweep for orphaned build-worker Fly apps — the existing exec-sandbox
-   pattern has no such sweep today (its `finally`-block teardown never fires if the
-   underlying machine is OOM-killed or evicted); don't inherit that gap silently at a larger
-   scale.
-10. **Minimal per-build Fly cost tracking is in this epic's scope, not deferred to EPIC #37.**
-    Nested sandboxing (the platform's own `verify` gate calling `runInFlyExecSandbox` *from
-    inside* a build worker) compounds real, currently-unmeasured spend — ROADMAP.md already
-    flags the existing single layer as unmeasured; this epic should not add a second, larger
-    layer on top of that blind.
+   independent periodic sweep for orphaned build-worker E2B sandboxes as a backstop — E2B
+   sandboxes already carry their own `timeoutMs` auto-expiry (confirmed: `Sandbox.create`'s
+   default timeout kills an abandoned sandbox even if nothing ever calls teardown), which is a
+   real safety net Fly's exec-sandbox pattern didn't have as cleanly — but don't rely on that
+   alone; the sweep is still the thing that closes the "nothing ever notices" admission-control
+   gap.
+10. **Minimal per-build compute cost tracking is in this epic's scope, not deferred to EPIC
+    #37.** Nested sandboxing (the platform's own `verify` gate calling a sandboxed exec *from
+    inside* a build worker) compounds real spend across two layers — track both, not just the
+    outer one.
 
 **Shipped separately, unblocked by the rest:** `Orchestrator.pendingConfirm` (the yes/no gate
 before "ship") lives in an in-process `Map` today — a latent, independent bug on the
@@ -123,14 +142,15 @@ on anything above.
 ## In scope (v1 — the walking skeleton)
 - `WorkspaceStore` seam + one Tigris implementation: whole-tree tar pull at worker start,
   push at each checkpoint.
-- `BuildWorker` seam + one ephemeral-Fly implementation, running the platform's own image.
+- `BuildWorker` seam + one E2B sandbox implementation, running the platform's own custom
+  template image.
 - One dispatcher, replacing both existing local-spawn call sites, carrying the missing
   admission check.
 - Durable append-only live build log + SSE poll-and-tail with reconnect replay.
 - Cooperative stop (durable poll-flag).
 - Scoped, single-use, expiring token for secrets propagation to the worker.
 - Heartbeat-based staleness detection + an independent orphan-worker sweep.
-- Minimal per-build cost tracking (at minimum: Fly machine-seconds, surfaced somewhere
+- Minimal per-build cost tracking (at minimum: compute-seconds consumed, surfaced somewhere
   durable — not a full cost-governance dashboard).
 - `Orchestrator.pendingConfirm` durability fix (separate workstream, no dependency on the rest).
 
@@ -149,9 +169,9 @@ on anything above.
   also lives on the same volume mount — don't assume it's unused).
 
 ## Data + security posture
-- **Tenant secrets never appear in Fly's own machine-config/audit surface.** The worker
-  fetches its env via a scoped, single-use, expiring token minted at dispatch (decision #8) —
-  not `fly secrets set`, not `--env` on `fly machine run`.
+- **Tenant secrets never appear in the sandbox provider's own creation-config/audit surface.**
+  The worker fetches its env via a scoped, single-use, expiring token minted at dispatch
+  (decision #8) — not passed directly as sandbox-creation env vars.
 - **Workspace content in object storage is the SAME data that's on local disk today** (source
   code, `.vibehard/spec.json`, generated app files) — no NEW class of sensitive data is
   introduced by moving it to Tigris; classification/rigor is unchanged. Standard "credentials
@@ -174,12 +194,17 @@ on anything above.
   the LLM calls happen exactly where they do today, *inside* the worker's own `cli.ts`
   execution; nothing about moving where that execution runs adds a new LLM call to the
   control plane.
-- **Nested sandbox calls require `FLY_API_TOKEN` threaded to the worker** — the platform's
-  own `verify` gate already calls `runInFlyExecSandbox` from inside the pipeline; once that
-  pipeline itself runs inside a build worker, the token must reach two layers deep, not one.
+- **Nested sandbox calls require `E2B_API_KEY` threaded to the worker** — the platform's own
+  `verify` gate calls a sandboxed exec from inside the pipeline; once that pipeline itself
+  runs inside a build worker, the key must reach two layers deep, not one. **Confirmed live,
+  2026-07-10**: a real E2B sandbox, given the API key in its own env, successfully created a
+  second, independent sandbox via a plain HTTP call to E2B's control-plane API from code
+  running inside it, then tore that second sandbox down — the exact nested pattern this
+  invariant depends on. No orphaned sandboxes remained afterward. This is not an inference
+  from documentation; it's a live-tested fact.
 
 ## Success = a build survives the machine it started on
-A build that's mid-flight when its worker machine dies (crash, OOM, a platform deploy) is
-recoverable from its last checkpoint, not lost — with no cross-machine split-brain (the
-07-08/09 incident does not recur), no SIGKILL-based stop, and no silent orphaned Fly spend —
-while the browser-facing chat/status/live-log experience is unchanged from today's.
+A build that's mid-flight when its worker dies (crash, OOM, a platform deploy) is recoverable
+from its last checkpoint, not lost — with no cross-machine split-brain (the 07-08/09 incident
+does not recur), no SIGKILL-based stop, and no silent orphaned sandbox spend — while the
+browser-facing chat/status/live-log experience is unchanged from today's.
