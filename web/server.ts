@@ -692,13 +692,64 @@ async function getOrchestrator(tenantId: string, app: string): Promise<Orchestra
     const channel: Channel = { send: (m) => appendInbox(tenantId, app, m) };
     const byo = await loadKey(tenantId);
     const modelFactory = byo ? byoModelFactory(byo.startsWith("sk-ant-") ? { anthropicKey: byo } : { openaiKey: byo }) : undefined;
+    // Chat-dispatched retry/ship marker capture — mirrors buildStream()'s own runStep onLog
+    // scanning (::held/LIVE →), previously unset entirely here (THE BUG: a chat-dispatched
+    // build's output went nowhere, so a held ticket or a live URL was never captured).
+    let chatHeldTicket: string | undefined;
+    let chatLiveUrl: string | undefined;
     const tools = realBuildTools(workspace, runPipeline, {
       tenantId,
       app,
-      onRetryDone: (ok) =>
-        channel.send(ok ? { kind: "done", text: '✅ The build landed clean — all gates pass. Say "ship" when you want to deploy.' } : { kind: "error", text: '🛑 It stopped again. Say "why" and I\'ll tell you the blocker.' }),
+      // THE BUG THIS CLOSES: retry()/ship() previously had no concurrency guard at all — a chat
+      // "retry" while an SSE-driven buildStream() was mid-flight could dispatch a second,
+      // concurrent cli.ts run against the same workspace. Same checks buildStream()'s own two
+      // HTTP call sites already use.
+      guard: async () => {
+        if (await isBuildRunning(tenantId)) return 'a build is already running — say "status" to check, or wait for it to finish';
+        if (await atBuildCapacity()) return "the platform is at capacity right now — please try again in a few minutes";
+        return null;
+      },
+      onDispatchStart: async () => {
+        chatHeldTicket = undefined;
+        chatLiveUrl = undefined;
+        await buildStore.patchActive(tenantId, { status: "running" });
+        await buildStore.patchBuild(tenantId, app, { status: "running" });
+      },
+      onLog: (ln) => {
+        const h = ln.match(/::held (\S+)/);
+        if (h) {
+          chatHeldTicket = h[1];
+          return;
+        }
+        const u = ln.match(/LIVE → (\S+)/);
+        if (u) chatLiveUrl = u[1];
+      },
+      onRetryDone: (ok) => {
+        const status = ok ? "paused" : "blocked"; // fixed-but-not-shipped has no dedicated status; "paused" (stopped, resumable) is the closest existing fit
+        void buildStore.patchActive(tenantId, { status });
+        void buildStore.patchBuild(tenantId, app, { status, ...(chatHeldTicket ? { ticket: chatHeldTicket } : {}) });
+        if (status === "blocked") void notifyOperatorHeld({ tenantId, app, prompt: "(chat retry)", ticket: chatHeldTicket });
+        channel.send(
+          ok
+            ? { kind: "done", text: '✅ The build landed clean — all gates pass. Say "ship" when you want to deploy.' }
+            : {
+                kind: "error",
+                text: chatHeldTicket ? `🛑 Held for review (${chatHeldTicket}). Say "why" for detail.` : '🛑 It stopped again. Say "why" and I\'ll tell you the blocker.',
+              },
+        );
+      },
       onRetryHeartbeat: (_dir, minutes) =>
         channel.send({ kind: "info", text: `Still working — the fix loop has been running about ${minutes} minute(s). I'll message you the moment it lands.` }),
+      onShipDone: (ok) => {
+        const status = ok ? "live" : "deploy-failed";
+        void buildStore.patchActive(tenantId, { status });
+        void buildStore.patchBuild(tenantId, app, { status, ...(chatLiveUrl ? { url: chatLiveUrl } : {}) });
+        channel.send(
+          ok
+            ? { kind: "done", text: chatLiveUrl ? `🚀 Shipped → ${chatLiveUrl}` : "🚀 Shipped." }
+            : { kind: "error", text: '🛑 Deploy failed. Say "why" for detail.' },
+        );
+      },
     });
     o = new Orchestrator(
       tools,
@@ -1344,6 +1395,29 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
     await buildStore.setActive(tenantId, { app, prompt, status });
     await buildStore.patchBuild(tenantId, app, { status, ...(heldTicket ? { ticket: heldTicket } : {}), ...(liveUrl ? { url: liveUrl } : {}) });
     if (status === "blocked") void notifyOperatorHeld({ tenantId, app, prompt, ticket: heldTicket });
+    // THE BUG THIS CLOSES (found 2026-07-12 verifying wiring before a real build test, not by a
+    // failure): Orchestrator.onEvent exists specifically to push PROACTIVE messages into the
+    // tenant's own chat inbox ("🛑 Held for review…", "🚀 Shipped.") — fully built, fully tested
+    // (proactiveMessage()'s own unit tests) — but buildStream() never called it. The orchestrator
+    // only ever reacted to messages the tenant explicitly sent; it never actually saw a build
+    // happen. notifyOperatorHeld above is a SEPARATE, operator-facing email — it was never a
+    // substitute for this. Best-effort: a notification failure must never fail the build itself.
+    try {
+      const orchestrator = await getOrchestrator(tenantId, app);
+      if (status === "blocked" && heldTicket) {
+        await orchestrator.onEvent({ type: "held", ticket: heldTicket, reason: "Gate checks found something that needs a decision." });
+      } else if (status === "live") {
+        await orchestrator.onEvent({ type: "shipped" });
+      } else if (status === "deploy-failed") {
+        await orchestrator.onEvent({ type: "done", ok: false, summary: "Gates passed, but the deploy itself failed." });
+      } else if (status === "error") {
+        await orchestrator.onEvent({ type: "done", ok: false, summary: "An unexpected error stopped the build." });
+      }
+      // "paused" is the tenant's OWN action (they clicked Stop) — no need to tell them what
+      // they just did; "running" is set once at start, never reached via finish() itself.
+    } catch {
+      /* best-effort — the build's own outcome is already durable via buildStore above */
+    }
   };
   const stream = new ReadableStream({
     async start(controller) {
