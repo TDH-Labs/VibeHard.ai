@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VERSION, teeToLogFile } from "./cli.ts";
+import { VERSION, teeToLogFile, checkpointHook } from "./cli.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
 // M1 replaces/expands this with real gate tests (PROJECT_BRIEF.md §8–9).
@@ -83,5 +83,57 @@ describe("teeToLogFile — 2026-07-09 durable per-workspace build log", () => {
     const impossible = join(d, "not-a-dir-because-this-is-a-file");
     writeFileSync(impossible, "x");
     expect(() => teeToLogFile(join(impossible, "nested", "deeper"))).not.toThrow();
+  });
+});
+
+describe("checkpointHook — build-substrate W3 checkpoint wiring", () => {
+  const prevEnv = process.env.VIBEHARD_CHECKPOINT_CMD;
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.VIBEHARD_CHECKPOINT_CMD;
+    else process.env.VIBEHARD_CHECKPOINT_CMD = prevEnv;
+  });
+  const dirs2: string[] = [];
+  afterEach(() => {
+    for (const d of dirs2.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  function dir2(): string {
+    const d = mkdtempSync(join(tmpdir(), "vibehard-checkpoint-"));
+    dirs2.push(d);
+    return d;
+  }
+  function scriptThatExits(dir: string, exitCode: number, name = "checkpoint.sh"): string {
+    const p = join(dir, name);
+    writeFileSync(p, `#!/bin/sh\necho "round=$1" >> "${join(dir, "calls.log")}"\nexit ${exitCode}\n`);
+    Bun.spawnSync(["chmod", "+x", p]);
+    return p;
+  }
+
+  test("VIBEHARD_CHECKPOINT_CMD unset → returns undefined (zero behavior change outside a BuildWorker)", () => {
+    delete process.env.VIBEHARD_CHECKPOINT_CMD;
+    expect(checkpointHook(dir2())).toBeUndefined();
+  });
+
+  test("set + the command succeeds → the hook resolves cleanly and the command actually ran", async () => {
+    const d = dir2();
+    process.env.VIBEHARD_CHECKPOINT_CMD = scriptThatExits(d, 0);
+    const hook = checkpointHook(d);
+    expect(hook).toBeDefined();
+    await hook!(1);
+    expect(readFileSync(join(d, "calls.log"), "utf8")).toContain("round=1");
+  });
+
+  test("set + the command fails → the hook THROWS (propagates, doesn't swallow — the fail-closed contract)", async () => {
+    const d = dir2();
+    process.env.VIBEHARD_CHECKPOINT_CMD = scriptThatExits(d, 1);
+    const hook = checkpointHook(d)!;
+    await expect(hook(2)).rejects.toThrow(/checkpoint command failed \(exit 1\) after round 2/);
+  });
+
+  test("the round number is passed through to the command as its first argument", async () => {
+    const d = dir2();
+    process.env.VIBEHARD_CHECKPOINT_CMD = scriptThatExits(d, 0);
+    const hook = checkpointHook(d)!;
+    await hook(7);
+    expect(readFileSync(join(d, "calls.log"), "utf8")).toContain("round=7");
   });
 });

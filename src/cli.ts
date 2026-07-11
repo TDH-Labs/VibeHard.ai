@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { formatWithOptions } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
-import { printReport } from "@vibehard/gate-check";
+import { printReport, SUBPROCESS_TIMEOUT_MS } from "@vibehard/gate-check";
 import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
 import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
@@ -432,6 +432,27 @@ function printGateVerdict(v: { gate: string; status: string; blocking: number })
   console.log(`  gate: ${glyph} ${v.gate}${suffix}`);
 }
 
+/** build-substrate W3: when set, a BuildWorker's wrapper script wrote a local checkpoint
+ *  command here (e.g. "tar the workspace and push it to Tigris via a presigned URL") —
+ *  invoked once per autofix iteration via onRoundComplete, awaited, exit code checked. A
+ *  non-zero exit means the checkpoint push failed, which must HOLD the round rather than
+ *  let progress continue unsaved (SPEC decision #4's fail-closed contract) — thrown, not
+ *  swallowed, so it propagates out of autoFix exactly like the existing test coverage
+ *  (autofix.test.ts) already proves. Unset for every non-sandboxed invocation (today's
+ *  default) — zero behavior change outside a BuildWorker.
+ */
+export function checkpointHook(target: string): ((round: number) => Promise<void>) | undefined {
+  const cmd = process.env.VIBEHARD_CHECKPOINT_CMD;
+  if (!cmd) return undefined;
+  return async (round: number) => {
+    const res = Bun.spawnSync([cmd, String(round)], { cwd: target, stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
+    if ((res.exitCode ?? 1) !== 0) {
+      const log = `${res.stdout?.toString() ?? ""}${res.stderr?.toString() ?? ""}`;
+      throw new Error(`checkpoint command failed (exit ${res.exitCode}) after round ${round}: ${log.slice(-500)}`);
+    }
+  };
+}
+
 /** Gate → auto-fix → re-gate; report green on success, or HOLD + queue for human
  *  review on exhaustion (§24). Returns the exit code. Shared by `fix` and `build`. */
 async function runAutoFixAndReport(target: string): Promise<number> {
@@ -443,6 +464,7 @@ async function runAutoFixAndReport(target: string): Promise<number> {
     onStep: (m) => console.log(`  … ${m}`),
     gate: (p) => runGate(p, undefined, printGateVerdict), // emit each gate's pass/fail live
     humanAvailable: async () => false,
+    onRoundComplete: checkpointHook(target),
   });
   if (result.fixed) {
     console.log(`\n✅ gate green after ${result.attempts} auto-fix attempt(s) — deploy-ready.`);
