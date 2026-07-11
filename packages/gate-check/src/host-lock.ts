@@ -23,7 +23,7 @@
  * work from starving itself on one machine.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const DEFAULT_LOCK_DIR = "/root/.vibehard/.host-lock";
 const DEFAULT_STALE_MS = 10 * 60_000; // a lock older than this is presumed abandoned (crashed holder)
@@ -61,6 +61,12 @@ async function acquire(lockDir: string, staleMs: number, pollMs: number, maxWait
   const deadline = Date.now() + maxWaitMs;
   for (;;) {
     try {
+      // Recursive mkdir on the PARENT only: Node's recursive mkdir silently no-ops when the
+      // target already exists (verified — it does NOT throw EEXIST), so running it directly on
+      // `lockDir` would defeat the atomicity below and let two processes both "acquire" it.
+      // The parent chain has no lock semantics of its own, so concurrent recursive-mkdir racers
+      // on it are harmless.
+      mkdirSync(dirname(lockDir), { recursive: true });
       mkdirSync(lockDir); // atomic — throws EEXIST if another process already holds it
       writeFileSync(join(lockDir, "holder.json"), JSON.stringify({ pid: process.pid, at: Date.now() }));
       return true;

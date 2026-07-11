@@ -104,4 +104,39 @@ describe("withHostLock — cross-process mutex for heavy host subprocess work (E
   test("isHostLockHeld is false for a nonexistent lock dir", () => {
     expect(isHostLockHeld(join(tmpdir(), "vibehard-hostlock-never-created"))).toBe(false);
   });
+
+  test("acquires the lock even when its parent directory doesn't exist yet (fresh host/container)", async () => {
+    // Simulates a genuinely fresh host where e.g. /root/.vibehard/ has never been created —
+    // unlike lockDir() above, nothing under the tempdir root exists until acquire() makes it.
+    const root = mkdtempSync(join(tmpdir(), "vibehard-hostlock-freshhost-"));
+    const dir = join(root, "nested", "deeper", ".host-lock");
+    dirs.push(root);
+    const result = await withHostLock(() => "acquired-on-fresh-host", { lockDir: dir });
+    expect(result).toBe("acquired-on-fresh-host");
+    expect(isHostLockHeld(dir)).toBe(false); // released afterward
+  });
+
+  test("still mutually excludes two callers when the parent directory has to be created (atomicity preserved)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vibehard-hostlock-freshhost-race-"));
+    const dir = join(root, "nested", "deeper", ".host-lock");
+    dirs.push(root);
+    const order: string[] = [];
+    const first = withHostLock(
+      async () => {
+        order.push("first-start");
+        await new Promise((r) => setTimeout(r, 150));
+        order.push("first-end");
+      },
+      { lockDir: dir, pollMs: 20 },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    const second = withHostLock(
+      () => {
+        order.push("second-start");
+      },
+      { lockDir: dir, pollMs: 20 },
+    );
+    await Promise.all([first, second]);
+    expect(order).toEqual(["first-start", "first-end", "second-start"]);
+  });
 });
