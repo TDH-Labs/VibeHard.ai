@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { E2BBuildWorker, type CreateSandbox, type SandboxHandle, type DispatchOptions } from "./build-worker.ts";
 import { InMemoryBuildLogStore } from "./build-log-store.ts";
+import { STOP_EXIT_CODE } from "./stop-signal.ts";
 
 interface RecordedCommand {
   cmd: string;
@@ -72,10 +73,12 @@ describe("E2BBuildWorker.dispatch — happy path", () => {
 
     const cmds = sandbox.commands.map((c) => c.cmd);
     expect(cmds.some((c) => c.includes("chmod +x /home/user/checkpoint.sh"))).toBe(true);
+    expect(cmds.some((c) => c.includes("chmod +x /home/user/push.sh"))).toBe(true);
     expect(cmds.some((c) => c.includes("curl -sf -o /tmp/pull.tar") && c.includes("|| true"))).toBe(true);
     expect(cmds.some((c) => c.includes("bun src/cli.ts") && c.includes("'fix'") && c.includes("/home/user/workspace"))).toBe(true);
-    // final push runs the checkpoint script directly
-    expect(cmds.filter((c) => c === "/home/user/checkpoint.sh").length).toBeGreaterThanOrEqual(1);
+    // final push runs the push-only script directly (build-substrate: separated from
+    // checkpoint.sh's stop-check ping, THE BUG found live 2026-07-11 — see finalPush() itself)
+    expect(cmds.filter((c) => c === "/home/user/push.sh").length).toBeGreaterThanOrEqual(1);
   });
 
   test("secrets reach the sandbox via structured envs, never interpolated into the command text", async () => {
@@ -121,7 +124,7 @@ describe("E2BBuildWorker.dispatch — happy path", () => {
 
     await worker.dispatch(baseOpts);
 
-    expect(sandbox.files.get("/home/user/checkpoint.sh")).toContain("PUSH_TOKEN");
+    expect(sandbox.files.get("/home/user/push.sh")).toContain("PUSH_TOKEN"); // the tar+push script, not checkpoint.sh
     const pullCmd = sandbox.commands.find((c) => c.cmd.includes("/tmp/pull.tar"));
     expect(pullCmd!.cmd).toContain("PULL_TOKEN");
   });
@@ -268,7 +271,7 @@ describe("E2BBuildWorker.dispatch — cooperative stop-check ping (build-substra
 
 describe("E2BBuildWorker.dispatch — checkpoint-push-then-destroy contract (SPEC decision #4)", () => {
   test("a final push that keeps failing means the sandbox is NEVER killed, and finalPushOk is false", async () => {
-    const sandbox = new FakeSandbox("sbx-7", (cmd) => (cmd === "/home/user/checkpoint.sh" ? 1 : 0)); // checkpoint always fails
+    const sandbox = new FakeSandbox("sbx-7", (cmd) => (cmd === "/home/user/push.sh" ? 1 : 0)); // the final push (push.sh, not checkpoint.sh) always fails
     const worker = new E2BBuildWorker({
       createSandbox: fakeCreateSandbox(sandbox),
       workspaceStore: fakeWorkspaceStore(),
@@ -285,7 +288,7 @@ describe("E2BBuildWorker.dispatch — checkpoint-push-then-destroy contract (SPE
   test("a final push that fails twice then succeeds still results in the sandbox being killed", async () => {
     let checkpointCalls = 0;
     const sandbox = new FakeSandbox("sbx-8", (cmd) => {
-      if (cmd !== "/home/user/checkpoint.sh") return 0;
+      if (cmd !== "/home/user/push.sh") return 0;
       checkpointCalls++;
       return checkpointCalls < 3 ? 1 : 0; // fails twice, succeeds on the 3rd (retry) attempt
     });
@@ -315,5 +318,28 @@ describe("E2BBuildWorker.dispatch — checkpoint-push-then-destroy contract (SPE
     expect(result.exitCode).toBe(1);
     expect(result.finalPushOk).toBe(true); // the checkpoint itself still succeeded — a build failure isn't an infra failure
     expect(sandbox.killed).toBe(true); // still torn down: the failure is recorded durably, nothing left unsaved
+  });
+
+  test("THE BUG THIS CLOSES (live 2026-07-11): a stop signal at exactly the FINAL push doesn't count as a push failure — finalPush never pings at all", async () => {
+    // push.sh (what finalPush() actually runs) always succeeds; IF finalPush() were still
+    // (incorrectly) running the full checkpoint.sh — which pings and exits via STOP_EXIT_CODE
+    // whenever stopRequested comes back true — this would fail exactly like the real dispatch
+    // that surfaced this bug: a workspace durably saved on the first attempt, but the sandbox
+    // left alive anyway because a nonzero (stop-sentinel) exit was misread as "push failed".
+    const sandbox = new FakeSandbox("sbx-10", (cmd) => (cmd === "/home/user/checkpoint.sh" ? STOP_EXIT_CODE : 0));
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+
+    const result = await worker.dispatch({ ...baseOpts, stopCheckToken: "tok" });
+
+    expect(result.finalPushOk).toBe(true);
+    expect(sandbox.killed).toBe(true);
+    // push.sh was called (and never returned STOP_EXIT_CODE — it doesn't ping at all);
+    // checkpoint.sh's own STOP_EXIT_CODE is irrelevant to the FINAL push's own success.
+    expect(sandbox.commands.some((c) => c.cmd === "/home/user/push.sh")).toBe(true);
   });
 });

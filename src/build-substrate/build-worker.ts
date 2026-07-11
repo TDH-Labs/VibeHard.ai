@@ -89,6 +89,7 @@ export type FetchEnv = (secretsToken: string) => Promise<Record<string, string>>
 
 const WORKSPACE_DIR = "/home/user/workspace";
 const CHECKPOINT_SCRIPT = "/home/user/checkpoint.sh";
+const PUSH_SCRIPT = "/home/user/push.sh";
 const CLI_PATH = "src/cli.ts"; // relative to the template image's own baked-in VibeHard checkout
 const DEFAULT_TIMEOUT_MS = 60 * 60_000; // 1h — real builds run 45+ min (docs/ROADMAP.md observed)
 const FINAL_PUSH_ATTEMPTS = 3;
@@ -179,18 +180,33 @@ export class E2BBuildWorker implements BuildWorker {
 
       const canPing = Boolean(d.stopCheckToken && this.opts.platformBaseUrl);
       const pingUrl = canPing ? `${this.opts.platformBaseUrl}${CHECKPOINT_PING_PATH}` : undefined;
+      // PUSH_SCRIPT is JUST tar+push — the one thing both a per-round checkpoint and the FINAL
+      // push (below) need. Kept separate from the stop-check ping (THE BUG found live
+      // 2026-07-11): finalPush() used to run the SAME script the per-round checkpoint uses,
+      // which also pings for a stop — and a real dispatch caught exactly this: the push itself
+      // succeeded, but the ping came back stopRequested:true (the dispatcher never having marked
+      // any build "active" for this test), so the script exited via STOP_EXIT_CODE (nonzero) —
+      // and finalPush(), seeing a nonzero exit, read that as "the push failed" and retried 3x,
+      // eventually leaving the sandbox alive despite the workspace having already been durably
+      // saved on the very first attempt. Asking "should I stop?" makes no sense for the FINAL
+      // push anyway — the build is already over, about to tear down either way.
+      await sandbox.writeFile(
+        PUSH_SCRIPT,
+        ["#!/bin/sh", "set -e", `tar -cf /tmp/checkpoint.tar -C ${WORKSPACE_DIR} .`, `curl -sf -T /tmp/checkpoint.tar ${shQuote(pushUrl)}`, "rm -f /tmp/checkpoint.tar"].join(
+          "\n",
+        ),
+      );
+      await sandbox.runCommand(`chmod +x ${PUSH_SCRIPT}`);
       await sandbox.writeFile(
         CHECKPOINT_SCRIPT,
         [
           "#!/bin/sh",
           "set -e",
-          `tar -cf /tmp/checkpoint.tar -C ${WORKSPACE_DIR} .`,
-          `curl -sf -T /tmp/checkpoint.tar ${shQuote(pushUrl)}`,
-          "rm -f /tmp/checkpoint.tar",
+          PUSH_SCRIPT,
           // build-substrate W5a/W6: refresh the heartbeat + learn whether a stop was requested,
-          // once per checkpoint. A ping failure (network blip) is tolerated — it just means this
-          // one round's heartbeat/stop-check is skipped, not that the checkpoint itself failed;
-          // the push above (the actual durability guarantee) already succeeded by this point.
+          // once per PER-ROUND checkpoint only (never the final push, above). A ping failure
+          // (network blip) is tolerated — it just means this one round's heartbeat/stop-check is
+          // skipped, not that the checkpoint itself failed; the push already succeeded by now.
           ...(canPing
             ? [
                 `RESP=$(curl -sf -X POST -H 'content-type: application/json' -d ${shQuote(JSON.stringify({ token: d.stopCheckToken }))} ${shQuote(pingUrl!)} || echo '{}')`,
@@ -246,7 +262,7 @@ export class E2BBuildWorker implements BuildWorker {
    *  thing standing between "this build's progress is durable" and "it dies with the sandbox"). */
   private async finalPush(sandbox: SandboxHandle): Promise<boolean> {
     for (let attempt = 0; attempt < FINAL_PUSH_ATTEMPTS; attempt++) {
-      const res = await sandbox.runCommand(CHECKPOINT_SCRIPT);
+      const res = await sandbox.runCommand(PUSH_SCRIPT); // push only — never the stop-check ping, see above
       if (res.exitCode === 0) return true;
       if (attempt < FINAL_PUSH_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
     }
