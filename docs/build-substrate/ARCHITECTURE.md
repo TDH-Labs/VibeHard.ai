@@ -79,8 +79,10 @@ for free (R3.1) and what removes the co-location assumption `pump()` has today.
   created a second sandbox via a plain `fetch()` POST to `https://api.e2b.app/sandboxes`
   and deleted it via `DELETE .../sandboxes/{id}` — no SDK, no CLI, just the raw REST contract
   the SDK itself wraps (confirmed by reading the SDK's own source: `POST /sandboxes`, header
-  `X-API-Key`, default `templateID: "base"`). Zero orphaned sandboxes after. This is exactly
-  the mechanism the platform's own `verify` gate needs when its sandboxed-exec call runs from
+  `X-API-Key`, default `templateID: "base"`). Zero orphaned sandboxes after. Re-confirmed a
+  second way via the full SDK (`commands.run()` on the nested sandbox executed a real
+  command and returned the exact expected output, exit code 0) — this is exactly the
+  mechanism the platform's own `verify` gate needs when its sandboxed-exec call runs from
   inside a `BuildWorker`.
 - **W4 The dispatcher.** The single new entry point both `web/server.ts`'s `buildStream()`
   and `src/orchestrator-glue/build-tools.ts`'s `realBuildTools().retry()` call instead of
@@ -114,15 +116,20 @@ for free (R3.1) and what removes the co-location assumption `pump()` has today.
 ## Dependency graph → build order (topological tiers)
 
 ```
-Tier 0 (SPIKE, before any build):  Tigris read/write/list from a real E2B sandbox (NOT YET
-                                   DONE) · nested E2B sandbox creation from inside an
-                                   already-ephemeral sandbox — CONFIRMED 2026-07-10, live ·
-                                   DATABASE_URL actually set in production — CONFIRMED
-                                   2026-07-10 (relevant to the web tier's own Fly hosting,
-                                   unrelated to the BuildWorker provider swap; still gates
-                                   any later change to min_machines_running, out of this
-                                   epic's own scope) · running an actual command inside a
-                                   nested sandbox, not just create+delete (NOT YET DONE)
+Tier 0 (SPIKE — ALL 4 ITEMS        Tigris read/write/list from a real E2B sandbox — CONFIRMED
+        CONFIRMED 2026-07-10,      (byte-identical SHA-256 round-trip on an 11MB/400-file
+        live, before any build):  synthetic workspace tar; PUT 635ms/LIST 214ms/GET 554ms) ·
+                                   nested E2B sandbox creation from inside an already-
+                                   ephemeral sandbox — CONFIRMED (raw HTTP AND full SDK) ·
+                                   running an actual command inside that nested sandbox —
+                                   CONFIRMED (chalk/npm-overrides fix; the underlying
+                                   non-determinism was a spike-methodology artifact, doesn't
+                                   apply to the real pinned-template design) · DATABASE_URL
+                                   actually set in production — CONFIRMED (relevant to the
+                                   web tier's own Fly hosting, unrelated to the BuildWorker
+                                   provider swap; still gates any later change to
+                                   min_machines_running, out of this epic's own scope).
+                                   Zero orphaned resources left on any provider afterward.
 
 Tier 1 (independent foundations,   WorkspaceStore(W1) · build_log_lines table(W2) ·
         parallel):                 stop-flag + heartbeat fields on BuildProgressStore(part
