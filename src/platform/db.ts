@@ -15,6 +15,7 @@ import { ensurePlatformSchema, ensureSubstrateSchema, pgliteSql, type Sql } from
 import { ensureBuildSchema } from "./build-store.ts";
 import { ensureUserSchema } from "./user-store.ts";
 import { ensureTenantKvSchema } from "./tenant-kv.ts";
+import { ensureBuildLogSchema } from "../build-substrate/build-log-store.ts";
 
 export interface Db {
   sql: Sql;
@@ -36,6 +37,7 @@ async function ensureAllSchema(sql: Sql): Promise<void> {
   await ensureBuildSchema(sql);
   await ensureUserSchema(sql);
   await ensureTenantKvSchema(sql);
+  await ensureBuildLogSchema(sql);
 }
 
 /**
