@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
+import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
 import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
@@ -110,6 +111,11 @@ const userStore = new PgUserStore(platformDb.sql);
 // touches the table.
 const tenantKv = new PgTenantKvStore(platformDb.sql);
 const seenBillingEvents = new Set<string>(); // processed Stripe event ids → drop replays (idempotency)
+// build-substrate W5b (SPEC decision #8): a BuildWorker sandbox has no direct DB/tenantKv access —
+// it exchanges the single-use token minted at dispatch time for its env via /api/internal/build-env
+// below. Not yet minted or dispatched from anywhere (that's W4's dispatcher); this is the seam +
+// callback endpoint it will call, wired now so W4 has something real to mint against.
+const secretsTokenStore = new PgSecretsTokenStore(platformDb.sql);
 
 // ── tiny encrypted store for the per-tenant LLM key (AES-256-GCM) ───────────────
 function encrypt(plain: string): string {
@@ -651,6 +657,25 @@ const server = Bun.serve({
     if (path === "/app" || path === "/reset") return new Response(Bun.file(APP_HTML), { headers: { "cache-control": "no-store" } });
     if (path === "/auth/stripe/connect" || path === "/auth/stripe/callback") return handleStripeConnect(req, url, path);
     if (path.startsWith("/auth/")) return handleOAuth(url, path);
+
+    // build-substrate W5b: a BuildWorker sandbox calls back here with the single-use token it was
+    // dispatched with to fetch its env. Deliberately NOT session/cookie-authenticated — the caller
+    // is a sandbox, not a browser; the token itself IS the credential (opaque, single-use,
+    // short-lived, minted server-side only). A bad/replayed/unknown/expired token gets a bare 404
+    // — never distinguish "wrong token" from "already used" from "expired" in the response, so a
+    // caller can't use the error shape to fish for which case they hit.
+    if (path === "/api/internal/build-env" && req.method === "POST") {
+      let token: unknown;
+      try {
+        ({ token } = await req.json());
+      } catch {
+        return json({ error: "invalid request body" }, 400);
+      }
+      if (typeof token !== "string" || !token) return json({ error: "invalid request body" }, 400);
+      const env = await secretsTokenStore.consume(token);
+      if (!env) return json({ error: "not found" }, 404);
+      return json({ env });
+    }
 
     // Public: tells the frontend whether to render Clerk's UI (+ the publishable key, which is
     // public-safe) or the legacy login form. No auth required.
