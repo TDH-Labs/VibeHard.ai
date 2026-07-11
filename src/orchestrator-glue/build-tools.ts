@@ -15,7 +15,7 @@ import type { BuildTools } from "@vibehard/orchestrator";
 import { diagnose, formatDiagnosis } from "../diagnose/diagnose.ts";
 import { deployGate } from "../gate/index.ts";
 import type { RunPipeline } from "../build-substrate/build-dispatcher.ts";
-import type { BuildEnvParts } from "../build-substrate/build-env.ts";
+import { operatorLLMKey, type BuildEnvParts } from "../build-substrate/build-env.ts";
 
 const HEARTBEAT_MS = 5 * 60 * 1000;
 const MAX_HEARTBEATS = 6; // ~30 minutes of periodic pings, then we stop nagging (still watching for completion/failure)
@@ -69,11 +69,12 @@ export function realBuildTools(dir: string, runPipeline: RunPipeline, opts: Buil
       // retry() only ever dispatches "fix" (never "ship"), and — matching this function's OWN
       // prior behavior (a blind `spawn` that inherited process.env wholesale, no per-tenant BYO
       // override) — doesn't apply the tenant's own LLM key here either; that asymmetry with
-      // buildStream() is pre-existing, not something this workstream changes. e2bEnvParts is
-      // still populated (operator-level values only) so a dispatch through e2bPipeline doesn't
-      // throw for want of it (build-dispatcher.ts requires it — SPEC decision #8).
+      // buildStream() is pre-existing, not something this workstream changes. It STILL needs
+      // SOME LLM key to actually run the fixer, though (THE BUG found live 2026-07-11: `fix`'s
+      // own TIER is "code", a real LLM call) — the old blind spawn got this for free via
+      // process.env inheritance; operatorLLMKey() is the explicit equivalent.
       const e2bEnvParts: BuildEnvParts = {
-        byoKey: null,
+        byoKey: operatorLLMKey(process.env) ?? null,
         integrations: {},
         integrationKeyNames: [],
         flyApiToken: process.env.FLY_API_TOKEN,

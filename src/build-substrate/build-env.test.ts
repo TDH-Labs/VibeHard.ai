@@ -1,5 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { assembleBuildEnv } from "./build-env.ts";
+import { assembleBuildEnv, operatorLLMKey } from "./build-env.ts";
+
+describe("operatorLLMKey — the fallback that closes the live 2026-07-11 bug (no-BYO-key tenants got NO LLM key at all)", () => {
+  test("prefers OPENROUTER_API_KEY, matching providerOf()'s own priority order", () => {
+    expect(operatorLLMKey({ OPENROUTER_API_KEY: "sk-or-x", OPENCODE_API_KEY: "oc-y", ANTHROPIC_API_KEY: "sk-ant-z" })).toBe("sk-or-x");
+  });
+  test("falls back to OPENCODE_API_KEY when no OpenRouter key", () => {
+    expect(operatorLLMKey({ OPENCODE_API_KEY: "oc-y", ANTHROPIC_API_KEY: "sk-ant-z" })).toBe("oc-y");
+  });
+  test("falls back to ANTHROPIC_API_KEY when neither of the above is set", () => {
+    expect(operatorLLMKey({ ANTHROPIC_API_KEY: "sk-ant-z" })).toBe("sk-ant-z");
+  });
+  test("undefined when none are set — the caller must handle a fully-unconfigured operator", () => {
+    expect(operatorLLMKey({})).toBeUndefined();
+  });
+});
 
 describe("assembleBuildEnv — SPEC decision #8 explicit allowlist", () => {
   test("no BYO key, no integrations, no design → only VIBEHARD_MANAGED + empty VIBEHARD_TENANT_KEYS", () => {

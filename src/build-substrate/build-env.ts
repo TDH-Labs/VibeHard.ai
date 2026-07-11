@@ -14,7 +14,14 @@
  * is visible by reading this one function, not by auditing everything `process.env` might hold.
  */
 export interface BuildEnvParts {
-  /** The tenant's BYO LLM key (`loadKey(tenantId)`), or null if they're on the platform key. */
+  /** THE EFFECTIVE LLM key to use — the tenant's own BYO key if they have one, ELSE the
+   *  operator's own platform key (see `operatorLLMKey()` below). NOT simply "the tenant's key or
+   *  null": a real bug shipped live 2026-07-11 from exactly that confusion — passing
+   *  `loadKey(tenantId)` here directly (null for the common, default, no-BYO-key tenant) meant
+   *  assembleBuildEnv() set NO LLM key at all for the overwhelming majority of tenants, since
+   *  the LOCAL-spawn path's `{...process.env}` had silently been carrying the operator's key
+   *  through this whole time — a fallback this function had no way to also express. The caller
+   *  is responsible for computing `byo ?? operatorLLMKey(process.env)` before setting this field. */
   byoKey: string | null;
   /** The tenant's decrypted integrations keychain (`loadIntegrations(tenantId)`). */
   integrations: Record<string, string>;
@@ -42,6 +49,14 @@ export interface BuildEnvParts {
   vibehardSecretsKey?: string;
   flyOrg?: string;
   flyRegion?: string;
+}
+
+/** The operator's own platform LLM key — same priority order as src/config/models.ts's
+ *  `providerOf()` (openrouter → opencode → anthropic by presence), so whichever provider a
+ *  build's model selection resolves to matches whichever key actually got sent. Takes an
+ *  env-like object (not reading `process.env` itself) so it's callable from any environment. */
+export function operatorLLMKey(env: Record<string, string | undefined>): string | undefined {
+  return env.OPENROUTER_API_KEY || env.OPENCODE_API_KEY || env.ANTHROPIC_API_KEY;
 }
 
 export function assembleBuildEnv(parts: BuildEnvParts): Record<string, string> {

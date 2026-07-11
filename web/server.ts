@@ -22,7 +22,7 @@ import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
 import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
 import { localSpawnPipeline, e2bPipeline, type RunPipeline } from "../src/build-substrate/build-dispatcher.ts";
-import type { BuildEnvParts } from "../src/build-substrate/build-env.ts";
+import { operatorLLMKey, type BuildEnvParts } from "../src/build-substrate/build-env.ts";
 import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
@@ -1313,8 +1313,13 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
   // `env` to BOTH paths, meaning DATABASE_URL/VIBEHARD_SECRETS_KEY/every operator secret would
   // have leaked into every E2B sandbox. flyApiToken/vibehardSecretsKey ARE deliberately included
   // (ship needs them — see build-env.ts's own doc comment for the tradeoff this accepts).
+  // THE BUG THIS CLOSES (found live 2026-07-11 via a real production dispatch): a tenant with no
+  // BYO key — the common, default, turnkey case — rides the OPERATOR's own platform key on the
+  // LOCAL path today via `env`'s blind `{...process.env}` inheritance above. assembleBuildEnv()
+  // has no such implicit fallback, so `byoKey: byo` alone (byo === null for most tenants) meant
+  // NO LLM key at all reached the sandbox, for the overwhelming majority of builds.
   const e2bEnvParts: BuildEnvParts = {
-    byoKey: byo,
+    byoKey: byo ?? operatorLLMKey(process.env) ?? null,
     integrations,
     integrationKeyNames,
     design,
