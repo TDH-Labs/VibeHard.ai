@@ -13,6 +13,7 @@
  */
 import type { BuildLogStore } from "./build-log-store.ts";
 import { cliPositionalArgs, type BuildWorker, type BuildMode } from "./build-worker.ts";
+import { assembleBuildEnv, type BuildEnvParts } from "./build-env.ts";
 
 export interface RunPipelineOptions {
   tenantId: string;
@@ -24,7 +25,16 @@ export interface RunPipelineOptions {
    *  dispatcher's own caller keeps the same local mirror it maintains today (steering writes
    *  etc.), NOT where the sandbox's own copy lives (that's WorkspaceStore's job, via Tigris). */
   workspace: string;
+  /** LOCAL path only — passed straight to Bun.spawn's `env`. Today's exact behavior: the
+   *  caller's full assembled env (which itself already spreads `...process.env`, unchanged from
+   *  before this workstream). NEVER read by the E2B path — see e2bEnvParts, and build-env.ts's
+   *  own header for why blindly forwarding this into a sandbox is a real bug, not a shortcut
+   *  (found live 2026-07-11: the first wiring of this dispatcher did exactly that). */
   env: Record<string, string>;
+  /** E2B path only — the explicit, minimal allowlist (SPEC decision #8). Required whenever the
+   *  active pipeline is e2bPipeline; e2bPipeline throws clearly if it's missing rather than
+   *  silently falling back to `env` (that fallback is the exact bug this field exists to close). */
+  e2bEnvParts?: BuildEnvParts;
   onLog?: (line: string) => void;
   /** LOCAL path only: lets the caller wire in its own kill()-based stop mechanism (e.g.
    *  web/server.ts's `running` Map, read by `/api/build/stop`). No-op for the E2B path, which
@@ -79,7 +89,8 @@ export interface E2BPipelineOptions {
   worker: BuildWorker;
   buildLogStore: BuildLogStore;
   /** Mints the single-use secrets token for this one dispatch (W5b) — the caller owns the
-   *  SecretsTokenStore; this seam only needs the resulting opaque token. */
+   *  SecretsTokenStore; this seam only needs the resulting opaque token. Called with
+   *  assembleBuildEnv(run.e2bEnvParts)'s result, NEVER run.env (see RunPipelineOptions.env). */
   mintSecretsToken: (env: Record<string, string>) => Promise<string>;
   /** Mints the reusable dispatch/stop-check token for this dispatch (W5a/W6). */
   mintStopCheckToken: (tenantId: string, app: string) => Promise<string>;
@@ -94,8 +105,11 @@ export interface E2BPipelineOptions {
  *  so it's a consistent, already-proven shape rather than a new one. */
 export function e2bPipeline(opts: E2BPipelineOptions): RunPipeline {
   return async (run) => {
+    if (!run.e2bEnvParts) {
+      throw new Error("e2bPipeline dispatch requires e2bEnvParts (SPEC decision #8 — never falls back to the caller's full env)");
+    }
     const scope = `${run.tenantId}:${run.app}`;
-    const secretsToken = await opts.mintSecretsToken(run.env);
+    const secretsToken = await opts.mintSecretsToken(assembleBuildEnv(run.e2bEnvParts));
     const stopCheckToken = await opts.mintStopCheckToken(run.tenantId, run.app);
     let lastSeq = 0;
     let polling = true;

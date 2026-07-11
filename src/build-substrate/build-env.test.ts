@@ -43,17 +43,50 @@ describe("assembleBuildEnv — SPEC decision #8 explicit allowlist", () => {
     );
   });
 
+  test("flyApiToken/vibehardSecretsKey/flyOrg/flyRegion are set only when explicitly provided (ship's deploy-time needs, SPEC decision #8)", () => {
+    const empty = assembleBuildEnv({ byoKey: null, integrations: {}, integrationKeyNames: [] });
+    expect(empty.FLY_API_TOKEN).toBeUndefined();
+    expect(empty.VIBEHARD_SECRETS_KEY).toBeUndefined();
+    expect(empty.FLY_ORG).toBeUndefined();
+    expect(empty.FLY_REGION).toBeUndefined();
+
+    const full = assembleBuildEnv({
+      byoKey: null,
+      integrations: {},
+      integrationKeyNames: [],
+      flyApiToken: "fo1_deploy-token",
+      vibehardSecretsKey: "master-key-value",
+      flyOrg: "personal",
+      flyRegion: "iad",
+    });
+    expect(full.FLY_API_TOKEN).toBe("fo1_deploy-token");
+    expect(full.VIBEHARD_SECRETS_KEY).toBe("master-key-value");
+    expect(full.FLY_ORG).toBe("personal");
+    expect(full.FLY_REGION).toBe("iad");
+  });
+
   test("THE CONTRACT THIS CLOSES: the result never contains anything beyond the explicit allowlist — no ambient process.env leakage", () => {
     const env = assembleBuildEnv({
       byoKey: "sk-ant-abc",
       integrations: { STRIPE_SECRET_KEY: "sk_test_1" },
       integrationKeyNames: ["STRIPE_SECRET_KEY"],
       design: "brutalist",
+      flyApiToken: "fo1_deploy-token",
+      vibehardSecretsKey: "master-key-value",
     });
-    const allowlist = new Set(["VIBEHARD_MANAGED", "VIBEHARD_TENANT_KEYS", "VIBEHARD_DESIGN", "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY"]);
+    const allowlist = new Set([
+      "VIBEHARD_MANAGED",
+      "VIBEHARD_TENANT_KEYS",
+      "VIBEHARD_DESIGN",
+      "ANTHROPIC_API_KEY",
+      "STRIPE_SECRET_KEY",
+      "FLY_API_TOKEN",
+      "VIBEHARD_SECRETS_KEY",
+    ]);
     for (const key of Object.keys(env)) expect(allowlist.has(key)).toBe(true);
-    // and nothing operator-only ever sneaks in, even if the test process's own env has it set
+    // and nothing UNEXPLAINED ever sneaks in, even if the test process's own env has it set —
+    // every value present traces to an explicit BuildEnvParts field, not ambient process.env
     expect(env.DATABASE_URL).toBeUndefined();
-    expect(env.FLY_API_TOKEN).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined(); // not passed as byoKey here, so absent
   });
 });

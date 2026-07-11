@@ -116,6 +116,46 @@ describe("e2bPipeline — same RunPipeline contract, dispatched onto a BuildWork
     };
     return { worker, calls };
   }
+  // e2bEnvParts, NOT env, is what a real dispatch must supply — env is the local-path-only field.
+  const e2bEnvParts = { byoKey: null, integrations: {}, integrationKeyNames: [] };
+
+  test("THE BUG THIS CLOSES: dispatching without e2bEnvParts throws rather than silently falling back to the caller's full env", async () => {
+    const { worker } = fakeWorker();
+    const pipeline = e2bPipeline({
+      worker,
+      buildLogStore: new InMemoryBuildLogStore(),
+      mintSecretsToken: async () => "tok",
+      mintStopCheckToken: async () => "tok2",
+    });
+    await expect(
+      pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/x", env: { DATABASE_URL: "postgres://should-never-leak" } }),
+    ).rejects.toThrow(/requires e2bEnvParts/);
+  });
+
+  test("mintSecretsToken receives assembleBuildEnv(e2bEnvParts)'s result, NOT run.env — the caller's full env never reaches the token store", async () => {
+    let mintedWith: Record<string, string> | undefined;
+    const { worker } = fakeWorker();
+    const pipeline = e2bPipeline({
+      worker,
+      buildLogStore: new InMemoryBuildLogStore(),
+      mintSecretsToken: async (env) => {
+        mintedWith = env;
+        return "secrets-tok";
+      },
+      mintStopCheckToken: async () => "stop-tok",
+    });
+    await pipeline({
+      tenantId: "t1",
+      app: "app1",
+      mode: "fix",
+      workspace: "/x",
+      env: { DATABASE_URL: "postgres://should-never-leak", VIBEHARD_SECRETS_KEY: "master-key-should-never-leak" },
+      e2bEnvParts: { byoKey: "sk-ant-real", integrations: {}, integrationKeyNames: [] },
+    });
+    expect(mintedWith).toEqual({ VIBEHARD_MANAGED: "1", ANTHROPIC_API_KEY: "sk-ant-real", VIBEHARD_TENANT_KEYS: "" });
+    expect(mintedWith?.DATABASE_URL).toBeUndefined();
+    expect(mintedWith?.VIBEHARD_SECRETS_KEY).toBeUndefined();
+  });
 
   test("mints both tokens and passes them through to worker.dispatch", async () => {
     const { worker, calls } = fakeWorker();
@@ -126,7 +166,7 @@ describe("e2bPipeline — same RunPipeline contract, dispatched onto a BuildWork
       mintStopCheckToken: async () => "stop-tok",
       pollIntervalMs: 10,
     });
-    await pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/irrelevant", env: { A: "B" } });
+    await pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/irrelevant", env: { A: "B" }, e2bEnvParts });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.secretsToken).toBe("secrets-tok");
     expect(calls[0]!.stopCheckToken).toBe("stop-tok");
@@ -156,7 +196,7 @@ describe("e2bPipeline — same RunPipeline contract, dispatched onto a BuildWork
       pollIntervalMs: 10,
     });
     const lines: string[] = [];
-    await pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/x", env: {}, onLog: (l) => lines.push(l) });
+    await pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/x", env: {}, e2bEnvParts, onLog: (l) => lines.push(l) });
     expect(lines).toEqual(["first line", "second line"]);
   });
 
@@ -168,7 +208,7 @@ describe("e2bPipeline — same RunPipeline contract, dispatched onto a BuildWork
       mintSecretsToken: async () => "tok",
       mintStopCheckToken: async () => "tok2",
     });
-    const result = await pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/x", env: {} });
+    const result = await pipeline({ tenantId: "t1", app: "app1", mode: "fix", workspace: "/x", env: {}, e2bEnvParts });
     expect(result.exitCode).toBe(42);
     expect(result.stopped).toBe(true);
   });

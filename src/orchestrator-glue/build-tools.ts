@@ -15,6 +15,7 @@ import type { BuildTools } from "@vibehard/orchestrator";
 import { diagnose, formatDiagnosis } from "../diagnose/diagnose.ts";
 import { deployGate } from "../gate/index.ts";
 import type { RunPipeline } from "../build-substrate/build-dispatcher.ts";
+import type { BuildEnvParts } from "../build-substrate/build-env.ts";
 
 const HEARTBEAT_MS = 5 * 60 * 1000;
 const MAX_HEARTBEATS = 6; // ~30 minutes of periodic pings, then we stop nagging (still watching for completion/failure)
@@ -65,7 +66,22 @@ export function realBuildTools(dir: string, runPipeline: RunPipeline, opts: Buil
         if (timer) clearInterval(timer);
         opts.onRetryDone?.(ok, dir);
       };
-      runPipeline({ tenantId: opts.tenantId, app: opts.app, mode: "fix", workspace: dir, env: process.env as Record<string, string> })
+      // retry() only ever dispatches "fix" (never "ship"), and — matching this function's OWN
+      // prior behavior (a blind `spawn` that inherited process.env wholesale, no per-tenant BYO
+      // override) — doesn't apply the tenant's own LLM key here either; that asymmetry with
+      // buildStream() is pre-existing, not something this workstream changes. e2bEnvParts is
+      // still populated (operator-level values only) so a dispatch through e2bPipeline doesn't
+      // throw for want of it (build-dispatcher.ts requires it — SPEC decision #8).
+      const e2bEnvParts: BuildEnvParts = {
+        byoKey: null,
+        integrations: {},
+        integrationKeyNames: [],
+        flyApiToken: process.env.FLY_API_TOKEN,
+        vibehardSecretsKey: process.env.VIBEHARD_SECRETS_KEY,
+        flyOrg: process.env.FLY_ORG,
+        flyRegion: process.env.FLY_REGION,
+      };
+      runPipeline({ tenantId: opts.tenantId, app: opts.app, mode: "fix", workspace: dir, env: process.env as Record<string, string>, e2bEnvParts })
         .then((result) => finish(result.exitCode === 0))
         .catch(() => finish(false));
       return "On it — re-running the gate → fix → re-gate loop. I'll message you when it lands.";

@@ -22,6 +22,7 @@ import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
 import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
 import { localSpawnPipeline, e2bPipeline, type RunPipeline } from "../src/build-substrate/build-dispatcher.ts";
+import type { BuildEnvParts } from "../src/build-substrate/build-env.ts";
 import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
 import { migrateLegacyTenantFiles, PgTenantKvStore } from "../src/platform/tenant-kv.ts";
@@ -1298,12 +1299,30 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
     else if (byo.startsWith("sk-or-")) env.OPENROUTER_API_KEY = byo;
     else env.OPENCODE_API_KEY = byo; // other OpenAI-compatible / gateway key
   }
-  Object.assign(env, await loadIntegrations(tenantId)); // the tenant's third-party keys → deploy injects the app's subset (#5)
+  const integrations = await loadIntegrations(tenantId);
+  Object.assign(env, integrations); // the tenant's third-party keys → deploy injects the app's subset (#5)
   // C-6 (audit3): the build subprocess env merges operator + tenant values; tell deploy-time
   // collectAppEnv which keys are the TENANT's own (their keychain) so an operator value under a
   // colliding name (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) is never injected into the tenant app.
-  env.VIBEHARD_TENANT_KEYS = (await integrationKeys(tenantId)).join(",");
+  const integrationKeyNames = await integrationKeys(tenantId);
+  env.VIBEHARD_TENANT_KEYS = integrationKeyNames.join(",");
   if (design) env.VIBEHARD_DESIGN = design; // #12: the chosen design preset → codegen styling
+  // build-substrate W4/W5b (SPEC decision #8): the E2B path's explicit, minimal allowlist —
+  // NEVER the `env` above, which still spreads `...process.env` for the local-spawn path
+  // (unchanged). Real bug found live 2026-07-11: the first wiring of this dispatcher passed
+  // `env` to BOTH paths, meaning DATABASE_URL/VIBEHARD_SECRETS_KEY/every operator secret would
+  // have leaked into every E2B sandbox. flyApiToken/vibehardSecretsKey ARE deliberately included
+  // (ship needs them — see build-env.ts's own doc comment for the tradeoff this accepts).
+  const e2bEnvParts: BuildEnvParts = {
+    byoKey: byo,
+    integrations,
+    integrationKeyNames,
+    design,
+    flyApiToken: process.env.FLY_API_TOKEN,
+    vibehardSecretsKey: process.env.VIBEHARD_SECRETS_KEY,
+    flyOrg: process.env.FLY_ORG,
+    flyRegion: process.env.FLY_REGION,
+  };
   // Pre-flight balance check (found live 2026-07-09: a build died mid-plan when the platform's
   // OpenRouter account ran to $0) — BEFORE any durable "running" state is written below, so a
   // refusal here never leaves the tenant looking like they have a stuck build.
@@ -1355,6 +1374,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
           args,
           workspace,
           env,
+          e2bEnvParts,
           onLog: (ln) => {
             const h = ln.match(/::held (\S+)/);
             if (h) {

@@ -23,6 +23,25 @@ export interface BuildEnvParts {
   integrationKeyNames: string[];
   /** Chosen design preset (#12), if any. */
   design?: string;
+  /** `ship` (every build ends in one) needs these operator-level, non-tenant-specific values —
+   *  found live 2026-07-11 the hard way: the first wiring of this function into the real
+   *  dispatcher DIDN'T include them, meaning `ship` mode would have failed inside a sandbox with
+   *  no way to deploy or encrypt the deployed app's own secrets. Explicit fields (not a blind
+   *  `...process.env` fallback) so the allowlist stays provably minimal even though what it
+   *  allows has grown — see this module's own test asserting the result never exceeds a known set. */
+  flyApiToken?: string;
+  /** The platform's master secrets-encryption key (deploy-app.ts's `defaultSubstrateDeps`
+   *  passphrase) — needed because `cli.ts ship` never gets a `sql` connection (it runs as a bare
+   *  subprocess, not through Platform.open()), so it falls back to a LOCAL encrypted-file store
+   *  for THIS deployment's own secrets (e.g. a freshly-provisioned Supabase project's connection
+   *  string) — never the platform's shared Postgres-backed store. Distributing this key to every
+   *  sandbox is a real, deliberate tradeoff (broader blast radius than a scoped credential) —
+   *  accepted for now because the LOCAL-spawn path already has the identical exposure today (a
+   *  compromised dependency mid-build already sees this in `process.env`); a KMS-backed redesign
+   *  that keeps it out of the sandbox entirely is EPIC #35, out of scope here. */
+  vibehardSecretsKey?: string;
+  flyOrg?: string;
+  flyRegion?: string;
 }
 
 export function assembleBuildEnv(parts: BuildEnvParts): Record<string, string> {
@@ -35,5 +54,9 @@ export function assembleBuildEnv(parts: BuildEnvParts): Record<string, string> {
   Object.assign(env, parts.integrations);
   env.VIBEHARD_TENANT_KEYS = parts.integrationKeyNames.join(",");
   if (parts.design) env.VIBEHARD_DESIGN = parts.design;
+  if (parts.flyApiToken) env.FLY_API_TOKEN = parts.flyApiToken;
+  if (parts.vibehardSecretsKey) env.VIBEHARD_SECRETS_KEY = parts.vibehardSecretsKey;
+  if (parts.flyOrg) env.FLY_ORG = parts.flyOrg;
+  if (parts.flyRegion) env.FLY_REGION = parts.flyRegion;
   return env;
 }
