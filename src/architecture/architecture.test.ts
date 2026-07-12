@@ -57,6 +57,39 @@ describe("assessSubstrateFit — architect-steering (stack must be substrate-dep
   });
 });
 
+describe("assessSubstrateFit — clientOnlyStorage: a hosted app can need NO backend at all (2026-07-11)", () => {
+  const archClientOnly = (stack: string, dataModel?: unknown): Architecture =>
+    arch([ws("ui")], {
+      prd: { spec: { name: "app", storesData: true, clientOnlyStorage: true, deployTarget: "hosted-app" }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd,
+      stack,
+      dataModel,
+    });
+
+  test("a purely static/client-side stack, no server entities → no findings (Supabase isn't forced on)", () => {
+    expect(assessSubstrateFit(archClientOnly("Next.js (static export) + TypeScript + Tailwind"))).toEqual([]);
+  });
+
+  test("THE BUG THIS CLOSES: clientOnlyStorage no longer trips stack-not-supabase (it used to, unconditionally, for any storesData:true app)", () => {
+    const ids = assessSubstrateFit(archClientOnly("Vite + React + TypeScript")).map((f) => f.ruleId);
+    expect(ids).not.toContain("stack-not-supabase");
+  });
+
+  test("the architect proposing Supabase anyway → blocking client-only-app-has-backend", () => {
+    const f = assessSubstrateFit(archClientOnly("Next.js + Supabase + TypeScript")).find((x) => x.ruleId === "client-only-app-has-backend");
+    expect(f?.severity).toBe("high");
+  });
+
+  test("a server-side dataModel proposed anyway (even with a clean stack name) is also caught", () => {
+    const ids = assessSubstrateFit(archClientOnly("Next.js + TypeScript", { entities: [{ name: "SessionCount", access: "owner", fields: [] }] })).map((f) => f.ruleId);
+    expect(ids).toContain("client-only-app-has-backend");
+  });
+
+  test("an incompatible-backend stack name is caught the same way as a Supabase one", () => {
+    const ids = assessSubstrateFit(archClientOnly("Next.js + Firebase")).map((f) => f.ruleId);
+    expect(ids).toContain("client-only-app-has-backend");
+  });
+});
+
 describe("assessSubstrateFit — deployTarget: downloadable-tool has no substrate to fit (2026-07-09)", () => {
   const archLocal = (stack: string): Architecture =>
     arch([ws("db"), ws("cli", ["db"])], {

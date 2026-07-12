@@ -404,6 +404,14 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
       const emptied = arch.workstreams.filter((w) => w.files.length === 0).map((w) => w.name);
       if (emptied.length) console.log(`  ▸ backend: ${emptied.length} planned workstream(s) now owned by the generator — skipping codegen for: ${emptied.join(", ")}`);
     }
+  } else if (arch.prd.spec.clientOnlyStorage && !isDownloadableTool && process.env.VIBEHARD_LANG !== "python") {
+    // The base system prompt's own escape hatch ("Supabase by default, unless the user specifies
+    // otherwise") is never triggered unless something explicitly says so — this is that something.
+    // Without it, codegen defaults straight to Supabase out of habit even when reviewArchitecture
+    // already forced the stack itself to be backend-free (found live 2026-07-11 alongside the
+    // architect-side fix — the same default needed closing at every layer that could re-add it).
+    systemPrompt +=
+      "\n\nNO BACKEND FOR THIS APP — it was specified as client-only storage. Do NOT add Supabase, any other database, migrations, auth, or a server-side data layer of any kind. ALL state persists in the browser only (localStorage/IndexedDB). Do not write a supabase/ directory, lib/supabase/*, or any app/api auth route.";
   }
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
   // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the

@@ -50,6 +50,10 @@ export function coerceSpec(raw: unknown): Spec {
     deployTarget,
     auth: asStr(o.auth, "none").trim() || "none",
     storesData: asBool(o.storesData, dataEntities.length > 0),
+    // Unknown → false: the stricter direction (a real backend gets provisioned) is the safe
+    // default when the model didn't say — matches the file's existing "fail toward the
+    // stricter bar" posture for deployTarget above.
+    clientOnlyStorage: asBool(o.clientOnlyStorage, false),
     dataEntities,
     sensitiveData: sensitiveData.length ? [...new Set(sensitiveData)] : ["none"],
     realUsers: asBool(o.realUsers),

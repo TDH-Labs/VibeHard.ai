@@ -52,6 +52,14 @@ export interface Spec {
   deployTarget: DeployTarget; // drives the verify gate's boot check and whether the build is downloadable
   auth: string; // "none" | "email-password" | "oauth" | "sso" | …
   storesData: boolean; // does the app persist data at all?
+  /** true iff ALL persisted data lives client-side only (localStorage/IndexedDB) — no server,
+   *  no database, no accounts needed to see it again. Optional (not required) so existing
+   *  hand-built Spec fixtures keep compiling; coerceSpec always fills it with a default.
+   *  THE BUG THIS CLOSES (found live 2026-07-11): with no way to say "no backend needed," the
+   *  architect defaulted to Supabase for every hosted-app spec that stores ANY data, even ones
+   *  whose own summary explicitly said "client-side only" — which then generated a real Supabase
+   *  backend (service-role key + all) for an app that was never supposed to have one. */
+  clientOnlyStorage?: boolean;
   dataEntities: DataEntity[];
   sensitiveData: SensitiveClass[]; // data classification (§21 control 1)
   realUsers: boolean; // rigor signal — not a throwaway

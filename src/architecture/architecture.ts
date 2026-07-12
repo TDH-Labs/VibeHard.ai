@@ -177,6 +177,27 @@ export function assessSubstrateFit(arch: Architecture): Finding[] {
     return out; // no substrate to fit — the checks below are all about being deployable, which doesn't apply
   }
 
+  // THE BUG THIS CLOSES (found live 2026-07-11): a spec that says "client-side only, no backend"
+  // still got a Supabase backend forced on it — the architect had no third option between "must
+  // use Supabase" and "downloadable, must be local" for a HOSTED app with no server data at all.
+  // clientOnlyStorage is that third option; it's a spec-level fact, so it's enforced here the same
+  // deterministic way as every other substrate-fit rule, not left to the prompt alone.
+  const clientOnly = arch.prd?.spec?.clientOnlyStorage === true;
+  if (clientOnly) {
+    const backend = stack.match(SUPABASE_RE) ?? stack.match(INCOMPATIBLE_BACKEND_RE) ?? stack.match(RAW_DB_CLIENT_RE);
+    const hasEntities = Array.isArray((arch.dataModel as { entities?: unknown[] } | undefined)?.entities) && ((arch.dataModel as { entities: unknown[] }).entities.length > 0);
+    if (backend || hasEntities) {
+      out.push(
+        gap(
+          "client-only-app-has-backend",
+          "high",
+          `This app was specified as client-only storage (everything persists in the browser, nothing server-side) but ${backend ? `the stack names "${backend[0]}"` : "the data model proposes server-side entities"}. Remove the backend entirely — no Supabase, no database, no migrations, no dataModel entities. Use a purely static/client-side stack (localStorage/IndexedDB only).`,
+        ),
+      );
+    }
+    return out; // no substrate to fit — there's no backend for these checks to apply to
+  }
+
   const incompatible = stack.match(INCOMPATIBLE_BACKEND_RE);
   if (incompatible) {
     out.push(

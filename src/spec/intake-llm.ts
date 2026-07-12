@@ -24,6 +24,7 @@ Return ONLY a JSON object (no prose, no markdown fence) with exactly these field
   "deployTarget": "hosted-app" | "downloadable-tool",  // hosted-app = lives at a URL others reach; downloadable-tool = a CLI/script the user runs locally, no server
   "auth": string,            // "none" | "email-password" | "oauth" | "sso" | ... — how users sign in
   "storesData": boolean,     // does it persist data?
+  "clientOnlyStorage": boolean,  // true ONLY if ALL persisted data lives in the browser/device itself (localStorage/IndexedDB) — no server, no database, nothing to sync or share across devices or logins
   "dataEntities": [ { "name": string, "fields": string[], "sensitive": boolean } ],  // the data model; sensitive=true for PII/PHI/financial/credentials
   "sensitiveData": ("none"|"pii"|"phi"|"financial"|"credentials")[],  // classify the data; ["none"] if none
   "realUsers": boolean,      // see the INTENT question below
@@ -38,6 +39,11 @@ Rules:
   interact with it via a TUI" + "just me, locally" → "downloadable-tool". A client portal, a dashboard
   multiple people log into, or anything mentioning "customers"/"clients"/"my team" accessing it remotely
   → "hosted-app".
+- clientOnlyStorage: true ONLY for a hosted-app that has NO account system and NO cross-device/
+  cross-user sharing — e.g. "a timer/counter/notes tool that just remembers state in THIS browser."
+  If two people could ever need to see the SAME data, or one person needs it on a second device, or
+  there's any login/account at all, set it FALSE — that needs a real backend. When storesData is
+  false, this doesn't matter (nothing persists either way).
 - NEVER describe the app as "compliant" or "certified" with any standard.
 - INTENT (this drives how much rigor the build gets). Read how they describe the idea and answer one question: "Is this something they're building to RELY ON and keep improving — or a quick experiment they might not keep?"
     • sounds real / ongoing / for actual use → realUsers=true AND maintained=true
