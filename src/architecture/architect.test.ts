@@ -17,7 +17,7 @@ const arch = (workstreams: Architecture["workstreams"]): Architecture => ({
 });
 
 const cyclic = arch([ws("x", ["y"]), ws("y", ["x"])]);
-const sound = arch([ws("api", ["db"]), ws("db")]);
+const sound = arch([{ ...ws("api", ["db"]), files: ["api.ts", "package.json"] }, ws("db")]);
 
 describe("architectApp — grill loop (architect proposes, reviewArchitecture disposes)", () => {
   test("a sound first design → one round, ready", async () => {

@@ -37,7 +37,7 @@ describe("buildOrder — topological tiers (deterministic from the graph)", () =
 
 describe("assessSubstrateFit — architect-steering (stack must be substrate-deployable)", () => {
   const archWith = (stack: string, storesData: boolean): Architecture =>
-    arch([ws("db"), ws("api", ["db"])], { prd: { spec: { name: "app", storesData }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd, stack });
+    arch([ws("db", [], ["db.ts", "package.json"]), ws("api", ["db"])], { prd: { spec: { name: "app", storesData }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd, stack });
 
   test("Supabase + stores data → on-substrate, no findings", () => {
     expect(reviewArchitecture(archWith("Next.js + Supabase + TypeScript + Tailwind", true))).toEqual([]);
@@ -128,7 +128,7 @@ describe("assessSubstrateFit — deployTarget: downloadable-tool has no substrat
 
 describe("reviewArchitecture — graph validation (the disposer)", () => {
   test("a clean, complete SAD → no findings, verdict passes", () => {
-    const a = arch([ws("api", ["db"]), ws("db")]);
+    const a = arch([ws("api", ["db"]), ws("db", [], ["db.ts", "package.json"])]);
     expect(reviewArchitecture(a)).toEqual([]);
     expect(architectureVerdict(a, "2026-06-21T00:00:00.000Z").status).toBe("pass");
   });
@@ -155,6 +155,28 @@ describe("reviewArchitecture — graph validation (the disposer)", () => {
     expect(reviewArchitecture(arch([ws("api", [], ["api.ts"]), ws("ui", [], ["ui.ts"])])).map((f) => f.ruleId)).not.toContain("file-collision");
   });
 
+  describe("no-project-manifest (2026-07-12)", () => {
+    test("THE BUG THIS CLOSES: workstreams cover only feature code, no package.json anywhere → blocking", () => {
+      // The exact live failure: a Vite/React plan with persistence/timer-engine/ui/app-shell
+      // workstreams — each individually well-formed (files, no cycles, no collisions) — but NONE
+      // of them ever assigned the project manifest. Codegen then writes five real source files
+      // and nothing installable. Not caught by any existing graph check.
+      const a = arch([ws("persistence", [], ["src/services/storage.ts"]), ws("ui", ["persistence"], ["src/App.tsx", "src/main.tsx"])]);
+      const f = reviewArchitecture(a).find((x) => x.ruleId === "no-project-manifest");
+      expect(f?.severity).toBe("high");
+    });
+
+    test("package.json owned by any workstream → not flagged", () => {
+      const a = arch([ws("persistence", [], ["src/services/storage.ts"]), ws("app-shell", ["persistence"], ["src/App.tsx", "package.json"])]);
+      expect(reviewArchitecture(a).map((f) => f.ruleId)).not.toContain("no-project-manifest");
+    });
+
+    test("a Python plan owning requirements.txt (not package.json) → also not flagged", () => {
+      const a = arch([ws("api", [], ["main.py", "requirements.txt"])]);
+      expect(reviewArchitecture(a).map((f) => f.ruleId)).not.toContain("no-project-manifest");
+    });
+  });
+
   test("no workstreams at all → no-workstreams", () => {
     expect(reviewArchitecture(arch([])).map((f) => f.ruleId)).toEqual(["no-workstreams"]);
   });
@@ -169,7 +191,7 @@ describe("reviewArchitecture — SAD completeness + traceability (§1/§2/§6)",
 
   test("every SRS functional requirement must map to a component; broken refs block", () => {
     const srs = { functionalRequirements: [{ id: "FR-1" }, { id: "FR-2" }], dataModel: [] } as unknown as Srs;
-    const covered = arch([ws("api", ["db"], ["api.ts"], ["FR-1", "FR-2"]), ws("db", [], ["db.sql"])], { srs });
+    const covered = arch([ws("api", ["db"], ["api.ts"], ["FR-1", "FR-2"]), ws("db", [], ["db.sql", "package.json"])], { srs });
     expect(reviewArchitecture(covered)).toEqual([]);
     const missed = arch([ws("api", ["db"], ["api.ts"], ["FR-1"]), ws("db", [], ["db.sql"])], { srs });
     expect(reviewArchitecture(missed).map((f) => f.ruleId)).toContain("component-coverage-gap");
@@ -178,7 +200,7 @@ describe("reviewArchitecture — SAD completeness + traceability (§1/§2/§6)",
   });
 
   test("with no SRS attached, traceability is skipped (a direct architectApp still works)", () => {
-    expect(reviewArchitecture(arch([ws("api", ["db"]), ws("db")]))).toEqual([]);
+    expect(reviewArchitecture(arch([ws("api", ["db"]), ws("db", [], ["db.ts", "package.json"])]))).toEqual([]);
   });
 });
 

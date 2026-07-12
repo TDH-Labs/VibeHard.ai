@@ -256,6 +256,28 @@ export function reviewArchitecture(arch: Architecture): Finding[] {
     if (claimants.length > 1) out.push(gap("file-collision", "high", `File "${file}" is claimed by multiple workstreams (${claimants.join(", ")}) — ownership must be disjoint so the concurrent build is deterministic.`));
   }
 
+  // THE BUG THIS CLOSES (found live 2026-07-12): a plan whose workstreams cover only feature
+  // code — no workstream ever assigned the project manifest — codegen then produces a handful of
+  // real source files and literally no package.json, so nothing can install/build; verify fails
+  // immediately and the fix loop has no manifest to work from either. Nothing in the existing
+  // graph/traceability checks catches this — a workstream can be perfectly well-formed (files,
+  // deps, coverage) and the PLAN AS A WHOLE can still omit the one file every stack needs. No
+  // workstreams (already blocking above) implies this trivially, so only check when there's a
+  // plan to check.
+  if (arch.workstreams.length > 0) {
+    const owned = new Set(arch.workstreams.flatMap((w) => w.files.map((f) => f.replace(/^\.?\//, ""))));
+    const MANIFESTS = ["package.json", "requirements.txt", "pyproject.toml"];
+    if (!MANIFESTS.some((m) => owned.has(m))) {
+      out.push(
+        gap(
+          "no-project-manifest",
+          "high",
+          `No workstream owns a project manifest (${MANIFESTS.join(" / ")}) — without one, nothing can be installed or built. Assign it to a workstream (typically the one that also owns the entry point/config files).`,
+        ),
+      );
+    }
+  }
+
   // SAD headline decisions must be present (a hollow SAD can't guide a build or a reviewer)
   if (!arch.systemOverview.trim()) out.push(gap("no-system-overview", "high", "The SAD has no system overview (§1)."));
   if (!arch.pattern.name.trim()) out.push(gap("no-pattern", "high", "The SAD names no architectural pattern (§2)."));
