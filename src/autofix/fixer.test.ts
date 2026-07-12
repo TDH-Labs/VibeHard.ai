@@ -131,6 +131,31 @@ describe("defaultFixer — no-op generation guard", () => {
     expect(sent).toContain("security requirement wins"); // supremacy framing present
   });
 
+  describe("clientOnlyStorage — the fixer must never reach for a backend on a backend-free app (2026-07-12)", () => {
+    test("THE BUG THIS CLOSES: spec.json says clientOnlyStorage — the fix prompt carries the no-backend instruction", async () => {
+      // Live 2026-07-12: codegen correctly built a backend-free app (clientOnlyStorage: true), but
+      // the fixer — chasing an unrelated build failure — didn't know that (it builds its OWN system
+      // prompt from scratch) and reached for Supabase boilerplate anyway. The fixer has no direct
+      // access to the spec object, only the workspace path — so it must read the SAME persisted
+      // .vibehard/spec.json every other stage reads, not carry a second copy of the decision.
+      const dir = workspace();
+      mkdirSync(join(dir, ".vibehard"), { recursive: true });
+      writeFileSync(join(dir, ".vibehard", "spec.json"), JSON.stringify({ storesData: true, clientOnlyStorage: true }));
+      const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+      await defaultFixer({ modelFactory: () => model })(dir, [blockingVerdict()]);
+      const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+      expect(sent).toMatch(/NO BACKEND FOR THIS APP/);
+      expect(sent).toMatch(/localStorage/i);
+    });
+
+    test("no spec.json, or clientOnlyStorage not set → the instruction is absent (a real backend app stays unaffected)", async () => {
+      const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+      await defaultFixer({ modelFactory: () => model })(workspace(), [blockingVerdict()]);
+      const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+      expect(sent).not.toMatch(/NO BACKEND FOR THIS APP/);
+    });
+  });
+
   test("every fix prompt forbids removing the query/data-access to a flagged table as a shortcut", async () => {
     // Found live 2026-07-04, SAME build, a third round, a third distinct shortcut: with both
     // deletion and suppression now forbidden, the fixer's next move was removing the .from('table')

@@ -16,7 +16,7 @@ import { SPECIALTIES } from "./escalation/routing.ts";
 import { FileReviewerStore, makeReviewer, matchesPacket, parseSpecialties } from "./reviewer/reviewer.ts";
 import { BoltEngine } from "./engine/bolt/engine.ts";
 import { liveBoltDriver } from "./engine/bolt/driver.ts";
-import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt } from "./engine/bolt/prompt.ts";
+import { PYTHON_SYSTEM_PROMPT, selectSystemPrompt, withClientOnlyGuard } from "./engine/bolt/prompt.ts";
 import { designBlock, pickDesignPreset } from "./design/presets.ts";
 import { scaffoldDesignSystem } from "./design/scaffold.ts";
 import { generateBackend } from "./backend/generate.ts";
@@ -404,14 +404,13 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
       const emptied = arch.workstreams.filter((w) => w.files.length === 0).map((w) => w.name);
       if (emptied.length) console.log(`  ▸ backend: ${emptied.length} planned workstream(s) now owned by the generator — skipping codegen for: ${emptied.join(", ")}`);
     }
-  } else if (arch.prd.spec.clientOnlyStorage && !isDownloadableTool && process.env.VIBEHARD_LANG !== "python") {
+  } else if (!isDownloadableTool && process.env.VIBEHARD_LANG !== "python") {
     // The base system prompt's own escape hatch ("Supabase by default, unless the user specifies
     // otherwise") is never triggered unless something explicitly says so — this is that something.
     // Without it, codegen defaults straight to Supabase out of habit even when reviewArchitecture
     // already forced the stack itself to be backend-free (found live 2026-07-11 alongside the
     // architect-side fix — the same default needed closing at every layer that could re-add it).
-    systemPrompt +=
-      "\n\nNO BACKEND FOR THIS APP — it was specified as client-only storage. Do NOT add Supabase, any other database, migrations, auth, or a server-side data layer of any kind. ALL state persists in the browser only (localStorage/IndexedDB). Do not write a supabase/ directory, lib/supabase/*, or any app/api auth route.";
+    systemPrompt = withClientOnlyGuard(systemPrompt, arch.prd.spec.clientOnlyStorage);
   }
   const concurrency = Math.max(1, Number(process.env.VIBEHARD_CODEGEN_CONCURRENCY) || 4);
   // runTiers keeps tiers sequential + workstreams within a tier concurrent (≤cap). `built` (the
@@ -941,12 +940,14 @@ export async function main(argv: string[]): Promise<number> {
     console.log(`\n── applying the change with ${providerOf()}/${modelForStage("fix")} … ──`);
     // newSpec (post-delta) is the freshest deployTarget — a change request could in principle flip
     // it, and a downloadable tool gets no Tailwind design block (no web UI to theme).
-    const changeSystemPrompt =
+    const changeSystemPrompt = withClientOnlyGuard(
       (newSpec.deployTarget === "downloadable-tool"
         ? selectSystemPrompt(arch.stack, newSpec.deployTarget)
         : selectSystemPrompt(arch.stack, newSpec.deployTarget) + designBlock(process.env.VIBEHARD_DESIGN ?? pickDesignPreset(newSpec))) +
-      fleetBlock(arch.stack, "codegen") +
-      steeringBlock(readWorkspaceSteering(target));
+        fleetBlock(arch.stack, "codegen") +
+        steeringBlock(readWorkspaceSteering(target)),
+      newSpec.deployTarget !== "downloadable-tool" && process.env.VIBEHARD_LANG !== "python" ? newSpec.clientOnlyStorage : undefined,
+    );
     if (!(await streamGeneration(target, buildChangeBrief(target, delta, blast), providerOf(), modelForStage("fix"), changeSystemPrompt, "change"))) return 1;
     recordNote(target, `change request applied (${auditRel}): ${delta.summary}`);
 
@@ -1073,7 +1074,11 @@ export async function main(argv: string[]): Promise<number> {
     // X, here's the current app" framing lives in the refine brief (src/refine/refine.ts).
     const arch = loadStage<Architecture>(target, "architecture.json");
     const systemPrompt =
-      process.env.VIBEHARD_LANG === "python" ? PYTHON_SYSTEM_PROMPT : arch ? selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget) : undefined;
+      process.env.VIBEHARD_LANG === "python"
+        ? PYTHON_SYSTEM_PROMPT
+        : arch
+          ? withClientOnlyGuard(selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget), arch.prd.spec.deployTarget !== "downloadable-tool" ? arch.prd.spec.clientOnlyStorage : undefined)
+          : undefined;
     console.log(`refining ${target} — incremental regen → re-gate → revert if it breaks a passing build …`);
     const result = await refine(target, change, {
       now: new Date().toISOString(),

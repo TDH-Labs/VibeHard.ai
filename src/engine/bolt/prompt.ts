@@ -551,3 +551,20 @@ export function selectSystemPrompt(stack: string, deployTarget?: DeployTarget): 
   if (deployTarget === "downloadable-tool") return DOWNLOADABLE_TOOL_SYSTEM_PROMPT;
   return /\b(python|fastapi|flask|uvicorn|django)\b/i.test(stack) ? PYTHON_SYSTEM_PROMPT : VIBEHARD_SYSTEM_PROMPT;
 }
+
+/** Appended to a codegen OR fix-loop system prompt for a clientOnlyStorage: true app — a shared
+ *  constant, not two copies, because two copies is exactly how this went missing from the fixer
+ *  in the first place (found live 2026-07-12: cli.ts's codegen pass got this instruction, but
+ *  defaultFixer builds its own system prompt from scratch and never saw it — so a LATER fix round
+ *  reached for Supabase boilerplate while chasing an unrelated build error, on an app codegen had
+ *  correctly built backend-free). Every call site that can add a backend needs this, not just
+ *  the first one. */
+export const NO_BACKEND_INSTRUCTION =
+  "\n\nNO BACKEND FOR THIS APP — it was specified as client-only storage. Do NOT add Supabase, any other database, migrations, auth, or a server-side data layer of any kind. ALL state persists in the browser only (localStorage/IndexedDB). Do not write a supabase/ directory, lib/supabase/*, or any app/api auth route.";
+
+/** Apply NO_BACKEND_INSTRUCTION uniformly — the single call every codegen/fix/change/refine
+ *  system-prompt assembly site should go through, so this can't go missing from any ONE of them
+ *  again the way it went missing from the fixer. */
+export function withClientOnlyGuard(systemPrompt: string, clientOnlyStorage: boolean | undefined): string {
+  return clientOnlyStorage === true ? systemPrompt + NO_BACKEND_INSTRUCTION : systemPrompt;
+}

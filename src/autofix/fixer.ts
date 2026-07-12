@@ -10,7 +10,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { VIBEHARD_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT } from "../engine/bolt/prompt.ts";
+import { VIBEHARD_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT, withClientOnlyGuard } from "../engine/bolt/prompt.ts";
 import type { EngineConfig, Finding, GateVerdict } from "../types.ts";
 import { isBlocking } from "../types.ts";
 import { configForStage } from "../config/models.ts";
@@ -47,6 +47,23 @@ async function collectTypeErrors(workspacePath: string): Promise<Finding[]> {
 
 /** Applies fixes for a set of (blocked) verdicts to the workspace, in place. */
 export type Fixer = (workspacePath: string, verdicts: GateVerdict[]) => Promise<void>;
+
+/** THE BUG THIS CLOSES (found live 2026-07-12): the fixer builds its OWN system prompt from
+ *  scratch — it never saw cli.ts's codegen-time clientOnlyStorage instruction, so a fix round
+ *  chasing an unrelated failure (a broken CSS build, in the live case) reached for Supabase
+ *  boilerplate on an app codegen had correctly built backend-free. The fixer doesn't receive the
+ *  spec directly (only workspacePath + verdicts), so it reads the SAME .vibehard/spec.json every
+ *  other stage persists (cli.ts's persistSpec) — the durable source of truth, not a second copy
+ *  of the decision. Missing/unreadable/malformed → false (the safe default: assume a backend is
+ *  still allowed rather than silently blocking one a real app needs). */
+function isClientOnlyStorage(workspacePath: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(join(workspacePath, ".vibehard", "spec.json"), "utf8")) as { clientOnlyStorage?: unknown };
+    return raw.clientOnlyStorage === true;
+  } catch {
+    return false;
+  }
+}
 
 export interface DefaultFixerOptions {
   modelFactory?: ModelFactory;
@@ -226,7 +243,7 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
       // Fix in the app's OWN language — a Python workspace (requirements.txt/pyproject)
       // gets the Python prompt, so the fixer's edits match the stack it's repairing.
       const usesPython = existsSync(join(workspacePath, "requirements.txt")) || existsSync(join(workspacePath, "pyproject.toml"));
-      const systemPrompt = usesPython ? PYTHON_SYSTEM_PROMPT : VIBEHARD_SYSTEM_PROMPT;
+      const systemPrompt = usesPython ? PYTHON_SYSTEM_PROMPT : withClientOnlyGuard(VIBEHARD_SYSTEM_PROMPT, isClientOnlyStorage(workspacePath));
       const session = await new BoltEngine(liveBoltDriver({ modelFactory: opts.modelFactory, systemPrompt })).startSession(
         workspacePath,
         config,
