@@ -276,6 +276,25 @@ export function reviewArchitecture(arch: Architecture): Finding[] {
         ),
       );
     }
+    // Same gap, framework-specific: Next.js App Router REQUIRES a root layout to build at all —
+    // detected structurally (some workstream already commits to an app/ page tree), not by
+    // matching "stack" text, since the files a plan actually produces are the ground truth, not
+    // what it CALLS itself. Found live 2026-07-12 immediately after the manifest fix: package.json
+    // + tsconfig + next.config + postcss.config + tailwind.config all present, 4 real UI files
+    // including app/page.tsx — and the production build still failed outright, ENOENT on
+    // app/globals.css, because no workstream ever owned app/layout.tsx (which is what would have
+    // imported it). A plan can cover its manifest and still omit the framework's OWN required
+    // entry point — this is that second, narrower case, not a duplicate of the manifest check.
+    const hasAppRouterPage = [...owned].some((f) => /^(?:src\/)?app\/.*\bpage\.(tsx|jsx|ts|js)$/.test(f));
+    if (hasAppRouterPage && ![...owned].some((f) => /^(?:src\/)?app\/layout\.(tsx|jsx|ts|js)$/.test(f))) {
+      out.push(
+        gap(
+          "no-root-layout",
+          "high",
+          "The plan builds pages under app/ (Next.js App Router) but no workstream owns a root layout (app/layout.tsx — or src/app/layout.tsx) — the App Router requires one to build at all. Assign it to a workstream.",
+        ),
+      );
+    }
   }
 
   // SAD headline decisions must be present (a hollow SAD can't guide a build or a reviewer)

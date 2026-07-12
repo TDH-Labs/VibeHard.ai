@@ -177,6 +177,34 @@ describe("reviewArchitecture — graph validation (the disposer)", () => {
     });
   });
 
+  describe("no-root-layout (2026-07-12)", () => {
+    test("THE BUG THIS CLOSES: an app/ page tree with everything else present, but no root layout → blocking", () => {
+      // The exact live failure, one build after the manifest fix: package.json + tsconfig +
+      // next.config + postcss.config + tailwind.config all present, real UI files including
+      // app/page.tsx — and the production build still failed outright (ENOENT on
+      // app/globals.css) because no workstream ever owned app/layout.tsx.
+      const a = arch([
+        ws("project-config", [], ["package.json", "tsconfig.json", "next.config.js"]),
+        ws("ui", ["project-config"], ["src/app/page.tsx", "src/components/TimerDisplay.tsx"]),
+      ]);
+      const f = reviewArchitecture(a).find((x) => x.ruleId === "no-root-layout");
+      expect(f?.severity).toBe("high");
+    });
+
+    test("root layout owned by some workstream → not flagged", () => {
+      const a = arch([
+        ws("project-config", [], ["package.json"]),
+        ws("ui", ["project-config"], ["src/app/page.tsx", "src/app/layout.tsx"]),
+      ]);
+      expect(reviewArchitecture(a).map((f) => f.ruleId)).not.toContain("no-root-layout");
+    });
+
+    test("no app/ page tree at all (e.g. a Vite plan) → not flagged — this check is Router-shape-specific", () => {
+      const a = arch([ws("app-shell", [], ["package.json", "src/App.tsx", "src/main.tsx"])]);
+      expect(reviewArchitecture(a).map((f) => f.ruleId)).not.toContain("no-root-layout");
+    });
+  });
+
   test("no workstreams at all → no-workstreams", () => {
     expect(reviewArchitecture(arch([])).map((f) => f.ruleId)).toEqual(["no-workstreams"]);
   });
