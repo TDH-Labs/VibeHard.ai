@@ -46,4 +46,32 @@ describe("architectApp — grill loop (architect proposes, reviewArchitecture di
     expect(r.ready).toBe(false);
     expect(r.gaps.some((g) => g.ruleId === "dependency-cycle")).toBe(true);
   });
+
+  // The one integration question the pure assessSubstrateFit unit tests (architecture.test.ts)
+  // don't answer on their own: does a BAD first proposal actually get looped back and fixed
+  // through architectApp's real retry mechanism — same question the "cyclic, then fixed" case
+  // above already proves for graph gaps, now for this codebase's newest substrate-fit rule.
+  describe("clientOnlyStorage — the retry loop actually self-corrects (2026-07-12)", () => {
+    const clientOnlyPrd = { spec: { name: "app", storesData: true, clientOnlyStorage: true }, requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd;
+    const badFirst = { ...sound, prd: clientOnlyPrd, stack: "Next.js + Supabase + TypeScript" };
+    const fixedSecond = { ...sound, prd: clientOnlyPrd, stack: "Vite + React + TypeScript (static export)" };
+
+    test("Supabase first, backend-free stack second → two rounds, ready, final stack is clean", async () => {
+      const designs = [badFirst, fixedSecond];
+      let i = 0;
+      const architect: Architect = async () => designs[Math.min(i++, designs.length - 1)]!;
+      const r = await architectApp(clientOnlyPrd, { architect });
+      expect(r.rounds).toBe(2);
+      expect(r.ready).toBe(true);
+      expect(r.arch.stack).toBe("Vite + React + TypeScript (static export)");
+    });
+
+    test("architect NEVER drops Supabase → stops at budget, not ready, with the right gap", async () => {
+      const architect: Architect = async () => badFirst;
+      const r = await architectApp(clientOnlyPrd, { architect, budget: 2 });
+      expect(r.rounds).toBe(2);
+      expect(r.ready).toBe(false);
+      expect(r.gaps.some((g) => g.ruleId === "client-only-app-has-backend")).toBe(true);
+    });
+  });
 });
