@@ -9,8 +9,8 @@
  * Same philosophy as scaffoldConfigs: boilerplate the model shouldn't be trusted to get right is
  * written in code. Idempotent; only runs for a Tailwind app.
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { designPreset, type DesignTokens } from "./presets.ts";
 
 function hexToRgbTriple(hex: string): string {
@@ -142,6 +142,15 @@ export function scaffoldDesignSystem(target: string, presetKey: string | undefin
     if (existsSync(p)) rmSync(p);
   }
   writeFileSync(join(target, "tailwind.config.ts"), tailwindConfigTs(preset.tokens));
-  writeFileSync(globalsPath(target), globalsCss(preset.tokens));
+  // THE BUG THIS CLOSES (found live 2026-07-12): globalsPath()'s App-Router default (app/globals.css)
+  // assumes an app/ directory already exists — true whenever some workstream owns app/page.tsx or
+  // similar, but NOT when the plan never touches app/ at all (observed live: a Next.js static-export
+  // plan whose workstreams covered only hooks/components/services, no app/ file anywhere).
+  // writeFileSync never creates parent directories — it threw, and per this run's actual behavior
+  // that exception propagated all the way to (and was reported by) the verify gate's build-failure
+  // path as an ENOENT on the very file this scaffold was supposed to guarantee.
+  const css = globalsPath(target);
+  mkdirSync(dirname(css), { recursive: true });
+  writeFileSync(css, globalsCss(preset.tokens));
   return { applied: true, preset: preset.key };
 }

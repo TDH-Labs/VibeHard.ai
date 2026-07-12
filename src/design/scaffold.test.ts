@@ -65,6 +65,19 @@ describe("design scaffold — premium by default, deterministic", () => {
     expect(scaffoldDesignSystem(dir).applied).toBe(false);
     expect(existsSync(join(dir, "tailwind.config.ts"))).toBe(false);
   });
+
+  test("THE BUG THIS CLOSES (2026-07-12): no app/ directory exists yet — the scaffold creates it instead of throwing", () => {
+    // Every other test's app() fixture pre-creates app/globals.css, so none of them ever exercised
+    // this path. Live failure: a plan whose workstreams never touched app/ at all (hooks/components/
+    // services only) — globalsPath()'s App-Router default still points at app/globals.css, and
+    // writeFileSync doesn't create parent directories. It threw, uncaught, all the way out to the
+    // verify gate reporting an ENOENT build failure on the exact file this scaffold exists to guarantee.
+    const dir = mkdtempSync(join(tmpdir(), "vibehard-ds-"));
+    tmps.push(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { next: "15", tailwindcss: "^3.4.0" } }));
+    expect(() => scaffoldDesignSystem(dir, "clean")).not.toThrow();
+    expect(readFileSync(join(dir, "app", "globals.css"), "utf8")).toContain("@tailwind base");
+  });
 });
 
 import { pickDesignPreset } from "./presets.ts";
