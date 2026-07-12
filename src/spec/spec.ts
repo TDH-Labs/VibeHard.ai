@@ -80,6 +80,12 @@ const gap = (ruleId: string, severity: Finding["severity"], field: string, messa
   message,
 });
 
+/** Strong, unambiguous phrasing for "this data never leaves the device" — deliberately narrow
+ *  (not just the word "local") to keep false positives rare; matched against the model's own
+ *  free-text summary/features, which is the SAME text a human reviewer would read to reach the
+ *  same conclusion. */
+const CLIENT_ONLY_SIGNAL_RE = /\b(local-only|locally[- ]only|localstorage|indexeddb|client-side only|no backend|no server(?:-side)?|only in the browser)\b/i;
+
 /**
  * Pure: a deterministic spec-readiness check. High/critical = BLOCKING (don't build
  * an underspecified spec); medium/low = ADVISORY (surface, don't block). Mirrors the
@@ -98,6 +104,27 @@ export function reviewSpec(spec: Spec): Finding[] {
   // would have nothing coherent to check).
   if (spec.storesData && spec.dataEntities.length === 0) {
     out.push(gap("no-data-model", "high", "dataEntities", "The app stores data but no data model (entities/fields) is defined."));
+  }
+
+  // THE BUG THIS CLOSES (found live 2026-07-12): the model's own summary can clearly describe
+  // client-only persistence ("local-only persistence via localStorage") while the
+  // clientOnlyStorage flag itself stays unset — an LLM-JSON-field reliability gap, not a genuine
+  // judgment call (an adversarial review elsewhere in the pipeline reaches the identical
+  // conclusion from the same text). Left uncaught, architecture silently defaults to a real
+  // backend because the flag its "no backend needed" branch depends on was never set. That
+  // downstream check is deliberately advisory-only for LLM opinions (an LLM finding never
+  // blocks); THIS is the deterministic equivalent, so it blocks and forces intake to reconcile
+  // the flag with what it already wrote, the same way the no-data-model check above does.
+  const clientOnlySignal = spec.storesData && !spec.clientOnlyStorage ? `${spec.summary} ${spec.features.join(" ")}`.match(CLIENT_ONLY_SIGNAL_RE) : null;
+  if (clientOnlySignal) {
+    out.push(
+      gap(
+        "client-only-storage-mismatch",
+        "high",
+        "clientOnlyStorage",
+        `The spec's own description says data stays local/client-side (it says "${clientOnlySignal[0]}"), but clientOnlyStorage isn't set true — architecture will default to a real backend unless this is corrected. If this really has no backend, set clientOnlyStorage true; if it actually needs to sync across devices or users, rewrite the summary/features to say so instead.`,
+      ),
+    );
   }
 
   // Sensitive or multi-tenant with no auth = open to anyone. The CVE-class mistake,

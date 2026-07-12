@@ -39,6 +39,37 @@ describe("reviewSpec — blocking readiness gaps", () => {
     expect(ruleIds(spec({ storesData: true, dataEntities: [] }))).toContain("no-data-model");
   });
 
+  describe("client-only-storage-mismatch (2026-07-12)", () => {
+    test("THE BUG THIS CLOSES: summary clearly says local-only but clientOnlyStorage isn't set → blocking", () => {
+      const s = spec({
+        summary: "A pomodoro timer. Local-only persistence via localStorage; nothing is sent to any server.",
+        dataEntities: [{ name: "SessionCount", fields: ["date", "count"], sensitive: false }],
+        clientOnlyStorage: undefined,
+      });
+      const f = reviewSpec(s).find((x) => x.ruleId === "client-only-storage-mismatch");
+      expect(f?.severity).toBe("high");
+      expect(specVerdict(s).status).toBe("block");
+    });
+
+    test("clientOnlyStorage already true → no mismatch finding (nothing to reconcile)", () => {
+      const s = spec({
+        summary: "A pomodoro timer. Local-only persistence via localStorage.",
+        dataEntities: [{ name: "SessionCount", fields: ["date", "count"], sensitive: false }],
+        clientOnlyStorage: true,
+      });
+      expect(ruleIds(s)).not.toContain("client-only-storage-mismatch");
+    });
+
+    test("no client-only language in the text at all → not flagged (a real backend app stays unaffected)", () => {
+      expect(ruleIds(spec({ clientOnlyStorage: undefined }))).not.toContain("client-only-storage-mismatch");
+    });
+
+    test("storesData false → not flagged (nothing persists either way, so the flag is moot)", () => {
+      const s = spec({ storesData: false, dataEntities: [], summary: "A local-only, no-backend tool.", clientOnlyStorage: undefined });
+      expect(ruleIds(s)).not.toContain("client-only-storage-mismatch");
+    });
+  });
+
   test("sensitive/multi-tenant with no auth → CRITICAL block", () => {
     const f = reviewSpec(spec({ auth: "none" })).find((x) => x.ruleId === "no-auth-for-sensitive");
     expect(f?.severity).toBe("critical");
