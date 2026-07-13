@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VERSION, teeToLogFile, checkpointHook } from "./cli.ts";
+import { VERSION, teeToLogFile, checkpointHook, scaffoldConfigs } from "./cli.ts";
 import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
@@ -158,5 +158,49 @@ describe("checkpointHook — build-substrate W3 checkpoint wiring", () => {
     }
     expect(caught).not.toBeInstanceOf(BuildStoppedError);
     expect(String(caught)).toMatch(/checkpoint command failed \(exit 1\)/);
+  });
+});
+
+describe("scaffoldConfigs — deterministic Tailwind/PostCSS boilerplate", () => {
+  const tmps: string[] = [];
+  afterEach(() => {
+    for (const d of tmps.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  function app(deps: Record<string, string>): string {
+    const d = mkdtempSync(join(tmpdir(), "vibehard-scaffold-"));
+    tmps.push(d);
+    writeFileSync(join(d, "package.json"), JSON.stringify({ dependencies: deps }));
+    return d;
+  }
+  const devDeps = (dir: string): Record<string, string> => JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).devDependencies ?? {};
+
+  test("v3: missing autoprefixer/postcss get added (existing behavior, still covered)", () => {
+    const d = app({ tailwindcss: "^3.4.0" });
+    scaffoldConfigs(d);
+    expect(readFileSync(join(d, "postcss.config.mjs"), "utf8")).toContain("autoprefixer: {}");
+    expect(devDeps(d)).toMatchObject({ autoprefixer: expect.any(String), postcss: expect.any(String) });
+  });
+
+  test("THE BUG THIS CLOSES (2026-07-12): v4 detected via tailwindcss version alone, @tailwindcss/postcss never added → clean install can't resolve it", () => {
+    // Live failure: package.json declared only "tailwindcss": "^4.x" (the LLM's common mistake —
+    // v4 split its PostCSS plugin into a separate package). v4 detection correctly fires and the
+    // config correctly references @tailwindcss/postcss, but nothing ever added it as an installable
+    // dependency — the v3 branch already did this for its own deps, the v4 branch never did.
+    const d = app({ tailwindcss: "^4.0.0" });
+    scaffoldConfigs(d);
+    expect(readFileSync(join(d, "postcss.config.mjs"), "utf8")).toContain('"@tailwindcss/postcss": {}');
+    expect(devDeps(d)).toHaveProperty("@tailwindcss/postcss");
+  });
+
+  test("v4 detected via @tailwindcss/postcss already present → not re-added (idempotent)", () => {
+    const d = app({ tailwindcss: "^4.0.0", "@tailwindcss/postcss": "^4.1.0" });
+    scaffoldConfigs(d);
+    expect(devDeps(d)).not.toHaveProperty("@tailwindcss/postcss"); // already in dependencies; devDependencies untouched
+  });
+
+  test("no Tailwind at all → no-op (doesn't impose a postcss config where none is used)", () => {
+    const d = app({ next: "15" });
+    scaffoldConfigs(d);
+    expect(existsSync(join(d, "postcss.config.mjs"))).toBe(false);
   });
 });

@@ -312,7 +312,7 @@ function normalizeLayout(target: string): void {
 /** Deterministically scaffold the boilerplate the model keeps botching: the Tailwind/PostCSS
  *  config (a duplicated/malformed postcss config held a build this cycle). Boilerplate is
  *  identical every app, so write it in code rather than trust the LLM. Idempotent. */
-function scaffoldConfigs(target: string): void {
+export function scaffoldConfigs(target: string): void {
   const pkgPath = join(target, "package.json");
   if (!existsSync(pkgPath)) return;
   let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
@@ -329,19 +329,34 @@ function scaffoldConfigs(target: string): void {
     const p = join(target, f);
     if (existsSync(p)) rmSync(p);
   }
-  const v4 = !!deps["@tailwindcss/postcss"] || /\b4\./.test(String(deps.tailwindcss ?? "").replace(/^[^\d]*/, "4."));
+  // THE BUG THIS CLOSES (found live 2026-07-12, while fixing something else entirely): this used
+  // to .replace(/^[^\d]*/, "4.") — which doesn't STRIP the leading "^"/"~", it INSERTS the literal
+  // string "4." there. A zero-width match at the start of an already-digit-led string (e.g.
+  // "3.4.0", no caret) still replaces-in-place, so "4." lands at position 0 regardless of input.
+  // Verified directly: every version string tested — "^3.4.0", "^4.0.0", "3.4.0", even undefined —
+  // produced a result starting with "4." Every Tailwind v3 app has been silently misdetected as
+  // v4 (and Tailwind v4's config plugin as always "needed") for as long as this line existed.
+  const v4 = !!deps["@tailwindcss/postcss"] || /^4(\.|$)/.test(String(deps.tailwindcss ?? "").replace(/^[^\d]*/, ""));
   const config = v4
     ? `export default {\n  plugins: {\n    "@tailwindcss/postcss": {},\n  },\n};\n`
     : `export default {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n`;
   writeFileSync(join(target, "postcss.config.mjs"), config);
-  // a v3 config needs autoprefixer + postcss installed (config-only deps the import scan can't see)
-  if (!v4) {
-    const dd = (pkg.devDependencies ??= {});
-    let changed = false;
+  // Each config style needs its own deps installed (config-only refs the import scan can't see).
+  // THE BUG THIS CLOSES (found live 2026-07-12): the v3 branch already covered this — the v4
+  // branch never did. Tailwind v4 split its PostCSS plugin into its OWN package
+  // (@tailwindcss/postcss, separate from tailwindcss itself) — a real, common migration gotcha —
+  // so a package.json declaring only "tailwindcss": "^4.x" trips the v4 branch here (correctly
+  // writing a config that references @tailwindcss/postcss) while never installing that package.
+  // `npm run build` then fails on a clean install: "Can't resolve '@tailwindcss/postcss'".
+  const dd = (pkg.devDependencies ??= {});
+  let changed = false;
+  if (v4) {
+    if (!deps["@tailwindcss/postcss"]) (dd["@tailwindcss/postcss"] = "^4.0.0"), (changed = true);
+  } else {
     if (!deps.autoprefixer) (dd.autoprefixer = "^10.4.20"), (changed = true);
     if (!deps.postcss) (dd.postcss = "^8.4.49"), (changed = true);
-    if (changed) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
   }
+  if (changed) writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
   console.log("  ▸ scaffold: wrote a clean postcss.config.mjs (boilerplate is deterministic, not generated)");
 }
 
