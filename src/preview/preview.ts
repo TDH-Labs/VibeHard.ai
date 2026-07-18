@@ -71,7 +71,10 @@ export async function runPreview(dir: string, opts: PreviewOptions = {}): Promis
   // 1) install if needed
   if (!existsSync(join(dir, "node_modules")) || installStale(dir)) {
     log("  ▸ installing dependencies…");
-    const inst = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: dir, stdout: "inherit", stderr: "inherit", timeout: SUBPROCESS_TIMEOUT_MS });
+    // safeToolEnv (2026-07-18): same scoping as C-7 below and the same starvation class the
+    // benchmark caught — under the host's NODE_ENV=production, an unscoped npm install omits
+    // devDependencies, so the preview build then fails on missing typescript/tailwind.
+    const inst = Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: dir, env: safeToolEnv(dir), stdout: "inherit", stderr: "inherit", timeout: SUBPROCESS_TIMEOUT_MS });
     if (inst.exitCode !== 0) throw new Error("npm install failed");
   }
 

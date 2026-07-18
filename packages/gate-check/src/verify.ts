@@ -361,6 +361,20 @@ function hasDeps(pkg: Pkg): boolean {
  *  on a dep that IS declared, and the fixer oscillates forever (no change to make). */
 export function installStale(projectPath: string): boolean {
   if (!existsSync(join(projectPath, "node_modules"))) return true;
+  // STARVED install detection (root-caused live 2026-07-18, benchmark run 1): the mtime check
+  // below judges freshness, not COMPLETENESS. An install that ran under the platform's
+  // NODE_ENV=production (npm's omit defaults to "dev") placed prod deps only — no typescript,
+  // no tailwind, no @types — and its stamp then looked fresh forever, so nothing ever
+  // reinstalled and every build failed "Module not found" on files that existed. If ANY
+  // declared dependency (dev included — the toolchain lives there) is missing on disk, the
+  // install is stale no matter what the stamps say. This self-heals a workspace poisoned by
+  // any past or future unscoped installer.
+  const pkg = readPkg(projectPath);
+  if (pkg) {
+    for (const name of [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]) {
+      if (!existsSync(join(projectPath, "node_modules", ...name.split("/")))) return true;
+    }
+  }
   try {
     const stamp = statSync(join(projectPath, "node_modules", ".package-lock.json")).mtimeMs;
     return statSync(join(projectPath, "package.json")).mtimeMs > stamp;

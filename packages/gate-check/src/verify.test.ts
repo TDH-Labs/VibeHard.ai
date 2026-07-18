@@ -66,9 +66,25 @@ describe("installStale (auto-fix loop's reinstall signal)", () => {
     expect(installStale(d)).toBe(true);
   });
 
-  test("install stamp newer than package.json → fresh (no reinstall)", async () => {
-    const d = await scratch({ "package.json": JSON.stringify({ dependencies: { zod: "^3" } }) });
+  test("install stamp newer than package.json AND every declared dep on disk → fresh (no reinstall)", async () => {
+    const d = await scratch({ "package.json": JSON.stringify({ dependencies: { zod: "^3" } }), "node_modules/zod/package.json": "{}" });
     await new Promise((r) => setTimeout(r, 12));
+    await Bun.write(join(d, "node_modules/.package-lock.json"), "{}");
+    expect(installStale(d)).toBe(false);
+  });
+
+  test("a STARVED install is stale regardless of stamps (2026-07-18, benchmark run 1: an unscoped npm under the host's NODE_ENV=production omitted devDependencies; the fresh-looking stamp then blocked every reinstall and builds failed 'Module not found' on files that existed)", async () => {
+    const d = await scratch({
+      "package.json": JSON.stringify({ dependencies: { next: "15.5.20" }, devDependencies: { typescript: "5.7.3", "@types/react": "19.0.6" } }),
+      "node_modules/next/package.json": "{}", // prod dep present…
+    });
+    await new Promise((r) => setTimeout(r, 12));
+    await Bun.write(join(d, "node_modules/.package-lock.json"), "{}"); // …stamp is fresh
+    expect(installStale(d)).toBe(true); // …but typescript/@types/react are MISSING → stale
+
+    // completing the toolchain (scoped path included) makes it genuinely fresh
+    await Bun.write(join(d, "node_modules/typescript/package.json"), "{}");
+    await Bun.write(join(d, "node_modules/@types/react/package.json"), "{}");
     await Bun.write(join(d, "node_modules/.package-lock.json"), "{}");
     expect(installStale(d)).toBe(false);
   });

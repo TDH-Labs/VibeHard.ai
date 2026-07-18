@@ -105,7 +105,14 @@ Format per entry:
   omit` → "dev" on the box was the confirming evidence.
 - fix: gate-check owns its toolchain env — NODE_ENV removed from TOOL_ENV_ALLOW +
   npm_config_include=dev pinned · 53b7eb2 · verify.test.ts
-- status: fixed
+- status: fixed — then REOPENED 2026-07-18 (benchmark run 1, case pomodoro held): the class had
+  more members. The FIRST install to touch a workspace (proptest generation's fast-check
+  install) ran unscoped, created the starved node_modules, and installStale's mtime-only check
+  then deemed it fresh forever — so the safeToolEnv fix never got a chance to run an install.
+  Closed properly: every workspace npm spawn site scoped (proptest/generate, autofix/depbump,
+  preview, diagnose) AND installStale now detects a starved install (any declared dep missing
+  on disk → stale), which self-heals workspaces poisoned by any past or future unscoped
+  installer. Locked by verify.test.ts's starved-install test.
 
 ## proptest.cross-file-global-pollution
 - first seen: 2026-07-18 · /tmp/debug-e2e-12 (held esc-oijrb9) · pomodoro-timer

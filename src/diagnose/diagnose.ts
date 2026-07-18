@@ -16,7 +16,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } fr
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { Finding } from "../types.ts";
-import { installStale } from "../gate/verify.ts";
+import { installStale, safeToolEnv } from "../gate/verify.ts";
 import { parseBuildErrors } from "../gate/build-errors.ts";
 import { packageNameOf } from "../autofix/missingdeps.ts";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
@@ -135,13 +135,17 @@ function buildCheck(dir: string): { ran: boolean; ok: boolean; findings: Finding
     cpSync(dir, tmp, { recursive: true, filter: (src) => !DERIVED.has(relative(dir, src).split("/").pop() ?? "") });
     // --ignore-scripts (audit2 B-3): the diagnostic clean-room install of generated deps must not run
     // their lifecycle scripts on the host.
-    const install = Bun.spawnSync(existsSync(join(tmp, "package-lock.json")) ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"] : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: tmp, stdout: "pipe", stderr: "pipe", timeout: 180_000 });
+    // safeToolEnv (2026-07-18): an unscoped install here both leaks the host env to generated
+    // deps AND (under the host's NODE_ENV=production) omits devDependencies — which would make
+    // this diagnostic MISDIAGNOSE healthy apps as broken, the exact starvation class the
+    // benchmark caught live in the gates.
+    const install = Bun.spawnSync(existsSync(join(tmp, "package-lock.json")) ? ["npm", "ci", "--no-audit", "--no-fund", "--ignore-scripts"] : ["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: tmp, env: safeToolEnv(tmp), stdout: "pipe", stderr: "pipe", timeout: 180_000 });
     if ((install.exitCode ?? 1) !== 0) {
       const log = `${install.stdout?.toString() ?? ""}${install.stderr?.toString() ?? ""}`;
       const localized = parseBuildErrors(log, dir, "install-failed");
       return { ran: true, ok: false, findings: localized.length ? localized : [{ tool: "verify", ruleId: "install-failed", severity: "high", file: "package.json", message: `clean install failed — ${log.trim().slice(-400)}` }] };
     }
-    const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, stdout: "pipe", stderr: "pipe", timeout: 180_000 });
+    const build = Bun.spawnSync(["npm", "run", "build"], { cwd: tmp, env: safeToolEnv(tmp), stdout: "pipe", stderr: "pipe", timeout: 180_000 });
     if ((build.exitCode ?? 1) === 0) return { ran: true, ok: true, findings: [] };
     const log = `${build.stdout?.toString() ?? ""}${build.stderr?.toString() ?? ""}`;
     const localized = parseBuildErrors(log, dir);

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { Finding } from "../types.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 import { withHostLock } from "../util/host-lock.ts";
+import { safeToolEnv } from "../gate/verify.ts";
 
 /** Parse `pkg@installed: <title> (fixed in a, b, c)` from a trivy Finding message. */
 export function parseDepFinding(f: Finding): { pkg: string; installed: string; fixed: string[] } | null {
@@ -154,6 +155,11 @@ export async function applyDepBumps(workspacePath: string, depFindings: Finding[
     () =>
       Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], {
         cwd: workspacePath,
+        // safeToolEnv (2026-07-18): missingdeps.ts got this scoping in audit3 M-1; this site never
+        // did. Without it npm inherits the FULL host env — secrets (FLY_API_TOKEN, …) leak into
+        // the workspace install, and the host's NODE_ENV=production makes npm omit devDependencies
+        // (the starved-node_modules class the benchmark caught live).
+        env: safeToolEnv(workspacePath),
         stdout: "ignore",
         stderr: "ignore",
         timeout: SUBPROCESS_TIMEOUT_MS,

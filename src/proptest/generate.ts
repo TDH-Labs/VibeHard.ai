@@ -21,6 +21,7 @@ import { configForStage } from "../config/models.ts";
 import type { Requirement } from "../prd/index.ts";
 import { PROPTEST_DIR, propTestFileName, propTestVacuityReason } from "./validate.ts";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
+import { safeToolEnv } from "../gate/verify.ts";
 
 /** Bound the LLM cost per build: MVP requirements first, at most this many test files. */
 export const MAX_PROPTEST_REQUIREMENTS = 6;
@@ -62,8 +63,15 @@ const defaultRunTest: NonNullable<PropTestGenOptions["runTest"]> = (projectPath,
   return { exitCode: p.exitCode ?? 1, output: `${p.stdout?.toString() ?? ""}${p.stderr?.toString() ?? ""}` };
 };
 
+// safeToolEnv, NOT the inherited process.env (root-caused live 2026-07-18, benchmark run 1):
+// this is the FIRST install to touch a fresh workspace (proptest generation runs before any
+// gate), and under the platform's NODE_ENV=production npm omits devDependencies — so it
+// created a starved node_modules (no typescript/tailwind/@types) that installStale's mtime
+// check then deemed fresh forever. Every later build failed "Module not found" on files that
+// existed, and the fixer looped blind until held. Also the audit3 M-1 scoping: never hand the
+// host's full env (FLY_API_TOKEN, …) to npm inside a workspace.
 const defaultInstall: NonNullable<PropTestGenOptions["install"]> = (projectPath) =>
-  Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: projectPath, stdout: "ignore", stderr: "ignore" }).exitCode ?? 1;
+  Bun.spawnSync(["npm", "install", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: projectPath, env: safeToolEnv(projectPath), stdout: "ignore", stderr: "ignore" }).exitCode ?? 1;
 
 /** Fallback when the app's own manifest can't install (observed live 2026-07-05: codegen's
  *  pre-fix-loop package.json was broken, so the full install failed and ALL property tests
@@ -73,6 +81,7 @@ const defaultInstall: NonNullable<PropTestGenOptions["install"]> = (projectPath)
 function installFastCheckIsolated(projectPath: string): { ok: boolean; log: string } {
   const p = Bun.spawnSync(["npm", "install", "--prefix", "tests/properties", "--no-audit", "--no-fund", "--ignore-scripts", "--no-save", "fast-check@^4.0.0"], {
     cwd: projectPath,
+    env: safeToolEnv(projectPath), // same env discipline as defaultInstall — never the host's env
     stdout: "pipe",
     stderr: "pipe",
   });
