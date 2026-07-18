@@ -374,6 +374,20 @@ describe("safeToolEnv — CRITICAL-2: platform secrets must not leak into genera
     expect(env.DATABASE_URL).toBeDefined(); // synthEnv dummy
     expect(env.DATABASE_URL).not.toBe(""); // has a placeholder, not empty
   });
+
+  test("a production-host NODE_ENV never reaches the toolchain, and installs always include devDeps (root-caused live 2026-07-17: npm's omit defaults to 'dev' under NODE_ENV=production, so every gate-spawned install skipped typescript/tailwind/@types and every TS app failed its from-scratch build)", async () => {
+    const dir = await scratch({});
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const env = safeToolEnv(dir);
+      expect(env.NODE_ENV).toBeUndefined();
+      expect(env.npm_config_include).toBe("dev");
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
+  });
 });
 
 describe("summarizeSandbox — a Fly-sandboxed container result → findings (EPIC #32a)", () => {

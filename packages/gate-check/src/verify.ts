@@ -433,9 +433,19 @@ async function ensurePythonInstalled(projectPath: string, env: Record<string, st
  *  (FLY_API_TOKEN, OPENCODE_API_KEY, SUPABASE_*, STRIPE_* …) into `npm run build` / `npm install`
  *  would hand those secrets to whatever the LLM wrote. We allowlist only toolchain vars and supply
  *  the app's DECLARED keys as dummies (synthEnv) — exactly what the isolated container branch does. */
+// NODE_ENV is deliberately NOT allowlisted (root-caused live 2026-07-17 on e2e-11, confirmed on
+// the prod box: `npm config get omit` → "dev"): npm's `omit` config DEFAULTS to "dev" whenever
+// NODE_ENV=production is in its environment — and the deployed platform's own process runs with
+// NODE_ENV=production. Forwarding it made every gate-spawned `npm install`/`npm ci` silently skip
+// devDependencies, so any TypeScript/Tailwind app failed its from-scratch build (module-not-found
+// on the tsconfig alias — no `typescript` on disk means Next never reads tsconfig paths; e2e-9's
+// "Cannot find namespace 'JSX'" was the same cause, missing @types/react). The host's NODE_ENV
+// describes the PLATFORM, not the generated app's toolchain; `next build` forces its own
+// NODE_ENV=production internally regardless. npm_config_include=dev is the belt-and-suspenders:
+// npm's include beats omit even if some other channel re-injects a production signal.
 const TOOL_ENV_ALLOW = [
   "PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
-  "USER", "LOGNAME", "SHELL", "NODE_ENV", "NODE_OPTIONS", "npm_config_cache",
+  "USER", "LOGNAME", "SHELL", "NODE_OPTIONS", "npm_config_cache",
   "npm_config_registry", "npm_config_prefix", "XDG_CACHE_HOME", "SYSTEMROOT", "COMSPEC",
 ];
 export function safeToolEnv(projectPath: string): Record<string, string> {
@@ -444,6 +454,7 @@ export function safeToolEnv(projectPath: string): Record<string, string> {
     const v = process.env[k];
     if (v !== undefined) env[k] = v;
   }
+  env.npm_config_include = "dev"; // a from-scratch install MUST get the toolchain (typescript, tailwind, @types/*)
   return env;
 }
 
