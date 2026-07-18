@@ -76,6 +76,21 @@ Format per entry:
   template.test.ts + CI template job
 - status: fixed pending live re-verify (e2e-11)
 
+## template.stale-pinned-deps
+- first seen: 2026-07-17 · /tmp/debug-e2e-11 (the FIRST template-scaffolded build) · pomodoro-timer
+- symptom: depvuln(10 blocking) on round 1 — every finding against the template's own pinned
+  next@15.1.6 (middleware auth bypass, RSC pre-auth RCE, several DoS). The deterministic
+  dep-bumper converged (round 2: one left), but every build was going to burn ~2 fix rounds
+  re-fixing the same known-stale pins.
+- root cause: the template pinned the version the author knew, not the currently CVE-clean one.
+  Pinned deps trade drift for staleness — the trade is only sound if freshness is enforced.
+- fix: templates re-pinned to next@15.5.20 (the maintained 15.x backport line), lockfiles
+  regenerated, build+boot re-proven. Next 15.5 also changed standalone output layout under an
+  inferred workspace root — pinned outputFileTracingRoot so the layout is invariant. CI's
+  template job would have caught a build/boot break but NOT a CVE: freshness needs its own
+  check (open idea: run the depvuln scanner against templates/ in CI).
+- status: fixed (this entry's open idea tracks the missing enforcement)
+
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer
 - symptom: "Model deepseek-v3.2 is not supported" at the first LLM call (OpenCode Zen);
