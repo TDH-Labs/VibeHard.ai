@@ -752,7 +752,13 @@ export async function main(argv: string[]): Promise<number> {
           env: { ...process.env, ...c.env },
           stdout: "pipe",
           stderr: "pipe",
-          timeout: 5_400_000, // 90 min hard cap per build — beyond that it's a hang, not a build
+          // 150 min hard cap per build. Calibrated from direct measurement (2026-07-18, benchmark
+          // run 1): a HEALTHY production-rigor pomodoro build was still legitimately working at
+          // the old 90-min mark — the gate chain runs in full at least twice (fix loop + the
+          // all-green confirmation pass), and each pass carries a from-scratch npm ci + build
+          // (~10 min) plus an ephemeral Fly sandbox boot (~5-8 min). The cap exists to catch
+          // HANGS (e.g. the silently-dead 04:23 build), not to race real work.
+          timeout: 9_000_000,
         });
         return { exitCode: proc.exitCode ?? 1, log: `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}` };
       },
