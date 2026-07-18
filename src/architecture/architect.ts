@@ -9,7 +9,7 @@ import type { Finding } from "../types.ts";
 import { isBlocking } from "../types.ts";
 import type { Prd } from "../prd/index.ts";
 import type { Srs } from "../srs/index.ts";
-import { reviewArchitecture, type Architecture } from "./architecture.ts";
+import { reviewArchitecture, type Architecture, type ReviewContext } from "./architecture.ts";
 
 /** An Architect designs from the PRD, optionally enriched by the SRS (data model + interfaces +
  *  modules) when the SRS stage ran before it. The 3rd param is optional so fakes can ignore it. */
@@ -27,17 +27,20 @@ export interface ArchitectOptions {
   srs?: Srs; // when the SRS stage ran, the architect designs against its data model + interfaces
   budget?: number;
   onStep?: (message: string) => void;
+  /** Golden-template context (Phase 1): review with "template owns the skeleton" semantics. */
+  review?: ReviewContext;
 }
 
 export async function architectApp(prd: Prd, opts: ArchitectOptions): Promise<ArchitectResult> {
   const budget = Math.max(1, opts.budget ?? 3);
+  const ctx = opts.review ?? {};
   let arch = await opts.architect(prd, null, opts.srs);
-  let gaps = reviewArchitecture(arch);
+  let gaps = reviewArchitecture(arch, ctx);
   let rounds = 1;
   while (gaps.some(isBlocking) && rounds < budget) {
     opts.onStep?.(`refining the design — ${gaps.filter(isBlocking).length} thing(s) the checks want resolved; redrawing (pass ${rounds} of up to ${budget})`);
     arch = await opts.architect(prd, { arch, gaps }, opts.srs);
-    gaps = reviewArchitecture(arch);
+    gaps = reviewArchitecture(arch, ctx);
     rounds++;
   }
   return { arch, gaps, ready: !gaps.some(isBlocking), rounds };

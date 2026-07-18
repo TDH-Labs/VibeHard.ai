@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { architectureVerdict, assessSubstrateFit, buildOrder, coerceArchitecture, renderSadMarkdown, reviewArchitecture, type Architecture } from "./architecture.ts";
 import type { Prd } from "../prd/index.ts";
 import type { Srs } from "../srs/index.ts";
+import { isTemplateOwnedPath } from "../build/template.ts";
 
 // A minimal PRD stand-in (architecture only carries it for traceability).
 const prd = { spec: { name: "app" }, title: "PRD", requirements: [], nfrs: [], buyVsBuild: [] } as unknown as Prd;
@@ -207,6 +208,33 @@ describe("reviewArchitecture — graph validation (the disposer)", () => {
 
   test("no workstreams at all → no-workstreams", () => {
     expect(reviewArchitecture(arch([])).map((f) => f.ruleId)).toEqual(["no-workstreams"]);
+  });
+
+  describe("golden-template inversion (Phase 1, 2026-07-17): the template owns the skeleton", () => {
+    const tplCtx = { template: { key: "next-static-client-only", isOwnedPath: isTemplateOwnedPath } };
+
+    test("a features-only plan (no manifest, no root layout anywhere) is CORRECT with a template — neither skeleton check fires", () => {
+      const a = arch([ws("timer", [], ["hooks/useTimer.ts", "components/Timer.tsx"]), ws("page", ["timer"], ["app/page.tsx"])]);
+      const ids = reviewArchitecture(a, tplCtx).map((f) => f.ruleId);
+      expect(ids).not.toContain("no-project-manifest");
+      expect(ids).not.toContain("no-root-layout");
+    });
+
+    test("a workstream claiming a template-owned path (or a variant spelling that would SHADOW it, like next.config.js) → blocking template-owned-path naming file and workstream", () => {
+      const a = arch([ws("setup", [], ["package.json", "next.config.js", "app/layout.tsx"]), ws("page", ["setup"], ["app/page.tsx"])]);
+      const f = reviewArchitecture(a, tplCtx).find((x) => x.ruleId === "template-owned-path");
+      expect(f?.severity).toBe("high");
+      expect(f?.message).toContain("package.json");
+      expect(f?.message).toContain("next.config.js");
+      expect(f?.message).toContain("setup");
+    });
+
+    test("without a template context, the original skeleton checks stand unchanged", () => {
+      const a = arch([ws("timer", [], ["hooks/useTimer.ts"]), ws("page", ["timer"], ["app/page.tsx"])]);
+      const ids = reviewArchitecture(a).map((f) => f.ruleId);
+      expect(ids).toContain("no-project-manifest");
+      expect(ids).toContain("no-root-layout");
+    });
   });
 });
 

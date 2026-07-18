@@ -5,6 +5,10 @@
 .loop
 .loop.lock
 node_modules
+**/node_modules
+templates/*/.next
+templates/*/out
+templates/*/dist
 landing
 design
 docs

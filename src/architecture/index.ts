@@ -12,6 +12,7 @@ export {
   type ArchPattern,
   type Architecture,
   type DataArchitecture,
+  type ReviewContext,
   type Workstream,
 } from "./architecture.ts";
 export { architectApp, type Architect, type ArchitectOptions, type ArchitectResult } from "./architect.ts";

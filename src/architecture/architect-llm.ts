@@ -18,6 +18,7 @@ import type { Srs } from "../srs/index.ts";
 import { coerceArchitecture } from "./architecture.ts";
 import type { Architect } from "./architect.ts";
 import { fleetBlock } from "../fleet/fleet.ts";
+import type { AppTemplate } from "../build/template.ts";
 
 const ARCHITECT_SYSTEM_PROMPT = `# Role
 You are an expert Software Architect. You turn a Software Requirements Specification (SRS) — which flows from a PRD and Spec — into a Software Architecture Document (SAD): the stack, the components (WORKSTREAMS, each owning files with a dependency graph), and the architectural decisions. Output a single JSON object — no prose, no markdown fence.
@@ -58,9 +59,24 @@ You are an expert Software Architect. You turn a Software Requirements Specifica
 - BE CONCISE so the whole JSON fits in one response: short phrases, a focused DDL, 3-7 workstreams. A truncated document is a failed document.
 - If given previous gaps, FIX every one (break a cycle, add files or covers, move the data layer to Supabase, supply the missing pattern rationale, …).`;
 
+/** Phase 1 (golden templates): when a vendored template scaffolds this build, the architect is
+ *  TOLD the skeleton exists — it plans features only. The prompt is a hint; the enforcement is
+ *  reviewArchitecture's template-owned-path check + the cli's workstream pruning. */
+export function architectTemplateBlock(tpl: AppTemplate): string {
+  return `
+
+# Project skeleton (VENDORED — already exists, do NOT plan it)
+This build starts from a verified, pinned-dependency template. Its stack is fixed: "${tpl.stack}" — output exactly that as "stack".
+The skeleton files already exist before any codegen: package.json (+ lockfile), tsconfig.json, next.config.mjs, postcss.config.mjs, tailwind.config.ts, app/layout.tsx, app/globals.css, README.md, Dockerfile${tpl.key === "next-static-client-only" ? ", server.js (static-file container entry)" : ", .env.example"}.
+- Do NOT create a "Project Setup"/scaffolding workstream. Do NOT assign ANY skeleton file above to a workstream — nor variants of them (next.config.js, tailwind.config.js, postcss.config.js, styles/globals.css, pages/_app.tsx, a Dockerfile, a lockfile).
+- Plan FEATURE work only: pages under app/ (Next.js App Router — a feature workstream SHOULD own app/page.tsx; NEVER plan a pages/ directory), components/, hooks/, lib/.`;
+}
+
 export interface LlmArchitectOptions {
   modelFactory?: ModelFactory;
   config?: EngineConfig;
+  /** Golden template scaffolding this build (Phase 1) — null/undefined = no template. */
+  template?: AppTemplate | null;
 }
 
 export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
@@ -91,7 +107,7 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
       : `SRS/PRD:\n${JSON.stringify(summary)}\n\nReturn the SAD JSON.`;
 
     // Inject the fleet's PLANNING-phase learned conventions (e.g. Supabase Auth, never Clerk).
-    const system = ARCHITECT_SYSTEM_PROMPT + fleetBlock(undefined, "planning");
+    const system = ARCHITECT_SYSTEM_PROMPT + (opts.template ? architectTemplateBlock(opts.template) : "") + fleetBlock(undefined, "planning");
     const { text, finishReason } = await generateTextResilient({ model: modelFactory(config), system, prompt: user, maxOutputTokens: 12000 });
     // A "length" finishReason means the model truncated mid-JSON → unparseable → empty design,
     // which reviewArchitecture flags (no-workstreams) so the loop retries. The concise prompt keeps

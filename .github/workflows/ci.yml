@@ -23,3 +23,44 @@ jobs:
         run: bun run typecheck
       - name: Unit tests
         run: bun test
+
+  # Golden templates are TESTED PRODUCT CODE (Phase 1): each must install from its committed
+  # lockfile, build, and BOOT green on the platform's injected PORT — or the whole premise
+  # ("boilerplate is vendored and known-good") is broken. One matrix job per template.
+  templates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        template: [next-static-client-only, next-supabase]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (from the committed lockfile)
+        working-directory: templates/${{ matrix.template }}
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        working-directory: templates/${{ matrix.template }}
+        run: npm run build
+      - name: Boot on the injected PORT and probe
+        working-directory: templates/${{ matrix.template }}
+        run: |
+          set -e
+          if [ "${{ matrix.template }}" = "next-static-client-only" ]; then
+            PORT=8080 node server.js &
+          else
+            cp -r .next/static .next/standalone/.next/static
+            cp -r public .next/standalone/public
+            PORT=8080 HOSTNAME=0.0.0.0 node .next/standalone/server.js &
+          fi
+          SERVER_PID=$!
+          for i in $(seq 1 30); do
+            sleep 0.5
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ || true)
+            [ "$CODE" = "200" ] && break
+          done
+          kill $SERVER_PID || true
+          echo "probe status: $CODE"
+          [ "$CODE" = "200" ]

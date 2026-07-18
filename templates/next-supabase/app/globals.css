@@ -1,0 +1,6 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Baseline global styles — the design-system scaffold (scaffoldDesignSystem) overwrites this
+   with the chosen preset's tokens/fonts/components during a build. */

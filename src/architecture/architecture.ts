@@ -224,8 +224,19 @@ export function assessSubstrateFit(arch: Architecture): Finding[] {
   return out;
 }
 
+/** Golden-template context for the review (Phase 1): when a vendored template provides the
+ *  project skeleton, the "plan must own the boilerplate" checks INVERT — the template owns it,
+ *  and a workstream claiming a template-owned path is the defect (it would re-author verified
+ *  boilerplate; a differently-spelled config would even SHADOW the template's — next.config.js
+ *  beats next.config.mjs). The predicate comes from the template module so the ownership
+ *  boundary has exactly one definition. */
+export interface ReviewContext {
+  /** Present ⇔ a golden template scaffolds this build. */
+  template?: { key: string; isOwnedPath: (file: string) => boolean };
+}
+
 /** Deterministic validation: the design must be a complete, traceable, buildable SAD before codegen. */
-export function reviewArchitecture(arch: Architecture): Finding[] {
+export function reviewArchitecture(arch: Architecture, ctx: ReviewContext = {}): Finding[] {
   const out: Finding[] = [];
   if (arch.workstreams.length === 0) {
     out.push(gap("no-workstreams", "high", "The architecture defines no workstreams — there's nothing to build from."));
@@ -264,7 +275,28 @@ export function reviewArchitecture(arch: Architecture): Finding[] {
   // deps, coverage) and the PLAN AS A WHOLE can still omit the one file every stack needs. No
   // workstreams (already blocking above) implies this trivially, so only check when there's a
   // plan to check.
-  if (arch.workstreams.length > 0) {
+  // Phase 1 inversion: with a golden template, the skeleton EXISTS before codegen — a plan that
+  // omits package.json / app/layout.tsx is now CORRECT (the template provides them), and a plan
+  // that CLAIMS one is the new defect. Without a template, the original checks stand unchanged.
+  if (ctx.template) {
+    const claimed = new Map<string, string[]>(); // file → workstreams claiming it
+    for (const w of arch.workstreams) {
+      for (const f of w.files) {
+        if (ctx.template.isOwnedPath(f)) (claimed.get(f) ?? claimed.set(f, []).get(f)!).push(w.name);
+      }
+    }
+    if (claimed.size) {
+      const detail = [...claimed.entries()].map(([f, ws]) => `${f} (${ws.join(", ")})`).join("; ");
+      out.push(
+        gap(
+          "template-owned-path",
+          "high",
+          `These files already exist — the project skeleton (${ctx.template.key} template: manifest, lockfile, configs, app/layout.tsx, globals.css, Dockerfile, README) is provided and verified before codegen runs. Remove them from the plan and plan FEATURE files only (app/ pages, components/, hooks/, lib/): ${detail}.`,
+        ),
+      );
+    }
+  }
+  if (arch.workstreams.length > 0 && !ctx.template) {
     const owned = new Set(arch.workstreams.flatMap((w) => w.files.map((f) => f.replace(/^\.?\//, ""))));
     const MANIFESTS = ["package.json", "requirements.txt", "pyproject.toml"];
     if (!MANIFESTS.some((m) => owned.has(m))) {

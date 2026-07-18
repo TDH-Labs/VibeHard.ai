@@ -45,6 +45,7 @@ import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/i
 import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
+import { applyTemplate, isTemplateOwnedPath, pickTemplate, templateBlock, type AppTemplate } from "./build/template.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
 import { deployApp } from "./substrate/index.ts";
 import { LocalBuildRunner, Platform, planFor } from "./platform/index.ts";
@@ -369,7 +370,7 @@ export function missingWorkstreamFiles(target: string, files: string[]): string[
   return files.filter((f) => !existsSync(join(target, f.replace(/^\.?\/+/, ""))));
 }
 
-async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
+async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string, tpl: AppTemplate | null = null): Promise<boolean> {
   // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
   // prompt; else the TS/Supabase one). VIBEHARD_LANG=python forces it, for deliberately
   // building/validating a Python app.
@@ -393,6 +394,18 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
         : selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget) + designBlock(designPresetKey)) +
     fleetBlock(arch.stack, "codegen") +
     steeringBlock(readWorkspaceSteering(target));
+
+  // GOLDEN TEMPLATE (Phase 1): vendor the verified skeleton BEFORE codegen, tell codegen it's
+  // hands-off, and prune template-owned paths from the workstreams — the exact mechanism the
+  // deterministic backend below already proved out. A workstream left with no files is skipped.
+  if (tpl) {
+    const copied = applyTemplate(target, tpl);
+    console.log(`  ▸ template: ${tpl.key} — ${copied} skeleton file(s) vendored (boilerplate is tested product code, not generated)`);
+    systemPrompt += templateBlock(tpl);
+    arch = { ...arch, workstreams: arch.workstreams.map((w) => ({ ...w, files: w.files.filter((f) => !isTemplateOwnedPath(f)) })) };
+    const emptied = arch.workstreams.filter((w) => w.files.length === 0).map((w) => w.name);
+    if (emptied.length) console.log(`  ▸ template: ${emptied.length} planned workstream(s) owned by the template — skipping codegen for: ${emptied.join(", ")}`);
+  }
 
   // DETERMINISTIC BACKEND (default ON for Supabase stacks; opt OUT with VIBEHARD_DETERMINISTIC_BACKEND=0):
   // generate migrations/RLS/auth/clients from the structured data model BEFORE codegen — the layer the
@@ -444,8 +457,8 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
     concurrency,
     async (ws, built) => {
       if (ws.files.length === 0) {
-        console.log(`\n  ▸ workstream: ${ws.name} — backend-owned, nothing to generate`);
-        return true; // kept in the dependency graph, but the generator already wrote its files
+        console.log(`\n  ▸ workstream: ${ws.name} — template/generator-owned, nothing to generate`);
+        return true; // kept in the dependency graph; the template or deterministic generator already wrote its files
       }
       console.log(`\n  ▸ workstream: ${ws.name} — ${ws.files.length} file(s)`);
       const brief = workstreamBrief(arch, ws, built.map((w) => w.name));
@@ -857,6 +870,11 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`   📄 SRS written → ${join(target, "SRS.md")}`);
     }
 
+    // Phase 1 (golden templates): decide from the SPEC — before the architect runs — whether a
+    // vendored skeleton scaffolds this build. Python is env-gated (its codegen path has no
+    // vendored template yet); downloadable tools ship no hosted skeleton at all (pickTemplate).
+    const tpl = process.env.VIBEHARD_LANG === "python" || process.env.VIBEHARD_TEMPLATE === "0" ? null : pickTemplate(spec);
+
     // 4. SRS → architecture / SAD (workstream dependency graph, designed against the SRS)
     let arch = loadStage<Architecture>(target, "architecture.json");
     if (arch) {
@@ -864,7 +882,12 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`✓ architecture (SAD) — restored from saved work (${arch.workstreams.length} component(s))`);
     } else {
       console.log("\n── designing the architecture (SAD) … ──");
-      const archRes = await architectApp(prd, { architect: llmArchitect({ config: configForStage("sad") }), srs, onStep });
+      const archRes = await architectApp(prd, {
+        architect: llmArchitect({ config: configForStage("sad"), template: tpl }),
+        srs,
+        onStep,
+        review: tpl ? { template: { key: tpl.key, isOwnedPath: isTemplateOwnedPath } } : undefined,
+      });
       if (!archRes.ready) {
         console.log("\n🛑 architecture not buildable:");
         for (const f of archRes.gaps.filter(isBlocking)) explainFinding(f);
@@ -900,7 +923,7 @@ export async function main(argv: string[]): Promise<number> {
 
       // Build each component from the plan, in dependency order.
       console.log(`\n── writing the code with ${provider}/${modelForStage("codegen")} → ${target} ──`);
-      if (!(await buildFromArchitecture(target, arch, provider, modelForStage("codegen")))) return 1;
+      if (!(await buildFromArchitecture(target, arch, provider, modelForStage("codegen"), tpl))) return 1;
       normalizeLayout(target); // deterministic safety net: make the @/* alias match where files live
       scaffoldConfigs(target); // deterministic boilerplate (postcss/tailwind) — never LLM-generated
       // Deterministic design system: write the chosen preset's theme + globals so the look is
