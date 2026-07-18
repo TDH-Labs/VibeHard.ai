@@ -38,6 +38,12 @@ describe("stage → tier assignment (cloud-only, right-fit)", () => {
     expect(modelForStage("procurement")).toBe("deepseek/deepseek-v4-flash");
   });
 
+  test("opencode's reason-lite tier resolves to a slug that survives the 2026-07 catalog change (deepseek-v3.2 was DELISTED — a live build failed at the very first stage with 'Model deepseek-v3.2 is not supported')", () => {
+    process.env.VIBEHARD_PROVIDER = "opencode";
+    const liteStages: Stage[] = ["intake", "spec", "prd", "srs", "refactor", "polish"];
+    for (const s of liteStages) expect(modelForStage(s)).toBe("deepseek-v4-flash");
+  });
+
   test("every stage resolves to SOME model for every provider — no gap in the tier table", () => {
     const stages: Stage[] = ["intake", "spec", "prd", "srs", "sad", "review", "codegen", "fix", "refactor", "polish", "functest", "procurement"];
     for (const provider of ["openrouter", "opencode", "anthropic"]) {

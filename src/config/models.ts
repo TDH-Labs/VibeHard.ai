@@ -53,7 +53,12 @@ const TIER: Record<Stage, Tier> = {
 // pending a real quality A/B (see docs/ROADMAP.md).
 const MODELS: Record<string, Record<Tier, string>> = {
   openrouter: { code: "moonshotai/kimi-k2.7-code", reason: "deepseek/deepseek-v4-pro", "reason-lite": "deepseek/deepseek-v3.2", light: "deepseek/deepseek-v4-flash" },
-  opencode: { code: "kimi-k2.7-code", reason: "deepseek-v4-pro", "reason-lite": "deepseek-v3.2", light: "deepseek-v4-flash" },
+  // reason-lite moved to deepseek-v4-flash 2026-07-17: OpenCode Zen DELISTED deepseek-v3.2 (checked
+  // the live /zen/go/v1/models catalog directly — v3.2 is gone; v4-pro / v4-flash / kimi-k2.7-code
+  // remain) and a live build failed at the very first stage with "Model deepseek-v3.2 is not
+  // supported". Flash is the remaining cheaper member of the SAME family — the tier's original
+  // rationale (bounded/fail-safe stages tolerate a cheaper model) unchanged.
+  opencode: { code: "kimi-k2.7-code", reason: "deepseek-v4-pro", "reason-lite": "deepseek-v4-flash", light: "deepseek-v4-flash" },
   anthropic: { code: "claude-opus-4-8", reason: "claude-opus-4-8", "reason-lite": "claude-sonnet-5", light: "claude-haiku-4-5" },
 };
 
