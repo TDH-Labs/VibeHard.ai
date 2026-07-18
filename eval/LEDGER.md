@@ -91,6 +91,22 @@ Format per entry:
   check (open idea: run the depvuln scanner against templates/ in CI).
 - status: fixed (this entry's open idea tracks the missing enforcement)
 
+## platform.node-env-starved-devdeps
+- first seen: 2026-07-17 · /tmp/debug-e2e-11 rounds 2-3 · pomodoro-timer (retroactively: e2e-10's
+  identical loop; e2e-9 round 2's "Cannot find namespace 'JSX'")
+- symptom: clean-env verify failed "Module not found: Can't resolve '@/components/…'" on a
+  workspace whose files were all present; recurred identically across fix rounds because the
+  finding blamed the app ("undeclared dependency or lockfile drift") and the fixer looped on the
+  wrong layer.
+- root cause (reproduced in isolation on the prod box): npm's `omit` config defaults to "dev"
+  whenever NODE_ENV=production is in its environment; the platform's own process runs with
+  NODE_ENV=production and safeToolEnv forwarded it — every gate-spawned npm install/ci silently
+  skipped typescript/tailwindcss/@types, so Next never read tsconfig paths. `npm config get
+  omit` → "dev" on the box was the confirming evidence.
+- fix: gate-check owns its toolchain env — NODE_ENV removed from TOOL_ENV_ALLOW +
+  npm_config_include=dev pinned · 53b7eb2 · verify.test.ts
+- status: fixed
+
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer
 - symptom: "Model deepseek-v3.2 is not supported" at the first LLM call (OpenCode Zen);
