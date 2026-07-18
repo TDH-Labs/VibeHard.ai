@@ -131,6 +131,16 @@ export async function runBenchmark(corpus: BenchCase[], deps: BenchDeps): Promis
         };
       } else {
         const s = await deps.ship(dir);
+        // A downloadable-tool has no hosted URL BY DESIGN — `vibehard ship` gates it (sentinel
+        // stamped) and stops before deployApp with an explicit marker. Gate-green + export-ready
+        // IS that deliverable's "shipped"; demanding a URL+probe would mis-score a perfect run
+        // as ship-failed (caught reviewing run 1's corpus before its case ever executed).
+        if (s.exitCode === 0 && /ready to download/i.test(s.log)) {
+          r = { id: c.id, outcome: "shipped", blockingGates: [], attempts, ticket: null, wallClockMs: now() - started, url: null, probeStatus: null, logTail: s.log.slice(-TAIL) };
+          results.push(r);
+          deps.onCase?.(r);
+          continue;
+        }
         const url = parseShipUrl(s.log);
         if (s.exitCode !== 0 || !url) {
           r = { id: c.id, outcome: "ship-failed", blockingGates: [], attempts, ticket: null, wallClockMs: now() - started, url, probeStatus: null, logTail: s.log.slice(-TAIL) };

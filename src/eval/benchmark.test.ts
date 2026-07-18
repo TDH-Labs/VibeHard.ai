@@ -98,6 +98,15 @@ describe("runBenchmark — build → ship → probe; only a live 2xx URL scores"
     expect(r.results[0]!.outcome).toBe("ship-failed");
   });
 
+  test("a downloadable-tool that gates green and stops at 'ready to download' → shipped with no URL (its deliverable is the export, not a hosted URL — demanding a probe would mis-score a perfect run as ship-failed)", async () => {
+    const r = await runBenchmark(
+      [{ id: "csv-dedupe-cli", prompt: "a CSV cleaning tool" }],
+      deps({ ship: async () => ({ exitCode: 0, log: "✅ Gates passed — ready to download. (A downloadable tool has no hosted URL to deploy to.)" }) }),
+    );
+    expect(r.results[0]).toMatchObject({ outcome: "shipped", url: null, probeStatus: null });
+    expect(r.shipped).toBe(1);
+  });
+
   test("deployed but the URL never answers 2xx → not-loadable (a dead URL is not a shipped app)", async () => {
     const r = await runBenchmark([CASES[0]!], deps({ probe: async () => 502 }));
     expect(r.results[0]).toMatchObject({ outcome: "not-loadable", probeStatus: 502 });
