@@ -18,7 +18,7 @@
  * (Next.js prefers .js), so every spelling of a template-owned role is owned. app/page.tsx is
  * deliberately NOT owned: it's the feature surface, and workstreams must overwrite it.
  */
-import { existsSync, mkdirSync, readdirSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type TemplateKey = "next-static-client-only" | "next-supabase";
@@ -139,6 +139,39 @@ export function applyTemplate(target: string, tpl: AppTemplate, srcDir: string =
   };
   walk("");
   return copied;
+}
+
+/** Persist which template scaffolded this workspace (.vibehard/template.json) — ground truth
+ *  for every LATER pipeline stage (the fix loop, change/refine) that needs to know, without
+ *  re-deriving the decision (and its env gates) from scratch. */
+export function persistWorkspaceTemplate(target: string, tpl: AppTemplate): void {
+  const dir = join(target, ".vibehard");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "template.json"), JSON.stringify({ key: tpl.key }, null, 2));
+}
+
+/** Which template scaffolded this workspace, if any (null: pre-template build, no marker, or a
+ *  marker naming a template this platform version doesn't know). */
+export function readWorkspaceTemplate(workspacePath: string): AppTemplate | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(workspacePath, ".vibehard", "template.json"), "utf8")) as { key?: string };
+    return raw.key && raw.key in TEMPLATES ? TEMPLATES[raw.key as TemplateKey] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The fix loop's variant of the hands-off block — SOFTER than codegen's, deliberately: the
+ *  fixer must be able to touch a skeleton file when a finding points at it (a themed config
+ *  can genuinely break a build). What it must never do is what e2e-9's fixer did: improvise
+ *  wholesale replacements for boilerplate that is already verified. */
+export function fixerTemplateBlock(tpl: AppTemplate): string {
+  return (
+    `\n\nPROJECT SKELETON IS FROM A VERIFIED TEMPLATE (${tpl.stack}): package.json (pinned dependencies + a real lockfile), tsconfig.json, next.config.mjs, postcss/tailwind configs, app/layout.tsx, app/globals.css, README, Dockerfile` +
+    `${tpl.key === "next-static-client-only" ? ", server.js" : ""} are known-good. ` +
+    `Fix FEATURE code first. Touch a skeleton file ONLY when a finding explicitly points at it — change the minimum, never rewrite it wholesale, never replace it with a variant spelling (no next.config.js, no tailwind.config.js, no pages/ directory), never delete it, never hand-author a lockfile. ` +
+    `Deploy contract: the platform injects PORT (default 8080) and routes traffic there — the app must listen on process.env.PORT; never pin a different port.`
+  );
 }
 
 /** The system-prompt block telling codegen the skeleton EXISTS and is hands-off. A prompt is a

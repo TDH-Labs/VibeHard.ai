@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TEMPLATES, applyTemplate, isTemplateOwnedPath, pickTemplate, templateBlock, templateDir } from "./template.ts";
+import { TEMPLATES, applyTemplate, fixerTemplateBlock, isTemplateOwnedPath, persistWorkspaceTemplate, pickTemplate, readWorkspaceTemplate, templateBlock, templateDir } from "./template.ts";
 
 describe("pickTemplate — the spec (not the stack string) decides", () => {
   test("clientOnlyStorage → the static client-only template", () => {
@@ -118,6 +118,45 @@ describe("applyTemplate — vendored skeleton into the workspace", () => {
 
   test("the vendored template dirs exist in-repo (templateDir resolution)", () => {
     for (const tpl of Object.values(TEMPLATES)) expect(existsSync(templateDir(tpl.key))).toBe(true);
+  });
+});
+
+describe("workspace template marker — the build's own record, read by later stages", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const dir = (): string => {
+    const d = mkdtempSync(join(tmpdir(), "vibehard-tplmark-"));
+    dirs.push(d);
+    return d;
+  };
+
+  test("persist → read round-trips to the same template", () => {
+    const d = dir();
+    persistWorkspaceTemplate(d, TEMPLATES["next-supabase"]);
+    expect(readWorkspaceTemplate(d)?.key).toBe("next-supabase");
+  });
+
+  test("no marker (a pre-template build) → null; a malformed or unknown-key marker → null, never a throw", () => {
+    expect(readWorkspaceTemplate(dir())).toBeNull();
+    const d = dir();
+    persistWorkspaceTemplate(d, TEMPLATES["next-static-client-only"]);
+    writeFileSync(join(d, ".vibehard", "template.json"), "{not json");
+    expect(readWorkspaceTemplate(d)).toBeNull();
+    writeFileSync(join(d, ".vibehard", "template.json"), JSON.stringify({ key: "future-template" }));
+    expect(readWorkspaceTemplate(d)).toBeNull();
+  });
+});
+
+describe("fixerTemplateBlock — the fix loop's softer hands-off (e2e-9's fixer improvised a whole skeleton)", () => {
+  test("permits minimal finding-directed edits but forbids wholesale rewrites, variant spellings, and a different port", () => {
+    const b = fixerTemplateBlock(TEMPLATES["next-static-client-only"]);
+    expect(b).toContain("ONLY when a finding explicitly points at it");
+    expect(b).toContain("never rewrite it wholesale");
+    expect(b).toContain("no pages/ directory");
+    expect(b).toContain("process.env.PORT");
+    expect(b).toContain("server.js");
   });
 });
 

@@ -46,7 +46,7 @@ import { elaborateSrs, llmSpecifier, renderSrsMarkdown, type Srs } from "./srs/i
 import { architectApp, buildOrder, llmArchitect, renderSadMarkdown, type Architecture } from "./architecture/index.ts";
 import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
-import { applyTemplate, isTemplateOwnedPath, pickTemplate, templateBlock, type AppTemplate } from "./build/template.ts";
+import { applyTemplate, isTemplateOwnedPath, persistWorkspaceTemplate, pickTemplate, templateBlock, type AppTemplate } from "./build/template.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
 import { deployApp } from "./substrate/index.ts";
 import { LocalBuildRunner, Platform, planFor } from "./platform/index.ts";
@@ -401,6 +401,7 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   // deterministic backend below already proved out. A workstream left with no files is skipped.
   if (tpl) {
     const copied = applyTemplate(target, tpl);
+    persistWorkspaceTemplate(target, tpl); // ground truth for the fix loop + change/refine
     console.log(`  ▸ template: ${tpl.key} — ${copied} skeleton file(s) vendored (boilerplate is tested product code, not generated)`);
     systemPrompt += templateBlock(tpl);
     arch = { ...arch, workstreams: arch.workstreams.map((w) => ({ ...w, files: w.files.filter((f) => !isTemplateOwnedPath(f)) })) };

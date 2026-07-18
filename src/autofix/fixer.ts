@@ -11,6 +11,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { VIBEHARD_SYSTEM_PROMPT, PYTHON_SYSTEM_PROMPT, withClientOnlyGuard } from "../engine/bolt/prompt.ts";
+import { fixerTemplateBlock, readWorkspaceTemplate } from "../build/template.ts";
 import type { EngineConfig, Finding, GateVerdict } from "../types.ts";
 import { isBlocking } from "../types.ts";
 import { configForStage } from "../config/models.ts";
@@ -243,7 +244,14 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
       // Fix in the app's OWN language — a Python workspace (requirements.txt/pyproject)
       // gets the Python prompt, so the fixer's edits match the stack it's repairing.
       const usesPython = existsSync(join(workspacePath, "requirements.txt")) || existsSync(join(workspacePath, "pyproject.toml"));
-      const systemPrompt = usesPython ? PYTHON_SYSTEM_PROMPT : withClientOnlyGuard(VIBEHARD_SYSTEM_PROMPT, isClientOnlyStorage(workspacePath));
+      // Template-scaffolded workspace (Phase 1): the fixer runs with NO plan review between it
+      // and the files, which is exactly how e2e-9's fixer improvised a wholesale skeleton
+      // (hand-rolled server.js + Dockerfile guessing the wrong port). Tell it the skeleton is
+      // verified and hands-off-by-default; .vibehard/template.json is the build's own record.
+      const tpl = usesPython ? null : readWorkspaceTemplate(workspacePath);
+      const systemPrompt = usesPython
+        ? PYTHON_SYSTEM_PROMPT
+        : withClientOnlyGuard(VIBEHARD_SYSTEM_PROMPT, isClientOnlyStorage(workspacePath)) + (tpl ? fixerTemplateBlock(tpl) : "");
       const session = await new BoltEngine(liveBoltDriver({ modelFactory: opts.modelFactory, systemPrompt })).startSession(
         workspacePath,
         config,
