@@ -38,7 +38,12 @@ export function crossCheck(spec: Spec, prd: Prd, arch: Architecture): Finding[] 
 
   // 2. A data app must have a workstream that owns the schema/migration — otherwise the
   //    data model (and the RLS the gates require) has nowhere to live. Worse for sensitive.
-  if (spec.storesData && !ownsDataLayer(arch)) {
+  //    clientOnlyStorage is the deliberate exception (2026-07-17, observed on both e2e-9 and
+  //    e2e-11): everything persists in the browser, so there IS no database layer to own —
+  //    firing here contradicts the client-only-app-has-backend check, which BLOCKS the exact
+  //    "fix" this finding suggests. A check pair that disagrees teaches the operator to ignore
+  //    one of them.
+  if (spec.storesData && spec.clientOnlyStorage !== true && !ownsDataLayer(arch)) {
     out.push(
       f(
         "architecture-misses-data-layer",

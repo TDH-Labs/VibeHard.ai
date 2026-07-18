@@ -64,6 +64,12 @@ describe("crossCheck — spec ↔ PRD ↔ architecture consistency", () => {
     expect(crossCheck(nonSensitive, prd({ spec: nonSensitive }), noData).find((x) => x.ruleId === "architecture-misses-data-layer")?.severity).toBe("medium");
   });
 
+  test("clientOnlyStorage → NO data-layer finding (2026-07-17, fired on e2e-9 and e2e-11): the browser IS the storage, and the 'fix' this finding suggests is the exact backend client-only-app-has-backend blocks", () => {
+    const clientOnly = spec({ clientOnlyStorage: true });
+    const noData = arch({ workstreams: [ws("timer", ["hooks/useTimer.ts"], "countdown"), ws("ui", ["app/page.tsx"], "frontend")] });
+    expect(crossCheck(clientOnly, prd({ spec: clientOnly }), noData).map((x) => x.ruleId)).not.toContain("architecture-misses-data-layer");
+  });
+
   test("a workstream that builds a BUY category, with NO evidence the service was adopted → builds-what-should-be-bought (advisory)", () => {
     const p = prd({ buyVsBuild: [{ category: "payments", recommendation: "buy", service: "Stripe", services: ["Stripe"], rationale: "use Stripe" }] });
     const a = arch({ stack: "Next.js + Supabase", workstreams: [ws("db", ["supabase/migrations/1.sql"], "schema"), ws("payments", ["pay.ts"], "build payment processing")] });
