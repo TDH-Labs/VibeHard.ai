@@ -91,6 +91,29 @@ describe("proptest gate — verdict mapping (stub runner)", () => {
     expect(v.status).toBe("block");
     expect(v.findings[0]!.ruleId).toBe("property-violated");
   });
+
+  test("each test FILE runs in its own process, and each failure carries its OWN output tail (e2e-12, held esc-oijrb9: one file's leaked window/localStorage globals failed a LATER file's correct assertions when bun ran the whole dir in one process — every file passed alone; the fixer burned 11 attempts on app behavior that was never broken)", async () => {
+    const dir = workspace();
+    writeApp(dir, "export const clamp=(x:number,lo:number,hi:number)=>Math.min(hi,Math.max(lo,x));");
+    writeFileSync(join(dir, PROPTEST_DIR, "f4.test.ts"), VALID_TEST.replace("F1", "F4"));
+    const calls: string[][] = [];
+    const runner: PropRunner = (cmd) => {
+      calls.push(cmd);
+      const file = cmd[cmd.length - 1]!;
+      // Simulate the live shape: f1 fails WITH its own counterexample; f4 passes in isolation.
+      return file.includes("f1") ? { exitCode: 1, output: "Counterexample: [11, 0]" } : { exitCode: 0, output: "1 pass" };
+    };
+    const v = await propTestGateRun(dir, NOW, runner);
+    // one process per file — never one shared `bun test <dir>` process
+    expect(calls).toHaveLength(2);
+    for (const cmd of calls) expect(cmd[cmd.length - 1]).toMatch(/f[14]\.test\.ts$/);
+    expect(calls.every((c) => !c.includes(PROPTEST_DIR) || c[c.length - 1] !== PROPTEST_DIR)).toBe(true);
+    // only the genuinely failing file blocks, with its own tail
+    expect(v.status).toBe("block");
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]!.file).toContain("f1.test.ts");
+    expect(v.findings[0]!.message).toContain("Counterexample: [11, 0]");
+  });
 });
 
 describe("proptest gate — REAL bun test run (integration)", () => {

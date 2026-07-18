@@ -90,24 +90,20 @@ export function propTestGateRun(projectPath: string, now: string, runner: PropRu
     }
   }
 
-  const run = runner(["bun", "test", PROPTEST_DIR], projectPath, env, PROPTEST_TIMEOUT_MS);
-  if (run.exitCode === 0) return Promise.resolve(verdictOf("proptest", [], now));
-
-  // Attribute failures to requirement(s) via each file's @requirement header. bun test prints
-  // a per-file section header ("path/to/x.test.ts:") followed by its (pass)/(fail) lines —
-  // walk the sections so only files that actually FAILED are attributed. Attribution is
-  // best-effort display; an unattributable failure still blocks via the aggregate finding.
-  const tail = run.output.slice(-1200);
-  const failedFiles = new Set<string>();
-  let currentFile: string | null = null;
-  for (const line of run.output.split("\n")) {
-    const header = /([\w./-]+\.test\.tsx?):?\s*$/.exec(line.trim());
-    if (header) currentFile = header[1] ?? null;
-    if (/^\s*\(fail\)/.test(line) && currentFile) failedFiles.add(currentFile.split("/").pop()!);
-  }
+  // ONE PROCESS PER TEST FILE (root-caused live 2026-07-18 on e2e-12, held as esc-oijrb9):
+  // generated property files install global fakes (window/localStorage), and `bun test <dir>`
+  // runs every file in a single process — so an earlier file's leaked globals fail a LATER
+  // file's correct assertions against a CORRECT app. Observed exactly: f3+f4 together → f4
+  // fails on a counterexample that passes standalone; every file green alone; the auto-fix
+  // loop then burned 11 attempts "fixing" app behavior that was never broken. Generation-time
+  // validation (src/proptest) already validates each file in its own run — the gate must
+  // exercise the same contract it validated. Same assertions, same blocking; only cross-file
+  // interference is removed. Per-file runs also give each finding ITS OWN output tail (the
+  // shared suite tail used to show only the last failure's counterexample).
   for (const name of files) {
-    if (!failedFiles.has(name)) continue;
     const rel = join(PROPTEST_DIR, name);
+    const run = runner(["bun", "test", rel], projectPath, env, PROPTEST_TIMEOUT_MS);
+    if (run.exitCode === 0) continue;
     let reqId: string | null = null;
     try {
       reqId = requirementIdOf(readFileSync(join(projectPath, rel), "utf8"));
@@ -118,12 +114,9 @@ export function propTestGateRun(projectPath: string, now: string, runner: PropRu
       f(
         "property-violated",
         rel,
-        `A property test${reqId ? ` for requirement ${reqId}` : ""} FAILED — the app violates an acceptance criterion it previously satisfied. Fix the app behavior; the test itself is generated from the PRD and read-only. Output tail:\n${tail}`,
+        `A property test${reqId ? ` for requirement ${reqId}` : ""} FAILED — the app violates an acceptance criterion it previously satisfied. Fix the app behavior; the test itself is generated from the PRD and read-only. Output tail:\n${run.output.slice(-1200)}`,
       ),
     );
-  }
-  if (!findings.length) {
-    findings.push(f("property-violated", PROPTEST_DIR, `The property test suite failed (exit ${run.exitCode}). Output tail:\n${tail}`));
   }
   return Promise.resolve(verdictOf("proptest", findings, now));
 }

@@ -107,6 +107,20 @@ Format per entry:
   npm_config_include=dev pinned · 53b7eb2 · verify.test.ts
 - status: fixed
 
+## proptest.cross-file-global-pollution
+- first seen: 2026-07-18 · /tmp/debug-e2e-12 (held esc-oijrb9) · pomodoro-timer
+- symptom: proptest blocked on F2+F4 across 11 fix attempts; the fixer kept "fixing" app behavior
+  that was never broken (verified: the failing counterexample ["",0] passes against the real
+  lib/storage.ts in isolation).
+- root cause (reproduced by pairwise runs on the box): generated property files install global
+  fakes (window/localStorage); `bun test <dir>` runs all files in ONE process, so f3's leaked
+  globals failed any storage property that ran after it — every file green alone, f3+anything red.
+  Generation-time validation runs per-file; the gate ran per-dir — a contract mismatch inside the
+  platform.
+- fix: the proptest gate runs one process per test file (same assertions, same blocking; each
+  finding now carries its own output tail too) · <this commit> · proptest.test.ts
+- status: fixed
+
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer
 - symptom: "Model deepseek-v3.2 is not supported" at the first LLM call (OpenCode Zen);
