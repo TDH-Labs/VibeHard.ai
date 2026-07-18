@@ -320,7 +320,14 @@ export function summarizeBuild(outcome: BuildOutcome, projectPath?: string): Fin
 }
 
 /** A Fly-sandboxed container verify result → findings (EPIC #32a). Mirrors `summarizeBuild`'s
- *  shape: ok → no findings (pass); not ok → one finding carrying the sandbox's log tail. */
+ *  shape: ok → no findings (pass); not ok → one finding carrying the sandbox's log tail.
+ *
+ *  The message STATES THE PORT CONTRACT (e2e-9 root cause, found live 2026-07-13): the sandbox
+ *  routes traffic to the container's internal port (CONTAINER_PORT) and injects PORT at runtime.
+ *  A generated Dockerfile that pinned ENV PORT=3000 booted a perfectly healthy app that no probe
+ *  could ever reach — and because this finding never named the contract, the auto-fix LLM had
+ *  nothing actionable and oscillated for 4 attempts until the build was held. A finding about an
+ *  unreachable app must say where the platform expects it to listen. */
 export function summarizeSandbox(result: SandboxResult): Finding[] {
   if (result.ok) return [];
   return [
@@ -329,7 +336,11 @@ export function summarizeSandbox(result: SandboxResult): Finding[] {
       ruleId: "sandbox-boot-failed",
       severity: "high",
       file: "Dockerfile",
-      message: `sandboxed boot did not serve a healthy response (status ${result.status}) — the container cannot be deployed${result.log ? ` — error: ${result.log.slice(-600)}` : ""}`,
+      message:
+        `sandboxed boot did not serve a healthy response (status ${result.status}) — the container cannot be deployed. ` +
+        `The platform routes traffic to the container's internal port ${CONTAINER_PORT} and injects PORT=${CONTAINER_PORT} at runtime: ` +
+        `the app must listen on process.env.PORT, and the Dockerfile must not pin ENV PORT to a different value or hard-code another port` +
+        `${result.log ? ` — error: ${result.log.slice(-600)}` : ""}`,
     },
   ];
 }
@@ -703,15 +714,28 @@ async function buildContainerImage(projectPath: string, tag: string): Promise<Fi
   };
 }
 
+/** Pure: the docker-run argv for one container probe. PORT is pinned to CONTAINER_PORT (the
+ *  platform's deploy contract — the port mapping targets it); the app's own declared env may
+ *  ALSO contain PORT (synthEnv dummies a declared PORT as "3000"), and docker honors the LAST
+ *  `-e` occurrence — so an app-declared PORT appended after the pin would silently repoint the
+ *  app away from the mapped port and fail every probe (the same mismatch as the e2e-9 sandbox
+ *  502, in the local path). The pin must win: app env is filtered of PORT. */
+export function containerRunArgs(tag: string, name: string, hostPort: number, env: Record<string, string>): string[] {
+  const args = ["docker", "run", "-d", "--name", name, "-p", `${hostPort}:${CONTAINER_PORT}`, "-e", `PORT=${CONTAINER_PORT}`];
+  for (const [k, v] of Object.entries(env)) {
+    if (k === "PORT") continue;
+    args.push("-e", `${k}=${v}`);
+  }
+  args.push(tag);
+  return args;
+}
+
 /** Run the built image once (dummy env — NEVER the host's real secrets), probe it, tear it
  *  down. The container runs the app in its TARGET runtime, so we verify what actually ships. */
 async function probeContainerOnce(tag: string, hostPort: number, env: Record<string, string>): Promise<{ status: number; log: string; cleanShutdown: boolean }> {
   const name = `${tag}-${hostPort}`;
   Bun.spawnSync(["docker", "rm", "-f", name], { stdout: "ignore", stderr: "ignore" }); // clear any stale container
-  const args = ["docker", "run", "-d", "--name", name, "-p", `${hostPort}:${CONTAINER_PORT}`, "-e", `PORT=${CONTAINER_PORT}`];
-  for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
-  args.push(tag);
-  const run = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
+  const run = Bun.spawnSync(containerRunArgs(tag, name, hostPort, env), { stdout: "pipe", stderr: "pipe", timeout: SUBPROCESS_TIMEOUT_MS });
   if ((run.exitCode ?? 1) !== 0) {
     return { status: 0, log: `${run.stderr?.toString() ?? ""}`.trim(), cleanShutdown: true };
   }

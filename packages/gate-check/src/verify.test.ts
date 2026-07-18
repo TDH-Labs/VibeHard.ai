@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  containerRunArgs,
   detectLaunch,
   dockerTag,
   dummyEnvValue,
@@ -386,6 +387,26 @@ describe("summarizeSandbox — a Fly-sandboxed container result → findings (EP
     expect(findings[0]!.severity).toBe("high");
     expect(findings[0]!.ruleId).toBe("sandbox-boot-failed");
     expect(findings[0]!.message).toContain("ECONNREFUSED");
+  });
+
+  test("the failure message states the PORT contract — the e2e-9 502 was unfixable because nothing named it (found live 2026-07-13: a healthy app listening on the Dockerfile's own ENV PORT=3000 while the sandbox routed to 8080; 4 fix attempts oscillated blind)", () => {
+    const findings = summarizeSandbox({ ok: false, status: 502, url: "https://x", log: "app did not serve a healthy response (last status 502)" });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.message).toContain("internal port 8080");
+    expect(findings[0]!.message).toContain("PORT=8080");
+    expect(findings[0]!.message).toContain("process.env.PORT");
+  });
+});
+
+describe("containerRunArgs — the local docker probe's PORT pin must win (e2e-9's port-contract mismatch, local path)", () => {
+  test("pins PORT to the container port and filters an app-declared PORT (docker honors the LAST -e; synthEnv dummies a declared PORT as '3000')", () => {
+    const args = containerRunArgs("img", "img-4201", 4201, { PORT: "3000", SUPABASE_URL: "http://localhost:54321" });
+    expect(args).toContain("PORT=8080");
+    expect(args).not.toContain("PORT=3000");
+    expect(args.filter((a) => a.startsWith("PORT="))).toEqual(["PORT=8080"]); // exactly one PORT, the pinned one
+    expect(args).toContain("SUPABASE_URL=http://localhost:54321"); // the rest of the app env still flows
+    expect(args).toContain("4201:8080"); // mapped to the pinned container port
+    expect(args[args.length - 1]).toBe("img"); // image last, after every -e
   });
 });
 

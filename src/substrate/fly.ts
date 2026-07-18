@@ -104,6 +104,15 @@ export class FlyHostProvider implements HostProvider {
     // H6 fix: never write third-party secrets (STRIPE_SECRET_KEY, etc.) to plaintext fly.toml.
     // Public vars (NEXT_PUBLIC_*, VITE_*, SUPABASE_URL/ANON_KEY) → [env]; secrets → fly secrets set.
     const { publicEnv, secretEnv } = partitionEnv(env);
+    // The deploy contract, enforced (e2e-9 root cause, found live 2026-07-13): this fly.toml routes
+    // ALL external traffic to internal_port, so the app must listen exactly there — and PORT is how
+    // a platform tells an app where to listen. Nothing used to inject it: a generated Dockerfile
+    // that picked its own port (ENV PORT=3000, the Node convention) booted fine but listened where
+    // no traffic would ever arrive — 502 on every probe, unfixable from the app side because the
+    // finding couldn't name the contract. Pinned unconditionally (over any caller value): a PORT
+    // from the app's own .env.example dummies (synthEnv yields "3000") is exactly the value that
+    // recreates the mismatch.
+    publicEnv.PORT = String(this.internalPort);
     const flyTomlPath = join(workspacePath, "fly.toml");
     writeFileSync(flyTomlPath, renderFlyToml(app, this.region, this.internalPort, publicEnv));
     const flyEnv = { FLY_API_TOKEN: this.token };

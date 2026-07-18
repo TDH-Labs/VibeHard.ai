@@ -100,6 +100,32 @@ describe("FlyHostProvider.deploy", () => {
     }
   });
 
+  test("pins PORT to the internal port in [env] — the deploy contract (e2e-9 root cause, found live 2026-07-13: fly.toml routed traffic to internal_port 8080 but nothing ever told the app, so a generated Dockerfile's ENV PORT=3000 booted a healthy app no probe could reach — 502 on every fix attempt)", async () => {
+    const dir = workspaceWithDockerfile();
+    try {
+      const { runner, calls } = capturingRunner();
+      await new FlyHostProvider({ token: "t", runner }).deploy(dir, {}, null);
+      const toml = calls.find((c) => c.cmd.includes("deploy"))!.flyToml ?? "";
+      expect(toml).toContain('PORT = "8080"');
+      expect(toml).toContain("internal_port = 8080"); // …and it matches where traffic is routed
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a caller-supplied PORT is overridden, not honored — synthEnv dummies a declared PORT as '3000', exactly the value that recreates the routed-port mismatch", async () => {
+    const dir = workspaceWithDockerfile();
+    try {
+      const { runner, calls } = capturingRunner();
+      await new FlyHostProvider({ token: "t", runner, internalPort: 8080 }).deploy(dir, { PORT: "3000" }, null);
+      const toml = calls.find((c) => c.cmd.includes("deploy"))!.flyToml ?? "";
+      expect(toml).toContain('PORT = "8080"');
+      expect(toml).not.toContain('"3000"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("reuses a prior hostRef (idempotent redeploy)", async () => {
     const dir = workspaceWithDockerfile();
     try {
