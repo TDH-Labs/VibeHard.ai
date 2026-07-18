@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { formatWithOptions } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { deployGate, runGate } from "./gate/index.ts";
+import { deployGate, FAST_GATES, GATES, runGate } from "./gate/index.ts";
 import { printReport, SUBPROCESS_TIMEOUT_MS } from "@vibehard/gate-check";
 import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
 import { formatBenchReport, runBenchmark, type BenchCase } from "./eval/benchmark.ts";
@@ -538,7 +538,17 @@ export async function runAutoFixAndReport(target: string): Promise<number> {
     // GitHub/Slack adapter lands (§24), this becomes a real availability check.
     const result = await autoFix(target, {
       onStep: (m) => console.log(`  … ${m}`),
-      gate: (p) => runGate(p, undefined, printGateVerdict), // emit each gate's pass/fail live
+      // Two-tier verification, as autoFix was DESIGNED to run (its own defaults): the inner
+      // fix loop iterates against FAST_GATES (verify = cheap in-place build — catches the vast
+      // majority of failures in seconds), and every "pass" is CONFIRMED by the full chain
+      // (real clean-room install/build + the Fly sandbox boot) before it is ever reported.
+      // This call site used to pass only `gate:` with the FULL set, which silently overrode
+      // BOTH tiers — every inner round paid ~15 min of clean-env + sandbox work that the
+      // convergence pass re-proves anyway (measured live, benchmark run 1: a healthy build
+      // spent most of its 95+ minutes in redundant full verifies). The final bar is unchanged:
+      // fullGate must still go green before "gate green" prints, and ship re-gates again.
+      gate: (p) => runGate(p, FAST_GATES, printGateVerdict), // emit each gate's pass/fail live
+      fullGate: (p) => runGate(p, GATES, printGateVerdict),
       humanAvailable: async () => false,
       onRoundComplete: checkpointHook(target),
     });
