@@ -4,12 +4,13 @@
  * chain on a project directory (PROJECT_BRIEF.md §8, §12).
  */
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { formatWithOptions } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, runGate } from "./gate/index.ts";
 import { printReport, SUBPROCESS_TIMEOUT_MS } from "@vibehard/gate-check";
 import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
+import { formatBenchReport, runBenchmark, type BenchCase } from "./eval/benchmark.ts";
 import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
 import { SPECIALTIES } from "./escalation/routing.ts";
@@ -715,6 +716,76 @@ export async function main(argv: string[]): Promise<number> {
     const report = await runEval(corpus, { build: cliBuild(import.meta.path) });
     console.log(formatReport(report));
     return report.successRate === 1 ? 0 : 1;
+  }
+
+  if (cmd === "benchmark") {
+    // The ship-rate benchmark (Phase 2): build → ship → probe each FIXED prompt; the score
+    // (shipped/total, target ≥8/10) is the ONLY progress metric. LIVE runs cost real LLM
+    // tokens + deploys, so it is opt-in, exactly like eval --live.
+    const corpusPath = arg && !arg.startsWith("--") ? resolve(arg) : join(import.meta.dir, "..", "eval", "benchmark-corpus.json");
+    const live = argv.includes("--live") || process.env.VIBEHARD_BENCH_LIVE === "1";
+    if (!existsSync(corpusPath)) {
+      console.error(`benchmark: corpus not found: ${corpusPath}`);
+      return 2;
+    }
+    let corpus: BenchCase[];
+    try {
+      corpus = JSON.parse(readFileSync(corpusPath, "utf8")) as BenchCase[];
+    } catch (e) {
+      console.error(`benchmark: could not parse corpus ${corpusPath}: ${e instanceof Error ? e.message : String(e)}`);
+      return 2;
+    }
+    if (!live) {
+      console.log(`benchmark corpus: ${corpus.length} fixed prompt(s) from ${corpusPath}`);
+      for (const c of corpus) console.log(`  • ${c.id}${c.env ? ` [${Object.entries(c.env).map(([k, v]) => `${k}=${v}`).join(" ")}]` : ""} — ${c.prompt.slice(0, 90)}`);
+      console.log(`\nDry listing only. A live run BUILDS, SHIPS and PROBES every app (hours of wall-clock, real LLM + deploy spend).`);
+      console.log(`Re-run with --live (or VIBEHARD_BENCH_LIVE=1) to measure the ship rate.`);
+      return 0;
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    console.log(`running the LIVE ship-rate benchmark over ${corpus.length} prompt(s) — sequential; expect hours…\n`);
+    const report = await runBenchmark(corpus, {
+      workspaceFor: (id) => join(tmpdir(), `vibehard-bench-${id}-${stamp}`),
+      build: async (c, dir) => {
+        const proc = Bun.spawnSync(["bun", import.meta.path, "build", c.prompt, dir], {
+          env: { ...process.env, ...c.env },
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout: 5_400_000, // 90 min hard cap per build — beyond that it's a hang, not a build
+        });
+        return { exitCode: proc.exitCode ?? 1, log: `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}` };
+      },
+      ship: async (dir) => {
+        const proc = Bun.spawnSync(["bun", import.meta.path, "ship", dir], { env: process.env as Record<string, string>, stdout: "pipe", stderr: "pipe", timeout: 1_800_000 });
+        return { exitCode: proc.exitCode ?? 1, log: `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}` };
+      },
+      probe: async (url) => {
+        // A cold Fly machine can take a few seconds to wake — try briefly before judging.
+        for (let i = 0; i < 6; i++) {
+          try {
+            const res = await fetch(url);
+            if (res.status >= 200 && res.status < 300) return res.status;
+          } catch {
+            /* not up yet */
+          }
+          await Bun.sleep(5000);
+        }
+        try {
+          return (await fetch(url)).status;
+        } catch {
+          return 0;
+        }
+      },
+      onCase: (r) => console.log(`  ${r.outcome === "shipped" ? "✅" : "🛑"} ${r.id} — ${r.outcome}${r.url ? ` · ${r.url}` : ""}${r.blockingGates.length ? ` · blocked by: ${r.blockingGates.join(", ")}` : ""} · ${(r.wallClockMs / 60000).toFixed(1)}m`),
+    });
+    console.log(`\n${formatBenchReport(report)}`);
+    const runsDir = join(import.meta.dir, "..", "eval", "runs");
+    mkdirSync(runsDir, { recursive: true });
+    const runPath = join(runsDir, `${stamp}.json`);
+    writeFileSync(runPath, JSON.stringify(report, null, 2));
+    console.log(`\nrun record → ${runPath}`);
+    console.log(`next: classify every non-shipped case in eval/LEDGER.md (new class → minimal repro → template fix, deterministic check, or new eval case).`);
+    return report.score >= 0.8 ? 0 : 1;
   }
 
   if (cmd === "intake") {

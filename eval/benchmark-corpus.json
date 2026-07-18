@@ -1,0 +1,43 @@
+[
+  {
+    "id": "pomodoro-timer",
+    "prompt": "A simple pomodoro timer web app. Start, pause, and reset a 25 minute timer. Track and display the number of completed sessions today, persisted client-side only (localStorage), no backend needed."
+  },
+  {
+    "id": "bakery-landing",
+    "prompt": "A landing page for my home bakery: what we bake, weekly menu, opening hours, a photo gallery section, and a contact section with our phone and address. No ordering, no accounts — just a beautiful static page."
+  },
+  {
+    "id": "markdown-notes",
+    "prompt": "A markdown notes app that runs entirely in my browser: create, edit, delete and search notes, live markdown preview, everything saved in localStorage. No login, no server."
+  },
+  {
+    "id": "recipe-converter",
+    "prompt": "A cooking unit converter web app: convert between cups, grams, ounces, ml and tablespoons for common ingredients like flour, sugar and butter, with a searchable ingredient list. Client-side only, no backend."
+  },
+  {
+    "id": "private-todo",
+    "prompt": "A simple to-do list app where I can sign in and only see my own tasks"
+  },
+  {
+    "id": "lead-crm",
+    "prompt": "A CRM to track my sales leads with notes and follow-up dates"
+  },
+  {
+    "id": "team-expenses",
+    "prompt": "A team expense tracker where staff submit expenses and an admin approves them"
+  },
+  {
+    "id": "barber-booking",
+    "prompt": "A booking page for my barbershop where customers pick an available time slot"
+  },
+  {
+    "id": "shortlink-api",
+    "prompt": "A URL shortener HTTP API: POST a long URL to get a short code, GET the short code to be redirected, and a JSON endpoint listing my links with click counts.",
+    "env": { "VIBEHARD_LANG": "python" }
+  },
+  {
+    "id": "csv-dedupe-cli",
+    "prompt": "A command-line tool I can run on my own computer that removes duplicate rows from a CSV file and writes the cleaned file next to the original. No web app, no hosting — just a tool I download and run."
+  }
+]
