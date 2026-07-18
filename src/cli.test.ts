@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VERSION, teeToLogFile, checkpointHook, scaffoldConfigs } from "./cli.ts";
+import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs } from "./cli.ts";
 import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
@@ -202,5 +202,47 @@ describe("scaffoldConfigs — deterministic Tailwind/PostCSS boilerplate", () =>
     const d = app({ next: "15" });
     scaffoldConfigs(d);
     expect(existsSync(join(d, "postcss.config.mjs"))).toBe(false);
+  });
+});
+
+describe("missingWorkstreamFiles — the workstream post-condition (e2e-9 root cause, found live 2026-07-13)", () => {
+  // The live failure: 'Project Setup — 7 file(s)' (package.json, next.config.js, tsconfig.json,
+  // tailwind.config.js, postcss.config.js, .gitignore, public/favicon.ico) streamed zero file
+  // actions and no error — streamGeneration returned true having written NOTHING, and every
+  // downstream stage built on the empty skeleton (proptest: "the app has no package.json";
+  // verify: "no launchable entry point"; 45 minutes of fix-loop improvisation → held).
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const dir = (): string => {
+    const d = mkdtempSync(join(tmpdir(), "vibehard-wsfiles-"));
+    dirs.push(d);
+    return d;
+  };
+
+  test("nothing written → EVERY assigned file is missing (the abort signal)", () => {
+    const d = dir();
+    const assigned = ["package.json", "next.config.js", "tsconfig.json", "tailwind.config.js", "postcss.config.js", ".gitignore", "public/favicon.ico"];
+    expect(missingWorkstreamFiles(d, assigned)).toEqual(assigned);
+  });
+
+  test("all assigned files exist → nothing missing, regardless of who wrote them", () => {
+    const d = dir();
+    writeFileSync(join(d, "package.json"), "{}");
+    writeFileSync(join(d, "server.js"), "");
+    expect(missingWorkstreamFiles(d, ["package.json", "server.js"])).toEqual([]);
+  });
+
+  test("partial output → names exactly the absent files (loud, not fatal)", () => {
+    const d = dir();
+    writeFileSync(join(d, "package.json"), "{}");
+    expect(missingWorkstreamFiles(d, ["package.json", "public/favicon.ico"])).toEqual(["public/favicon.ico"]);
+  });
+
+  test("normalizes the engine's path conventions — a leading './' or '/' means the workspace root", () => {
+    const d = dir();
+    writeFileSync(join(d, "package.json"), "{}");
+    expect(missingWorkstreamFiles(d, ["./package.json", "/package.json"])).toEqual([]);
   });
 });

@@ -360,6 +360,15 @@ export function scaffoldConfigs(target: string): void {
   console.log("  ▸ scaffold: wrote a clean postcss.config.mjs (boilerplate is deterministic, not generated)");
 }
 
+/** Pure-ish (fs existence checks): which of a workstream's ASSIGNED files are absent from the
+ *  workspace. The post-condition contract for a generation pass is "after this workstream, its
+ *  planned files exist" — regardless of who wrote them (an earlier tier legitimately satisfies
+ *  it). Paths are normalized the way the engine writes them (a leading "./" or "/" means the
+ *  workspace root — bolt convention, same as containedPath). */
+export function missingWorkstreamFiles(target: string, files: string[]): string[] {
+  return files.filter((f) => !existsSync(join(target, f.replace(/^\.?\/+/, ""))));
+}
+
 async function buildFromArchitecture(target: string, arch: Architecture, provider: string, model: string): Promise<boolean> {
   // Pick the codegen prompt for this architecture's stack (Python/FastAPI → the Python
   // prompt; else the TS/Supabase one). VIBEHARD_LANG=python forces it, for deliberately
@@ -433,13 +442,35 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
   return runTiers(
     buildOrder(arch),
     concurrency,
-    (ws, built) => {
+    async (ws, built) => {
       if (ws.files.length === 0) {
         console.log(`\n  ▸ workstream: ${ws.name} — backend-owned, nothing to generate`);
-        return Promise.resolve(true); // kept in the dependency graph, but the generator already wrote its files
+        return true; // kept in the dependency graph, but the generator already wrote its files
       }
       console.log(`\n  ▸ workstream: ${ws.name} — ${ws.files.length} file(s)`);
-      return streamGeneration(target, workstreamBrief(arch, ws, built.map((w) => w.name)), provider, model, systemPrompt, ws.name);
+      const brief = workstreamBrief(arch, ws, built.map((w) => w.name));
+      // Post-condition, enforced (e2e-9 root cause, found live 2026-07-13): a model response with
+      // no parseable file actions streams zero events and no error — streamGeneration returns true
+      // having written NOTHING. That's how "Project Setup — 7 file(s)" (package.json included)
+      // silently produced an empty skeleton, and every downstream stage built on air: proptest
+      // couldn't install, verify found no entry point, and the fix loop spent 45 minutes
+      // improvising the boilerplate the plan had already assigned. A workstream that produced
+      // NONE of its assigned files failed, whatever the stream said — retry once, then abort
+      // loudly (a build that never happened beats a build the fix loop has to invent).
+      for (let attempt = 1; ; attempt++) {
+        if (!(await streamGeneration(target, brief, provider, model, systemPrompt, ws.name))) return false;
+        const missing = missingWorkstreamFiles(target, ws.files);
+        if (missing.length < ws.files.length) {
+          // Partial is survivable (the gates + fix loop own the final say) — but say so loudly.
+          if (missing.length) console.log(`  ⚠ [${ws.name}] ${missing.length} of ${ws.files.length} planned file(s) not written: ${missing.join(", ")}`);
+          return true;
+        }
+        if (attempt >= 2) {
+          console.error(`  ✗ [${ws.name}] produced NONE of its ${ws.files.length} assigned file(s) in ${attempt} attempts — aborting the build (nothing to gate)`);
+          return false;
+        }
+        console.log(`  ⚠ [${ws.name}] produced none of its ${ws.files.length} assigned file(s) — the model emitted no file actions; retrying once`);
+      }
     },
     (tier) => {
       if (tier.length > 1) console.log(`\n  ▸ tier: ${tier.length} independent workstreams in parallel (≤${concurrency}) — ${tier.map((w) => w.name).join(", ")}`);
