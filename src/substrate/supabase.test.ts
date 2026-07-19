@@ -306,7 +306,7 @@ describe("verifyLiveRls — readiness retry for a just-provisioned project (foun
     const r = await p.verifyLiveRls(h, ["orders"], ["orders"]);
     expect(r.enforced).toBe(false);
     expect(r.inconclusive).toEqual(["orders"]);
-    expect(calls.orders).toBe(8); // bounded — retried the full budget, never more
+    expect(calls.orders).toBe(20); // bounded — retried the full budget, never more
   });
 
   test("a genuine LEAK on the FIRST attempt is recorded immediately — zero retries; retrying a real leak would only waste time, never change the verdict", async () => {

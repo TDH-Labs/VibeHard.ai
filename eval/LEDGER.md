@@ -163,13 +163,21 @@ Format per entry:
   Probing the SAME three tables by hand ~2 minutes later returned a clean 200+[] from all
   three — proving this was transient propagation lag, not a real security gap, and that the app
   was actually secure the whole time.
-- fix: verifyLiveRls retries a genuinely INCONCLUSIVE table (bounded: 8 attempts × 5s) before
-  recording it — a real LEAK or a real DENY is still conclusive on the FIRST attempt and is
-  NEVER retried, so the fail-closed guarantee is unchanged, only the transient-lag false
-  positive is removed. Locked by tests: retry-then-resolves, retry-exhausted-still-fails-closed,
-  and zero retries for both leak and deny.
-- status: fixed, pending live re-verification (re-ship C — the durable record now correctly
-  reuses the already-provisioned project, per platform.ship-never-reuses-backend-across-sandboxes)
+- fix: verifyLiveRls retries a genuinely INCONCLUSIVE table before recording it — a real LEAK or
+  a real DENY is still conclusive on the FIRST attempt and is NEVER retried, so the fail-closed
+  guarantee is unchanged, only the transient-lag false positive is removed. Locked by tests:
+  retry-then-resolves, retry-exhausted-still-fails-closed, zero retries for both leak and deny.
+- SECOND DATA POINT (same day): the first cut (8×5s=35s, tuned to a brand-new project's
+  schema-cache reload) was NOT enough for the very next ship — a REDEPLOY (reuse=true) onto the
+  SAME project after an idle gap hit the identical abort, and the tables were again clean
+  seconds later. Points at a slower path than a cache reload — most likely the project's own
+  compute/API gateway scaling back up from idle (a known free-tier Supabase behavior). Widened
+  to 20 attempts × 10s (~190s ceiling) — still bounded, still zero-cost on the happy path,
+  deliberately generous after being under-estimated twice. Revisit if the benchmark shows this
+  is still too short, or needlessly long.
+- status: fixed (widened), pending live re-verification (re-ship C — the durable record now
+  correctly reuses the already-provisioned project, per
+  platform.ship-never-reuses-backend-across-sandboxes)
 
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer

@@ -63,13 +63,20 @@ export interface SupabaseProviderOptions {
 
 const EMPTY_ENV: SupabaseEnv = { url: "", anonKey: "", serviceKey: "" };
 
-// verifyLiveRls readiness retry (2026-07-19): bounded wait for PostgREST's schema-cache reload on
-// a just-created managed project — see verifyLiveRls's own doc for the live evidence. 8 attempts ×
-// 5s = up to 35s of extra latency, and ONLY when a table is genuinely inconclusive (the happy path
-// pays nothing). Not precision-measured against Supabase's own SLA — a conservative first cut;
-// tighten later if the benchmark (eval/) shows it's short or needlessly long.
-const RLS_READY_ATTEMPTS = 8;
-const RLS_READY_DELAY_MS = 5000;
+// verifyLiveRls readiness retry (2026-07-19, widened the SAME day after a second live data
+// point): bounded wait for PostgREST to become ready to serve a managed project's tables — see
+// verifyLiveRls's own doc for the live evidence. The FIRST cut (8×5s=35s) was measured against a
+// brand-new project's schema-cache reload and fixed that case — but the very next ship (a
+// REDEPLOY, reuse=true, onto the SAME project after a gap of idle minutes) hit the identical
+// "could not prove RLS" abort again, and the tables were STILL clean seconds after the ship gave
+// up. That points at a slower path than a schema-cache nudge — most likely the project's own
+// compute/API gateway scaling back up from idle, which free-tier Supabase projects are known to
+// do and which takes materially longer than a cache reload. 20 attempts × 10s = up to ~190s of
+// extra latency, and ONLY when a table is genuinely inconclusive (the happy path pays nothing).
+// Still not precision-measured against Supabase's own SLA — generous on purpose after being
+// burned twice by an under-estimate; tighten later if the benchmark (eval/) shows it's excessive.
+const RLS_READY_ATTEMPTS = 20;
+const RLS_READY_DELAY_MS = 10000;
 
 export type RlsProbeVerdict = "leak" | "secure" | "inconclusive";
 
