@@ -124,7 +124,14 @@ function envFromProcess(): SupabaseEnv {
 /** Default executor over Bun's native Postgres client. `.simple()` runs the whole
  *  migration (multiple statements: create + enable RLS + policy) in one round-trip. */
 function bunExecutor(url: string): DbExecutor {
-  const db = new SQL(url);
+  // max: 1 (THE BUG THIS CLOSES, found live 2026-07-19, acceptance test prompt C's ship): each
+  // migration is applied as ONE literal "begin; …; commit;" string via .unsafe().simple() below.
+  // Over Bun SQL's default POOLED connection, that raw BEGIN/COMMIT text can legitimately land on
+  // two different physical connections — silently splitting the transaction — so Bun refuses it
+  // outright: "Only use sql.begin, sql.reserved or max: 1". Migrations run one at a time in a
+  // sequential loop (applyMigrations), never concurrently, so pinning this executor to a single
+  // connection is exactly what the guard asks for and costs nothing here.
+  const db = new SQL(url, { max: 1 });
   return {
     exec: async (sql: string) => {
       await db.unsafe(sql).simple();

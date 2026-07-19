@@ -86,6 +86,13 @@ describe("LIVE Tier-0 spike — verifyLiveRls against a real Supabase project", 
       const provider = new SupabaseBackendProvider({ env });
       const handle = { projectRef: "spike" };
 
+      // This call is also the regression coverage for bunExecutor's max:1 fix (found live
+      // 2026-07-19, acceptance test prompt C's ship): applyMigrations wraps each migration in a
+      // literal "begin; …; commit;" string — over a POOLED connection Bun SQL refuses that
+      // outright ("Only use sql.begin, sql.reserved or max: 1"), since the raw BEGIN/COMMIT text
+      // could legitimately land on two different physical connections. This test is the only
+      // place in the suite that exercises the REAL bunExecutor (everything else fakes DbExecutor)
+      // — a regression here would fail exactly like the live ship did.
       const mig = await provider.applyMigrations(handle, [{ id: "probe-setup", sql: SETUP_SQL }], []);
       expect(mig.ok).toBe(true);
 
