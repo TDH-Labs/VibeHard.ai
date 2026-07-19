@@ -27,6 +27,13 @@ export interface DeployInput {
   /** User-provided third-party credentials (Stripe, OAuth, email…) to inject into the running app's
    *  runtime env, alongside the Supabase vars (backlog #5). Never includes Supabase/service keys. */
   appEnv?: Record<string, string>;
+  /** Client-only app (no migrations, no supabase/ dir, no @supabase/* deps — deployApp derives
+   *  this deterministically): skip ALL backend provisioning and deploy the frontend only. THE BUG
+   *  THIS CLOSES (found live 2026-07-19, acceptance re-run A2): a gate-green STATIC app's ship
+   *  aborted at "provisioning backend" — SupabaseManagementClient demanded a management token to
+   *  create a Supabase project the app would never use. Client-only apps became a real class a
+   *  week ago (clientOnlyStorage + the static golden template); the deploy layer never learned. */
+  backendless?: boolean;
 }
 
 export interface SubstrateDeps {
@@ -82,6 +89,17 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
   };
 
   try {
+    // 0. Backendless (client-only) app: nothing to provision, migrate, RLS-probe, or configure —
+    // deploy the frontend and stop. appEnv only; no Supabase vars exist to inject.
+    if (input.backendless) {
+      step("client-only app — no backend to provision; deploying the frontend only");
+      const deployed = await deps.host.deploy(input.workspacePath, { ...(input.appEnv ?? {}) }, record.hostRef);
+      record = { ...record, url: deployed.url, hostRef: deployed.hostRef, status: "live", updatedAt: now() };
+      await deps.records.put(record);
+      step(`live at ${deployed.url}`);
+      return { live: true, url: deployed.url, abortedAt: null, reason: "deployed", record };
+    }
+
     // 1. provision OR reuse the project, in the CUSTOMER's org (idempotent via record)
     step(`provisioning backend (reuse=${Boolean(record.projectRef)})`);
     const { handle, secrets } = await deps.backend.ensureProject(record, input.org);

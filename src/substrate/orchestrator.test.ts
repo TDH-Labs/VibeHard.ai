@@ -160,3 +160,29 @@ describe("destroy", () => {
     expect(await destroy("ghost", deps())).toEqual({ destroyed: false });
   });
 });
+
+describe("backendless (client-only) deploys — found live 2026-07-19, acceptance re-run A2: a gate-green STATIC app's ship aborted demanding a Supabase management token for a project it would never use", () => {
+  test("backendless → the backend provider is NEVER touched; the frontend deploys with appEnv only; outcome live", async () => {
+    let provisioned = 0;
+    const backend = fakeBackend({
+      ensureProject: async () => {
+        provisioned++;
+        throw new Error("must not be called");
+      },
+    });
+    const host = fakeHost();
+    const r = await provisionAndDeploy(await input({ backendless: true, migrations: [], rlsTables: [], appEnv: { STRIPE_KEY: "sk_x" } }), deps({ backend, host }));
+    expect(r).toMatchObject({ live: true, url: "https://app.example.com", abortedAt: null });
+    expect(provisioned).toBe(0);
+    expect(host.lastEnv).toEqual({ STRIPE_KEY: "sk_x" }); // no Supabase vars exist to inject
+    expect(r.record.status).toBe("live");
+    expect(r.record.projectRef ?? null).toBeNull(); // freshRecord initializes null — the point is no project was EVER created
+  });
+
+  test("backendless still refuses without a valid gate sentinel — the skip is AFTER the §11 precondition, never around it", async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const bare = mkdtempSync(join(tmpdir(), "vibehard-nosentinel-"));
+    await expect(provisionAndDeploy(await input({ backendless: true, workspacePath: bare, migrations: [] }), deps())).rejects.toThrow(/sentinel/);
+  });
+});

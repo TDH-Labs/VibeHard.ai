@@ -98,6 +98,22 @@ export interface DeployAppOptions {
   scope?: string; // tenant id the Pg-backed secrets are scoped under
 }
 
+/** Pure-ish (fs reads): does this workspace need a backend at all? A client-only app — no
+ *  migrations, no supabase/ directory, no @supabase/* dependency — has nothing to provision;
+ *  ship deploys the frontend only (orchestrator.ts `backendless`). Deliberately conservative:
+ *  ANY supabase signal → false (provision as before). */
+export function isBackendlessWorkspace(workspacePath: string, migrations: Migration[]): boolean {
+  if (migrations.length > 0) return false;
+  if (existsSync(join(workspacePath, "supabase"))) return false;
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspacePath, "package.json"), "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    if (Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) }).some((d) => d.startsWith("@supabase/"))) return false;
+  } catch {
+    /* unreadable/absent manifest declares no supabase dependency */
+  }
+  return true;
+}
+
 /** A gate-passed app workspace → a live app. Derives migrations + RLS tables, runs the orchestrator. */
 export async function deployApp(workspacePath: string, opts: DeployAppOptions = {}): Promise<DeployOutcome> {
   const app = opts.app ?? basename(workspacePath);
@@ -114,5 +130,5 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   // backlog #5: the app's third-party creds (declared in its .env.example) come in via the process
   // env (the web injects the tenant's saved values; a CLI user exports them) → injected at runtime.
   const appEnv = collectAppEnv(requiredCredentialsForApp(workspacePath), process.env);
-  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, rlsEnabledTables, appEnv }, deps);
+  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, rlsEnabledTables, appEnv, backendless: isBackendlessWorkspace(workspacePath, migrations) }, deps);
 }

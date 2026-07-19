@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultSubstrateDeps, deployApp, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
+import { defaultSubstrateDeps, deployApp, isBackendlessWorkspace, parseMigrations, tablesFromMigrations } from "./deploy-app.ts";
 import { stampSentinel } from "../gate/index.ts";
 import type { DeploymentRecord } from "./types.ts";
 import type { SubstrateDeps } from "./orchestrator.ts";
@@ -219,5 +219,37 @@ describe("defaultSubstrateDeps — records store selection (EPIC #33c)", () => {
     } finally {
       await db.close();
     }
+  });
+});
+
+describe("isBackendlessWorkspace — deterministic 'does this app need a backend at all' (2026-07-19)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const ws = (): string => {
+    const d = mkdtempSync(join(tmpdir(), "vibehard-backendless-"));
+    dirs.push(d);
+    return d;
+  };
+
+  test("the static-template shape (manifest without @supabase, no migrations, no supabase/) → backendless", () => {
+    const d = ws();
+    writeFileSync(join(d, "package.json"), JSON.stringify({ dependencies: { next: "15.5.20", react: "19.0.0" } }));
+    expect(isBackendlessWorkspace(d, [])).toBe(true);
+  });
+
+  test("ANY supabase signal → NOT backendless (conservative): migrations, a supabase/ dir, or an @supabase/* dep", () => {
+    const withMigrations = ws();
+    writeFileSync(join(withMigrations, "package.json"), "{}");
+    expect(isBackendlessWorkspace(withMigrations, [{ id: "0001", sql: "create table t" }])).toBe(false);
+
+    const withDir = ws();
+    mkdirSync(join(withDir, "supabase"), { recursive: true });
+    expect(isBackendlessWorkspace(withDir, [])).toBe(false);
+
+    const withDep = ws();
+    writeFileSync(join(withDep, "package.json"), JSON.stringify({ dependencies: { "@supabase/supabase-js": "2.47.10" } }));
+    expect(isBackendlessWorkspace(withDep, [])).toBe(false);
   });
 });
