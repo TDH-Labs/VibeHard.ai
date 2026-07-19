@@ -10,7 +10,9 @@
 set -e
 cd "$(dirname "$0")/.."
 
-[ -z "$(git status --porcelain)" ] || { echo "release.sh: working tree dirty — commit first" >&2; exit 1; }
+# -uno: TRACKED changes only. The stamp names the committed tree; long-lived untracked scratch
+# (audit notes, design docs) doesn't invalidate a release — uncommitted CODE edits do.
+[ -z "$(git status --porcelain -uno)" ] || { echo "release.sh: uncommitted tracked changes — commit first" >&2; exit 1; }
 
 git rev-parse HEAD > .build-sha
 echo "release: stamping $(cat .build-sha)"
