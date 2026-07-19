@@ -19,7 +19,7 @@ import { VercelHostProvider } from "./vercel.ts";
 import { FlyHostProvider } from "./fly.ts";
 import { provisionAndDeploy, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
 import { PgRecordStore, PgSecretsStore, type Sql } from "../platform/pg-store.ts";
-import type { Migration, RecordStore } from "./types.ts";
+import type { Migration, RecordStore, SecretsStore } from "./types.ts";
 
 /** Read the workspace's Supabase migrations (sorted by filename), each file → one Migration. */
 export function parseMigrations(workspacePath: string): Migration[] {
@@ -77,13 +77,25 @@ export function defaultSubstrateDeps(
      *  given a platform base URL + dispatch token, restoring cross-dispatch durability without
      *  ever handing the sandbox a raw DB connection. */
     records?: RecordStore;
+    /** An explicit SecretsStore override — wins over the sql/file fallback below. THE SEAM THIS
+     *  EXISTS FOR (found live 2026-07-19, three ship attempts in a row, ~9.5 minutes of a fully-
+     *  exhausted RLS retry budget each time): the RECORD-store fix above made projectRef/
+     *  appliedMigrations/hostRef durable, but `ensureProject`'s REUSE path ALSO needs the
+     *  project's full connection (url/anonKey/serviceKey/dbHost/dbPassword) from `secrets` — which
+     *  had the IDENTICAL non-durability defect (LocalEncryptedSecretsStore under
+     *  `~/.vibehard/secrets`, gone on sandbox teardown). On a reuse, that returned null, and
+     *  ensureProject silently fell through to `this.env`'s EMPTY constructor default — every
+     *  live-RLS probe then hit a URL with NO HOST for the entire retry budget; no amount of
+     *  waiting could ever have fixed it. cli.ts now passes an httpSecretsStore
+     *  (secrets-client.ts) here alongside `records`, over the SAME scoped channel. */
+    secrets?: SecretsStore;
   } = {},
 ): SubstrateDeps {
   const stateDir = opts.stateDir ?? join(homedir(), ".vibehard");
   const containerized = !!opts.workspacePath && existsSync(join(opts.workspacePath, "Dockerfile"));
   const passphrase = process.env.VIBEHARD_SECRETS_KEY ?? "";
   const scope = opts.scope ?? opts.appName ?? "default";
-  const secrets = opts.sql ? new PgSecretsStore(opts.sql, passphrase, scope) : new LocalEncryptedSecretsStore(join(stateDir, "secrets"), passphrase);
+  const secrets = opts.secrets ?? (opts.sql ? new PgSecretsStore(opts.sql, passphrase, scope) : new LocalEncryptedSecretsStore(join(stateDir, "secrets"), passphrase));
   const records = opts.records ?? (opts.sql ? new PgRecordStore(opts.sql, scope) : new FileRecordStore(join(stateDir, "deployments")));
   return {
     // Managed mode → auto-CREATE a Supabase project per app (Management API); else adopt the
@@ -109,6 +121,7 @@ export interface DeployAppOptions {
   sql?: Sql; // durable-DB query runner; when set, secrets use PgSecretsStore (EPIC #33b)
   scope?: string; // tenant id the Pg-backed secrets are scoped under
   records?: RecordStore; // see defaultSubstrateDeps' own doc — the sandboxed-ship durability seam
+  secrets?: SecretsStore; // see defaultSubstrateDeps' own doc — the SAME durability seam, one layer deeper
   hostNameSeed?: string; // see DeployInput's own doc — decoupled from `app`/the record-store key
 }
 
@@ -136,7 +149,7 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   const managed = opts.managed ?? process.env.VIBEHARD_MANAGED === "1";
   const deps =
     opts.deps ??
-    defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app, sql: opts.sql, scope: opts.scope, records: opts.records });
+    defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app, sql: opts.sql, scope: opts.scope, records: opts.records, secrets: opts.secrets });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
   const rlsEnabledTables = rlsEnabledTablesFromMigrations(migrations);

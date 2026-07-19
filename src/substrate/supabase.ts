@@ -227,6 +227,21 @@ export class SupabaseBackendProvider implements BackendProvider {
           this.env = { url: stored.url, anonKey: stored.anonKey, serviceKey: stored.serviceKey, dbHost: stored.dbHost, dbPassword: stored.dbPassword };
           return { handle: { projectRef: record.projectRef }, secrets: stored };
         }
+        // THE BUG THIS CLOSES (found live 2026-07-19, acceptance test prompt C, THREE ship
+        // attempts in a row): this used to fall through silently to `this.env` at its EMPTY
+        // constructor default — the record claims a project exists (projectRef set), but with
+        // NOTHING to reconnect to, every downstream probe/query hit a URL with no host, for the
+        // ENTIRE ~190s×3-table retry budget (~9.5 minutes), every single time, before finally
+        // failing closed anyway. Root cause was a non-durable secrets store losing this data
+        // across a sandbox teardown (now fixed — see secrets-client.ts) — but "projectRef known,
+        // secrets missing" is ALWAYS a genuine inconsistency, never a legitimate state, regardless
+        // of what caused it. Fail fast and loud here instead of silently limping forward with a
+        // connection that can never work, so any FUTURE recurrence (a real data-loss bug, a
+        // manual deletion) surfaces in seconds with an actionable message, not in ~10 minutes with
+        // a misleading "could not prove RLS" abort three layers away from the actual cause.
+        throw new Error(
+          `managed reuse: record for "${record.app}" has projectRef "${record.projectRef}" but no connection secrets are stored for it — cannot safely reload the project`,
+        );
       }
       const secrets: BackendSecrets = { url: this.env.url, anonKey: this.env.anonKey, serviceKey: this.env.serviceKey };
       return { handle: { projectRef: record.projectRef }, secrets };

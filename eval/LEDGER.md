@@ -167,17 +167,47 @@ Format per entry:
   a real DENY is still conclusive on the FIRST attempt and is NEVER retried, so the fail-closed
   guarantee is unchanged, only the transient-lag false positive is removed. Locked by tests:
   retry-then-resolves, retry-exhausted-still-fails-closed, zero retries for both leak and deny.
-- SECOND DATA POINT (same day): the first cut (8×5s=35s, tuned to a brand-new project's
-  schema-cache reload) was NOT enough for the very next ship — a REDEPLOY (reuse=true) onto the
-  SAME project after an idle gap hit the identical abort, and the tables were again clean
-  seconds later. Points at a slower path than a cache reload — most likely the project's own
-  compute/API gateway scaling back up from idle (a known free-tier Supabase behavior). Widened
-  to 20 attempts × 10s (~190s ceiling) — still bounded, still zero-cost on the happy path,
-  deliberately generous after being under-estimated twice. Revisit if the benchmark shows this
-  is still too short, or needlessly long.
-- status: fixed (widened), pending live re-verification (re-ship C — the durable record now
-  correctly reuses the already-provisioned project, per
-  platform.ship-never-reuses-backend-across-sandboxes)
+- SECOND DATA POINT (same day) — MISDIAGNOSED: the first cut (8×5s=35s) wasn't enough for the
+  very next ship, so this entry widened it to 20×10s (~190s) on a "slower cold-start" theory.
+  WRONG — see platform.secrets-store-never-reuses-connection-across-sandboxes below for the
+  actual cause, found after a THIRD identical failure whose RLS step took a suspiciously exact
+  ~9.5 minutes (3 tables × the full 190s budget each, EVERY attempt inconclusive — a signature
+  of a structurally broken probe, not a real-but-slow one). The retry widening is harmless
+  (bounded, zero-cost on the happy path) but was NOT the fix; kept as a real, if smaller,
+  hardening (a genuine one-time schema-cache nudge on a truly fresh project is still plausible).
+- status: superseded — the retry tolerance stays; the actual root cause is the linked entry
+
+## platform.secrets-store-never-reuses-connection-across-sandboxes
+- first seen: 2026-07-19 · acceptance test prompt C, THIRD identical ship failure in a row (all
+  three: "could not prove RLS for: teams, users, orders") — the actual root cause behind
+  platform.rls-probe-races-postgrest-schema-cache, which had misdiagnosed the first two
+- symptom: the RLS-verify step's wall-clock time was ~9.5 minutes — an exact multiple of 3 tables
+  × the full ~190s retry budget each, meaning EVERY attempt on EVERY table was inconclusive,
+  never once resolving early. That signature (100% failure rate, zero variance) is a structurally
+  broken probe, not a slow-but-real one — a genuine propagation delay would show SOME early
+  successes as things warmed up.
+- root cause: the SAME non-durability defect as
+  platform.ship-never-reuses-backend-across-sandboxes, one layer deeper. That fix made
+  projectRef/appliedMigrations/hostRef durable via httpRecordStore — but ensureProject's REUSE
+  path also needs the project's FULL CONNECTION (url/anonKey/serviceKey/dbHost/dbPassword) from
+  `secretsStore`, which still defaulted to LocalEncryptedSecretsStore under `~/.vibehard/secrets`
+  — gone on sandbox teardown, same as the record store before it. On reuse, `secretsStore.get()`
+  returned null in the fresh sandbox, and `ensureProject` silently fell through to `this.env`'s
+  EMPTY constructor default (`{url:"",anonKey:"",serviceKey:""}`) — every live-RLS probe then hit
+  a URL with literally no host, for the ENTIRE retry budget, no amount of waiting could ever have
+  fixed it. applyMigrations masked this: with every migration already recorded applied (via the
+  WORKING record store), its `todo` list was empty, so it returned success WITHOUT ever touching
+  `this.env`, hiding the broken connection until the RLS step needed it.
+- fix: httpSecretsStore (secrets-client.ts) — the SAME architecture as httpRecordStore, a direct
+  sibling — over a new `/api/internal/backend-secrets` endpoint, same auth posture, same
+  encrypted-at-rest PgSecretsStore newly exposed instead of unused. Wired via the SAME dispatch
+  token already used for records (this data is no more sensitive than what the sandbox already
+  handles in-memory for its OWN app during creation). ALSO hardened the actual decision point:
+  ensureProject's reuse branch now THROWS immediately if a claimed projectRef has no stored
+  secrets — this is ALWAYS a genuine inconsistency, never a legitimate state, so any FUTURE
+  recurrence (a real data-loss bug, a manual deletion) surfaces in seconds with an actionable
+  message instead of ~10 minutes with a misleading "could not prove RLS" abort three layers away.
+- status: fixed, pending live re-verification (re-ship C)
 
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer

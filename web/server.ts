@@ -18,8 +18,8 @@ import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/i
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
 import { authorizeRecordRequest, PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
-import { PgRecordStore } from "../src/platform/pg-store.ts";
-import type { DeploymentRecord } from "../src/substrate/types.ts";
+import { PgRecordStore, PgSecretsStore } from "../src/platform/pg-store.ts";
+import type { BackendSecrets, DeploymentRecord } from "../src/substrate/types.ts";
 import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, readPlatformBuildSha, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
 import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
@@ -864,6 +864,44 @@ const server = Bun.serve({
           return json({ error: "record.app must match the ?app= query param" }, 400);
         }
         await records.put(record as DeploymentRecord);
+        return json({ ok: true });
+      }
+      return json({ error: "method not allowed" }, 405);
+    }
+
+    // build-substrate: the sandboxed `ship`'s ONLY durable read/write of a REUSED backend's
+    // connection secrets (src/substrate/secrets-client.ts) — direct sibling of
+    // deployment-record above; read that route's comment first. THE BUG THIS CLOSES (found live
+    // 2026-07-19, acceptance test prompt C, three ship attempts in a row): the record-store fix
+    // made projectRef/appliedMigrations durable, but ensureProject's REUSE path also needs the
+    // FULL connection (url/anonKey/serviceKey/dbHost/dbPassword) — which had the IDENTICAL
+    // non-durability defect, so every redeploy silently probed an empty '' URL for the entire
+    // live-RLS retry budget (~9.5 minutes wasted, 3 tables × ~190s each, every single time). Same
+    // auth posture, same encrypted-at-rest store (PgSecretsStore) newly exposed over HTTP instead
+    // of unused by any sandboxed caller.
+    if (path === "/api/internal/backend-secrets") {
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+      const resolved = token ? await dispatchTokenStore.resolve(token) : null;
+      const auth = authorizeRecordRequest(resolved, url.searchParams.get("app"));
+      if (!auth.ok) return json({ error: "not found" }, 404);
+      const secretsStore = new PgSecretsStore(platformDb.sql, process.env.VIBEHARD_SECRETS_KEY ?? "", auth.tenantId);
+      const app = url.searchParams.get("app")!; // authorizeRecordRequest already proved this is non-null and matches the token's own app
+      if (req.method === "GET") return json({ secrets: await secretsStore.get(app) });
+      if (req.method === "DELETE") {
+        await secretsStore.remove(app);
+        return json({ ok: true });
+      }
+      if (req.method === "PUT") {
+        let secrets: unknown;
+        try {
+          ({ secrets } = await req.json());
+        } catch {
+          return json({ error: "invalid request body" }, 400);
+        }
+        if (!secrets || typeof secrets !== "object" || typeof (secrets as BackendSecrets).url !== "string") {
+          return json({ error: "invalid secrets body" }, 400);
+        }
+        await secretsStore.put(app, secrets as BackendSecrets);
         return json({ ok: true });
       }
       return json({ error: "method not allowed" }, 405);

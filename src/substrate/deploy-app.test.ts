@@ -280,6 +280,32 @@ describe("defaultSubstrateDeps — records store selection (EPIC #33c)", () => {
       await db.close();
     }
   });
+
+  test("an explicit `secrets` override ALSO wins over both fallbacks (2026-07-19, the SAME class of bug one layer deeper: ensureProject's reuse path needs the durable CONNECTION, not just the record — a records-only fix left a redeploy reloading an empty '' url/anonKey from the non-durable default secrets store)", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    try {
+      const sql = pgliteSql(db);
+      await ensurePlatformSchema(sql);
+      await ensureSubstrateSchema(sql);
+      let gets = 0;
+      const custom = {
+        name: "custom",
+        get: async () => {
+          gets++;
+          return null;
+        },
+        put: async () => "ref",
+        remove: async () => {},
+      };
+      const deps = defaultSubstrateDeps({ sql, scope: "tenant-1", secrets: custom });
+      expect(deps.secrets).toBe(custom);
+      await deps.secrets.get("my-app");
+      expect(gets).toBe(1);
+    } finally {
+      await db.close();
+    }
+  });
 });
 
 describe("isBackendlessWorkspace — deterministic 'does this app need a backend at all' (2026-07-19)", () => {

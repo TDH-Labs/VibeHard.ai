@@ -27,3 +27,4 @@ export { VercelHostProvider, bunRunner, sanitizeProjectName, firstVercelUrl, typ
 export { FlyHostProvider, renderFlyToml, type FlyHostOptions } from "./fly.ts";
 export { deployApp, defaultSubstrateDeps, parseMigrations, tablesFromMigrations, type DeployAppOptions } from "./deploy-app.ts";
 export { httpRecordStore, type HttpRecordStoreOptions } from "./record-client.ts";
+export { httpSecretsStore, type HttpSecretsStoreOptions } from "./secrets-client.ts";

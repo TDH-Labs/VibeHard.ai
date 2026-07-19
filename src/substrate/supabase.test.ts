@@ -113,6 +113,15 @@ describe("SupabaseBackendProvider — managed mode (auto-create)", () => {
     expect(seen[0]).toContain("https://newref.supabase.co/rest/v1/notes");
   });
 
+  test("THE BUG THIS CLOSES: a claimed projectRef with NO stored secrets throws immediately — never silently falls through to an empty connection (found live 2026-07-19: this used to fall through to the EMPTY constructor default, and every downstream probe then spent the ENTIRE ~190s×3-table retry budget — ~9.5 minutes — hitting a URL with no host, on THREE separate ship attempts, before finally failing closed anyway)", async () => {
+    const emptyStore = memStore(); // durable, but genuinely has nothing for this app
+    const failMgmt = { provisionProject: async () => { throw new Error("must not create — this is a reuse"); } } as unknown as SupabaseManagementClient;
+    const provider = new SupabaseBackendProvider({ managed: true, appName: "app", management: failMgmt, secretsStore: emptyStore });
+    await expect(provider.ensureProject({ ...record0, projectRef: "orphaned-ref" }, { orgRef: "o" })).rejects.toThrow(
+      /projectRef "orphaned-ref" but no connection secrets are stored/,
+    );
+  });
+
   test("a record with an existing projectRef is reused (managed mode does NOT re-create)", async () => {
     let created = false;
     const fakeMgmt = {

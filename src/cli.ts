@@ -48,7 +48,7 @@ import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { applyTemplate, isTemplateOwnedPath, persistWorkspaceTemplate, pickTemplate, templateBlock, type AppTemplate } from "./build/template.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
-import { deployApp, httpRecordStore } from "./substrate/index.ts";
+import { deployApp, httpRecordStore, httpSecretsStore } from "./substrate/index.ts";
 import { LocalBuildRunner, Platform, planFor } from "./platform/index.ts";
 import {
   capabilitiesFromSpec,
@@ -1633,15 +1633,23 @@ export async function main(argv: string[]): Promise<number> {
       // VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN: inside a sandbox, ship has no live DB
       // connection and no local state that survives teardown — without a durable records store
       // it can never tell a redeploy from a first deploy, and re-provisions a whole NEW Supabase
-      // project every single time (data loss, orphaned projects, quota exhaustion). Local CLI use
-      // (all four env vars unset) keeps today's exact defaults, unchanged.
+      // project every single time (data loss, orphaned projects, quota exhaustion). The SAME
+      // token also authorizes httpSecretsStore — found live 2026-07-19, THREE ship attempts in a
+      // row: the record fix alone wasn't enough, because ensureProject's REUSE path ALSO needs
+      // the project's connection secrets (url/anonKey/serviceKey/dbHost/dbPassword) to reload —
+      // those had the identical non-durability defect, so every reused-project redeploy silently
+      // probed an empty '' URL for the ENTIRE live-RLS retry budget (~9.5 minutes, every time; no
+      // amount of retrying could ever have fixed a structurally-empty connection). Local CLI use
+      // (all five env vars unset) keeps today's exact defaults, unchanged.
       const recordsBaseUrl = process.env.VIBEHARD_PLATFORM_BASE_URL;
       const recordsToken = process.env.VIBEHARD_RECORD_TOKEN;
       const records = recordsBaseUrl && recordsToken ? httpRecordStore({ baseUrl: recordsBaseUrl, token: recordsToken }) : undefined;
+      const secrets = recordsBaseUrl && recordsToken ? httpSecretsStore({ baseUrl: recordsBaseUrl, token: recordsToken }) : undefined;
       const outcome = await deployApp(dir, {
         app: process.env.VIBEHARD_DISPATCH_APP || undefined,
         hostNameSeed: process.env.VIBEHARD_APP_NAME || undefined,
         records,
+        secrets,
         onStep: (m) => console.log(`   · ${m}`),
       });
       if (outcome.live) {
