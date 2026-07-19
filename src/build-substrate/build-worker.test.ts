@@ -448,4 +448,19 @@ describe("deployAppName — the deploy identity comes from the dispatch, never t
     const cli = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"));
     expect(cli?.opts?.envs?.VIBEHARD_APP_NAME).toBe("accept-a2-bf410b");
   });
+
+  test("VIBEHARD_DISPATCH_APP carries the RAW app id, unconditionally — even when no stopCheckToken/platformBaseUrl are set (2026-07-19: this must be independent of the record-store env gate, since deployApp's record-store KEY needs it regardless of whether httpRecordStore is even wired up; conflating it with VIBEHARD_APP_NAME broke httpRecordStore's PUT the very next ship after the reuse fix landed)", async () => {
+    const sandbox = new FakeSandbox("sbx-dispatch-app", () => 0);
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      // platformBaseUrl deliberately unset — VIBEHARD_DISPATCH_APP must still appear
+    });
+    await worker.dispatch({ tenantId: "bf410bdb-4107", app: "accept-c3", mode: "ship", secretsToken: "tok" });
+    const cli = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"));
+    expect(cli?.opts?.envs?.VIBEHARD_DISPATCH_APP).toBe("accept-c3"); // raw, NOT sanitized/tenant-scoped
+    expect(cli?.opts?.envs?.VIBEHARD_APP_NAME).toBe("accept-c3-bf410b"); // the two are genuinely different values
+  });
 });

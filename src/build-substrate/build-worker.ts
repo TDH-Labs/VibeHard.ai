@@ -326,9 +326,23 @@ export class E2BBuildWorker implements BuildWorker {
       const recordEnv: Record<string, string> = canPing ? { VIBEHARD_PLATFORM_BASE_URL: this.opts.platformBaseUrl!, VIBEHARD_RECORD_TOKEN: d.stopCheckToken! } : {};
       const run = await sandbox.runCommand(`bun ${CLI_PATH} ${cliArgs}`, {
         timeoutMs,
-        // VIBEHARD_APP_NAME: the tenant-scoped deploy identity (see deployAppName) — inside the
-        // sandbox nothing else knows it, and basename-derived names collide globally.
-        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT, VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR, VIBEHARD_APP_NAME: deployAppName(d.app, d.tenantId), ...recordEnv },
+        // VIBEHARD_APP_NAME: the sanitized, tenant-scoped FLY HOST NAME seed (deployAppName) —
+        // inside the sandbox nothing else knows it, and basename-derived names collide globally.
+        // VIBEHARD_DISPATCH_APP: the RAW dispatch-level app id (d.app, e.g. "accept-c3") — this,
+        // NOT VIBEHARD_APP_NAME, must be the record-store key: it's what the dispatch token
+        // (VIBEHARD_RECORD_TOKEN below) was minted against, and httpRecordStore's PUT is
+        // authorized by matching the two. THE BUG THIS CLOSES (found live 2026-07-19, right
+        // after the reuse fix landed): ship's OWN `app` param was doing double duty as both the
+        // host-name seed AND the record key — passing the sanitized/tenant-scoped name for both
+        // made every record-store PUT 404 (it no longer matched what the token was scoped to).
+        envs: {
+          ...env,
+          VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT,
+          VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR,
+          VIBEHARD_APP_NAME: deployAppName(d.app, d.tenantId),
+          VIBEHARD_DISPATCH_APP: d.app,
+          ...recordEnv,
+        },
         onStdout: tee.onChunk,
         onStderr: tee.onChunk,
       });

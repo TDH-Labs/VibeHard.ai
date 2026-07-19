@@ -117,6 +117,40 @@ describe("deployApp — derives input + runs the orchestrator", () => {
     }
   });
 
+  test("hostNameSeed flows through deployApp → provisionAndDeploy, decoupled from `app` (2026-07-19: cli.ts passes the RAW dispatch app as `app` — the record-store key, matching the dispatch token's scope — and the sanitized/tenant-scoped VIBEHARD_APP_NAME as hostNameSeed, the Fly host seed; conflating them broke httpRecordStore's PUT)", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "dd-hostseed-"));
+    try {
+      await stampSentinel(ws, true);
+      const captured: { hostRef?: string | null } = {};
+      const deps: SubstrateDeps = {
+        backend: {
+          name: "fake",
+          ensureProject: async () => ({ handle: { projectRef: "ref" }, secrets: { url: "u", anonKey: "a", serviceKey: "s" } }),
+          applyMigrations: async () => ({ ok: true, appliedNow: [] }),
+          verifyLiveRls: async () => ({ enforced: true, leakedTables: [], inconclusive: [] }),
+          configureAuth: async () => {},
+          deleteProject: async () => {},
+        },
+        host: {
+          name: "fake",
+          deploy: async (_ws, _env, hostRef) => {
+            captured.hostRef = hostRef;
+            return { url: "https://live.example.com", hostRef: hostRef ?? "hr" };
+          },
+          teardown: async () => {},
+        },
+        secrets: { name: "fake", put: async () => "secret-ref", get: async () => null, remove: async () => {} },
+        records: { get: async () => null, put: async () => {}, remove: async () => {} },
+      };
+      const outcome = await deployApp(ws, { app: "accept-c3", hostNameSeed: "accept-c3-eb9e9b", deps });
+      expect(outcome.live).toBe(true);
+      expect(outcome.record.app).toBe("accept-c3"); // record key = the raw dispatch app
+      expect(captured.hostRef).toBe("accept-c3-eb9e9b"); // host name = the sanitized seed
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test("without the gate sentinel, the orchestrator refuses (defense in depth)", async () => {
     const ws = mkdtempSync(join(tmpdir(), "dd-nopass-"));
     try {

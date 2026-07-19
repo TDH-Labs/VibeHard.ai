@@ -219,4 +219,31 @@ describe("host name seeding — first deploy uses the APP identity, never the wo
     await provisionAndDeploy(await input({ app: "myapp" }), d);
     expect(seen).toEqual(["myapp", "myapp"]); // second deploy reuses the recorded ref
   });
+
+  test("hostNameSeed, when given, wins over `app` for the HOST name — but `app` still keys the RECORD (2026-07-19, the ship RIGHT after the reuse fix: passing the same sanitized/tenant-scoped value for both broke httpRecordStore's PUT, because the dispatch token was minted against the RAW app id, not the sanitized host name)", async () => {
+    const seen: Array<string | null> = [];
+    const host = fakeHost({
+      deploy: async (_ws, _env, hostRef) => {
+        seen.push(hostRef);
+        return { url: "https://app.example.com", hostRef: hostRef ?? "host-1" };
+      },
+    });
+    const records = memRecords();
+    const r = await provisionAndDeploy(await input({ app: "accept-c3", hostNameSeed: "accept-c3-eb9e9b" }), deps({ host, records }));
+    expect(seen).toEqual(["accept-c3-eb9e9b"]); // the SANITIZED, tenant-scoped seed reached the host
+    expect(r.record.app).toBe("accept-c3"); // the record's own key is still the RAW dispatch id
+    expect(await records.get("accept-c3")).not.toBeNull(); // and that's what it's actually stored under
+  });
+
+  test("hostNameSeed unset → falls back to `app` for the host name (today's exact prior behavior, unchanged)", async () => {
+    const seen: Array<string | null> = [];
+    const host = fakeHost({
+      deploy: async (_ws, _env, hostRef) => {
+        seen.push(hostRef);
+        return { url: "https://app.example.com", hostRef: hostRef ?? "host-1" };
+      },
+    });
+    await provisionAndDeploy(await input({ app: "myapp" }), deps({ host }));
+    expect(seen).toEqual(["myapp"]);
+  });
 });

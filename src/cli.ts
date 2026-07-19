@@ -1623,21 +1623,27 @@ export async function main(argv: string[]): Promise<number> {
     // 2. provision (customer-owned Supabase) → migrate → VERIFY LIVE RLS → deploy (Vercel) → live URL
     console.log("\n── provisioning + deploying ──");
     try {
-      // VIBEHARD_APP_NAME: the dispatcher's tenant-scoped identity for this app (found live
-      // 2026-07-19, acceptance A2 ship: inside a sandbox the workspace is ALWAYS
-      // /home/user/workspace, so the basename-derived Fly app name was literally "workspace" —
-      // a name owned by some other Fly user → `fly deploy` "unauthorized" on every sandbox
-      // ship). Local CLI use keeps the basename default.
-      // VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN (found live 2026-07-19, acceptance test
-      // prompt C): inside a sandbox, ship has no live DB connection and no local state that
-      // survives teardown — without a durable records store it can never tell a redeploy from a
-      // first deploy, and re-provisions a whole NEW Supabase project every single time (data
-      // loss, orphaned projects, quota exhaustion — exactly what happened here). Local CLI use
-      // (these env vars unset) keeps today's file-backed default, unchanged.
+      // VIBEHARD_DISPATCH_APP vs VIBEHARD_APP_NAME (found live 2026-07-19, acceptance test prompt
+      // C, TWO separate incidents back to back): `app` is BOTH the record-store key (must match
+      // what the dispatch token was minted for — a raw, tenant-facing id like "accept-c3") AND,
+      // separately, the seed for the Fly host name (must be sanitized + tenant-scoped, since
+      // every sandbox's workspace dir is literally "/home/user/workspace" — the ORIGINAL
+      // "unauthorized: app already owned" collision). Conflating them into one value broke
+      // whichever role it wasn't computed for; deployApp now takes them as two distinct options.
+      // VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN: inside a sandbox, ship has no live DB
+      // connection and no local state that survives teardown — without a durable records store
+      // it can never tell a redeploy from a first deploy, and re-provisions a whole NEW Supabase
+      // project every single time (data loss, orphaned projects, quota exhaustion). Local CLI use
+      // (all four env vars unset) keeps today's exact defaults, unchanged.
       const recordsBaseUrl = process.env.VIBEHARD_PLATFORM_BASE_URL;
       const recordsToken = process.env.VIBEHARD_RECORD_TOKEN;
       const records = recordsBaseUrl && recordsToken ? httpRecordStore({ baseUrl: recordsBaseUrl, token: recordsToken }) : undefined;
-      const outcome = await deployApp(dir, { app: process.env.VIBEHARD_APP_NAME || undefined, records, onStep: (m) => console.log(`   · ${m}`) });
+      const outcome = await deployApp(dir, {
+        app: process.env.VIBEHARD_DISPATCH_APP || undefined,
+        hostNameSeed: process.env.VIBEHARD_APP_NAME || undefined,
+        records,
+        onStep: (m) => console.log(`   · ${m}`),
+      });
       if (outcome.live) {
         console.log(`\n✅ LIVE → ${outcome.url}`);
         return 0;

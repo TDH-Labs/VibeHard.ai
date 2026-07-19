@@ -34,6 +34,18 @@ export interface DeployInput {
    *  create a Supabase project the app would never use. Client-only apps became a real class a
    *  week ago (clientOnlyStorage + the static golden template); the deploy layer never learned. */
   backendless?: boolean;
+  /** An explicit, pre-sanitized seed for the Fly/host name on a FIRST deploy — decoupled from
+   *  `app` on purpose. Falls back to `app` when unset (today's exact prior behavior). THE BUG
+   *  THIS CLOSES (found live 2026-07-19, acceptance test prompt C, the ship RIGHT after the
+   *  reuse fix): `app` is also the RecordStore key, which MUST match the dispatch token's own
+   *  scope (an unsanitized, tenant-facing id like "accept-c3") for httpRecordStore's PUT to
+   *  authorize — but the Fly host name must be GLOBALLY unique, which inside a sandbox means
+   *  tenant-scoped + sanitized (deployAppName, e.g. "accept-c3-eb9e9b" — every sandbox's
+   *  workspace dir is literally "/home/user/workspace", so an unscoped name collides across
+   *  every tenant). Passing the SAME value for both broke the record-store's own scope check:
+   *  the PUT's ?app= no longer matched what the dispatch token was minted for → 404. `cli.ts`
+   *  now passes the raw dispatch app as `app` and the sanitized name as `hostNameSeed`. */
+  hostNameSeed?: string;
 }
 
 export interface SubstrateDeps {
@@ -106,7 +118,7 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     // deploy the frontend and stop. appEnv only; no Supabase vars exist to inject.
     if (input.backendless) {
       step("client-only app — no backend to provision; deploying the frontend only");
-      const deployed = await deps.host.deploy(input.workspacePath, { ...(input.appEnv ?? {}) }, record.hostRef ?? seedHostRef(input.app));
+      const deployed = await deps.host.deploy(input.workspacePath, { ...(input.appEnv ?? {}) }, record.hostRef ?? seedHostRef(input.hostNameSeed ?? input.app));
       record = { ...record, url: deployed.url, hostRef: deployed.hostRef, status: "live", updatedAt: now() };
       await deps.records.put(record);
       step(`live at ${deployed.url}`);
@@ -165,7 +177,7 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
       VITE_SUPABASE_URL: secrets.url,
       VITE_SUPABASE_ANON_KEY: secrets.anonKey,
     };
-    const deployed = await deps.host.deploy(input.workspacePath, hostEnv, record.hostRef ?? seedHostRef(input.app));
+    const deployed = await deps.host.deploy(input.workspacePath, hostEnv, record.hostRef ?? seedHostRef(input.hostNameSeed ?? input.app));
     record = { ...record, url: deployed.url, hostRef: deployed.hostRef, updatedAt: now() };
     await deps.records.put(record);
 

@@ -109,6 +109,7 @@ export interface DeployAppOptions {
   sql?: Sql; // durable-DB query runner; when set, secrets use PgSecretsStore (EPIC #33b)
   scope?: string; // tenant id the Pg-backed secrets are scoped under
   records?: RecordStore; // see defaultSubstrateDeps' own doc — the sandboxed-ship durability seam
+  hostNameSeed?: string; // see DeployInput's own doc — decoupled from `app`/the record-store key
 }
 
 /** Pure-ish (fs reads): does this workspace need a backend at all? A client-only app — no
@@ -143,5 +144,5 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   // backlog #5: the app's third-party creds (declared in its .env.example) come in via the process
   // env (the web injects the tenant's saved values; a CLI user exports them) → injected at runtime.
   const appEnv = collectAppEnv(requiredCredentialsForApp(workspacePath), process.env);
-  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, rlsEnabledTables, appEnv, backendless: isBackendlessWorkspace(workspacePath, migrations) }, deps);
+  return provisionAndDeploy({ app, org: { orgRef }, workspacePath, migrations, rlsTables, rlsEnabledTables, appEnv, backendless: isBackendlessWorkspace(workspacePath, migrations), hostNameSeed: opts.hostNameSeed }, deps);
 }
