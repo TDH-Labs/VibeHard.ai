@@ -19,7 +19,7 @@ import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type B
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
 import { PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
 import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
-import { E2BBuildWorker, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
+import { E2BBuildWorker, readPlatformBuildSha, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
 import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
 import { localSpawnPipeline, e2bPipeline, type RunPipeline } from "../src/build-substrate/build-dispatcher.ts";
 import { operatorLLMKey, type BuildEnvParts } from "../src/build-substrate/build-env.ts";
@@ -337,6 +337,11 @@ function buildRunPipeline(): RunPipeline {
       fetchEnv: async (token) => (await secretsTokenStore.consume(token)) ?? {},
       templateId: "vibehard-build-worker",
       platformBaseUrl: BASE_URL,
+      // Version handshake (2026-07-18, acceptance test 0/3): refuse to dispatch to a worker
+      // template built from a different commit than this server — the template drifted a week
+      // stale, silently, and every real user build ran old code. readPlatformBuildSha() reads
+      // the image's own baked stamp; scripts/release.sh keeps both images stamped in lockstep.
+      platformSha: readPlatformBuildSha(),
     }),
     buildLogStore,
     mintSecretsToken: (env) => secretsTokenStore.mint(env),

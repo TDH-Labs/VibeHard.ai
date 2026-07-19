@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { E2BBuildWorker, type CreateSandbox, type SandboxHandle, type DispatchOptions } from "./build-worker.ts";
+import { E2BBuildWorker, workerVersionMismatch, type CreateSandbox, type SandboxHandle, type DispatchOptions } from "./build-worker.ts";
 import { InMemoryBuildLogStore } from "./build-log-store.ts";
 import { STOP_EXIT_CODE } from "./stop-signal.ts";
 
@@ -341,5 +341,60 @@ describe("E2BBuildWorker.dispatch — checkpoint-push-then-destroy contract (SPE
     // push.sh was called (and never returned STOP_EXIT_CODE — it doesn't ping at all);
     // checkpoint.sh's own STOP_EXIT_CODE is irrelevant to the FINAL push's own success.
     expect(sandbox.commands.some((c) => c.cmd === "/home/user/push.sh")).toBe(true);
+  });
+});
+
+describe("version handshake — a stale worker template is refused, never silently used (2026-07-18, acceptance test 0/3: the template drifted a week stale and every real user build ran old code)", () => {
+  test("workerVersionMismatch: same sha → proceed; different sha → actionable refusal; unstamped worker → refusal (every pre-handshake template is by definition stale); unstamped platform → check disabled", () => {
+    expect(workerVersionMismatch("abc123", "abc123")).toBeNull();
+    expect(workerVersionMismatch("abc123", "  abc123\n")).toBeNull(); // sandbox cat output has trailing newline
+    expect(workerVersionMismatch("abc123", "def456")).toContain("STALE");
+    expect(workerVersionMismatch("abc123", "def456")).toContain("Republish");
+    expect(workerVersionMismatch("abc123", "")).toContain("no version stamp");
+    expect(workerVersionMismatch(undefined, "anything")).toBeNull();
+    expect(workerVersionMismatch("", "anything")).toBeNull();
+  });
+
+  test("dispatch against a stale worker: refuses BEFORE any workspace work, kills the sandbox (nothing in it to protect), and surfaces the remediation", async () => {
+    const sandbox = new FakeSandbox("sbx-stale", () => 0, (cmd) => (cmd.includes(".build-sha") ? "old-commit-sha\n" : undefined));
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      platformSha: "current-commit-sha",
+    });
+    await expect(worker.dispatch(baseOpts)).rejects.toThrow(/STALE|refusing to dispatch/);
+    expect(sandbox.killed).toBe(true);
+    // the ONLY command run was the stamp read — no pull, no scripts, no cli
+    expect(sandbox.commands).toHaveLength(1);
+    expect(sandbox.commands[0]!.cmd).toContain(".build-sha");
+    expect(sandbox.files.size).toBe(0);
+  });
+
+  test("dispatch against a MATCHING worker proceeds normally through the whole pipeline", async () => {
+    const sandbox = new FakeSandbox("sbx-ok", () => 0, (cmd) => (cmd.includes(".build-sha") ? "same-sha\n" : undefined));
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      platformSha: "same-sha",
+    });
+    const result = await worker.dispatch(baseOpts);
+    expect(result.finalPushOk).toBe(true);
+    expect(sandbox.commands.some((c) => c.cmd.includes("bun src/cli.ts"))).toBe(true);
+  });
+
+  test("no platformSha (dev/tests) → no handshake command at all — behavior unchanged from before the handshake existed", async () => {
+    const sandbox = new FakeSandbox("sbx-dev", () => 0);
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    await worker.dispatch(baseOpts);
+    expect(sandbox.commands.some((c) => c.cmd.includes(".build-sha"))).toBe(false);
   });
 });

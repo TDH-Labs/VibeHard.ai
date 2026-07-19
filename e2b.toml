@@ -1,0 +1,9 @@
+# E2B build-worker template config — `e2b template build` reads this. The pinned template_id
+# UPDATES the existing vibehard-build-worker template in place (the id web/server.ts dispatches
+# to via its name); without the pin a rebuild would mint a brand-new template nothing points at.
+# Republish ONLY via scripts/release.sh so the platform image and this template are always built
+# from the same stamped commit (the dispatch-time version handshake in build-worker.ts enforces
+# the match).
+template_id = "c9iv75vaji3nmn6opx4g"
+dockerfile = "e2b.Dockerfile"
+template_name = "vibehard-build-worker"

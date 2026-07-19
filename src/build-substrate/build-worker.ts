@@ -13,6 +13,8 @@
  * sandbox, given E2B_API_KEY in its own env, created a second sandbox and ran a real command in
  * it. `fetchEnv` below is exactly how that key (and every other tenant secret) reaches here.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { BuildLogStore } from "./build-log-store.ts";
 import type { TigrisWorkspaceStore } from "./workspace-store.ts";
 import { STOP_EXIT_CODE } from "./stop-signal.ts";
@@ -140,6 +142,51 @@ function lineTee(scope: string, store: BuildLogStore): { onChunk: (chunk: string
 
 const CHECKPOINT_PING_PATH = "/api/internal/build-checkpoint-ping";
 
+/** The worker image's version stamp — /app/.build-sha, written by scripts/release.sh at release
+ *  time and baked into BOTH images by their `COPY . .` (the platform Dockerfile and
+ *  e2b.Dockerfile alike). */
+const WORKER_SHA_PATH = "/app/.build-sha";
+
+/** Pure: may a dispatch proceed against a worker reporting `workerSha`? null → proceed; else a
+ *  human-actionable refusal.
+ *
+ *  THE BUG THIS CLOSES (found live 2026-07-18 — acceptance test scored 0/3): the E2B template
+ *  is a full snapshot of the platform, published OUT-OF-BAND from e2b.Dockerfile. It was built
+ *  once (2026-07-11) and never rebuilt through eleven subsequent platform fixes — so every
+ *  build a real user dispatched ran week-old code (Supabase forced onto client-only apps, no
+ *  golden templates, no lockfile, pre-fix gates), and NOTHING compared the worker's version to
+ *  the dispatcher's. Staleness must be impossible to miss silently: the platform refuses to
+ *  hand a build to a worker that can't prove it runs the same commit.
+ *
+ *  No platform stamp → check disabled (dev machines and tests don't stamp — the release script
+ *  does). A stamped platform + an UNstamped worker is a refusal, not a skip: every pre-handshake
+ *  template is by definition stale. */
+export function workerVersionMismatch(platformSha: string | undefined, workerSha: string): string | null {
+  const platform = platformSha?.trim();
+  if (!platform) return null;
+  const worker = workerSha.trim();
+  if (!worker) {
+    return "the E2B worker template has no version stamp — it predates the version handshake and is guaranteed stale. Republish it from the current commit (scripts/release.sh, or: git rev-parse HEAD > .build-sha && npx @e2b/cli template build).";
+  }
+  if (worker !== platform) {
+    return `the E2B worker template is STALE — built from ${worker.slice(0, 12)}, but the platform is running ${platform.slice(0, 12)}; builds dispatched to it would run old code. Republish it from the current commit (scripts/release.sh).`;
+  }
+  return null;
+}
+
+/** This process's own baked stamp (cwd/.build-sha — /app in the deployed image). Absent →
+ *  undefined (handshake disabled; dev machines don't stamp). VIBEHARD_BUILD_SHA overrides for
+ *  ops/tests. */
+export function readPlatformBuildSha(): string | undefined {
+  const env = process.env.VIBEHARD_BUILD_SHA?.trim();
+  if (env) return env;
+  try {
+    return readFileSync(join(process.cwd(), ".build-sha"), "utf8").trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface E2BBuildWorkerOptions {
   createSandbox: CreateSandbox;
   workspaceStore: TigrisWorkspaceStore; // needs .presign() — narrower than the generic WorkspaceStore contract
@@ -162,6 +209,11 @@ export interface E2BBuildWorkerOptions {
    *  module depends on resolve with zero extra wiring (docs/build-substrate/PRD.md spike item 5). */
   templateId?: string;
   timeoutMs?: number;
+  /** The platform's own commit stamp (readPlatformBuildSha()). When set, every dispatch first
+   *  demands the sandbox prove it was built from the SAME commit (workerVersionMismatch) —
+   *  refusing stale workers loudly instead of silently running old code. Unset → handshake
+   *  disabled (dev/tests). */
+  platformSha?: string;
 }
 
 export class E2BBuildWorker implements BuildWorker {
@@ -172,6 +224,27 @@ export class E2BBuildWorker implements BuildWorker {
     const timeoutMs = this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const startedAt = Date.now();
     const sandbox = await this.opts.createSandbox({ templateId: this.opts.templateId, timeoutMs });
+
+    // Version handshake BEFORE any workspace work (see workerVersionMismatch): a stale worker
+    // is refused outright. Killing here is safe — the sandbox holds no workspace state yet, so
+    // the checkpoint-push-then-destroy contract doesn't apply.
+    if (this.opts.platformSha) {
+      let workerSha = "";
+      try {
+        await sandbox.runCommand(`cat ${WORKER_SHA_PATH} 2>/dev/null || true`, {
+          onStdout: (c) => {
+            workerSha += c;
+          },
+        });
+      } catch {
+        /* unreadable → treated as unstamped below */
+      }
+      const mismatch = workerVersionMismatch(this.opts.platformSha, workerSha);
+      if (mismatch) {
+        await sandbox.kill().catch(() => {});
+        throw new Error(`refusing to dispatch build: ${mismatch}`);
+      }
+    }
 
     let finalPushOk = false;
     try {
