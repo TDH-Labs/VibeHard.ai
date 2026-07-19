@@ -311,6 +311,23 @@ function normalizeLayout(target: string): void {
   }
 }
 
+/** The codegen system-prompt block for a build with the deterministic Supabase backend already
+ *  generated. THE BUG THIS CLOSES (found live 2026-07-19, diagnosing the acceptance test's held
+ *  Supabase-backed prompt): this used to only ever say "import the clients from
+ *  '@/lib/supabase/server'" — it never named the ADMIN client's export at all. generate.ts's own
+ *  admin.ts deliberately exports `createAdminClient` (not `createClient`, unlike server.ts and
+ *  client.ts) specifically so an accidental same-name import can't silently grab the wrong
+ *  client — but a codegen workstream that genuinely needs admin access (an invite-code lookup, a
+ *  cross-user role update RLS can't authorize — exactly the pattern a real generated workstream
+ *  described wanting) had NOTHING telling it what to import, and reasonably guessed `createClient`
+ *  by analogy with the other two files, producing `verify:build-failed —
+ *  'createClient' is not exported from '@/lib/supabase/admin'`. The gate + fix loop already
+ *  catches and can repair this class of export mismatch (proven live) — this closes the GAP
+ *  that made the mismatch common in the first place, so fewer builds need that extra round. */
+export function deterministicBackendInstructions(): string {
+  return "\n\nBACKEND + DASHBOARD + SEED ALREADY GENERATED — do NOT rewrite them. The database migrations (supabase/migrations/*), Row-Level Security, the auth route (app/api/auth/signin), the auth bootstrap, the middleware, the Supabase clients (lib/supabase/{client,server,admin}.ts), a landing overview page (app/dashboard/page.tsx), and a demo seed (scripts/seed.ts) ALREADY EXIST and are verified. Do NOT create or modify any of those. Build ONLY the OTHER feature pages + server actions that USE them — for normal, RLS-scoped user features, `import { createClient } from '@/lib/supabase/server'`. For the RARE admin-only path that must bypass RLS (an invite-code lookup, a cross-user role update the requesting user's own row can't authorize) — never for a normal user feature — `import { createAdminClient } from '@/lib/supabase/admin'` (NOT `createClient` — that name is server.ts's export; admin.ts's is `createAdminClient`, deliberately different so an accidental import can't silently grab the wrong client). Read table/column names from supabase/migrations, and link from the existing /dashboard.";
+}
+
 /** Deterministically scaffold the boilerplate the model keeps botching: the Tailwind/PostCSS
  *  config (a duplicated/malformed postcss config held a build this cycle). Boilerplate is
  *  identical every app, so write it in code rather than trust the LLM. Idempotent. */
@@ -429,8 +446,7 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
       generateSeed(target, model);
       const dash = generateDashboard(target, model);
       console.log(`  ▸ experience: generated a demo seed (scripts/seed.ts)${dash.written ? " + an overview dashboard (/dashboard)" : ""}`);
-      systemPrompt +=
-        "\n\nBACKEND + DASHBOARD + SEED ALREADY GENERATED — do NOT rewrite them. The database migrations (supabase/migrations/*), Row-Level Security, the auth route (app/api/auth/signin), the auth bootstrap, the middleware, the Supabase clients (lib/supabase/{client,server,admin}.ts), a landing overview page (app/dashboard/page.tsx), and a demo seed (scripts/seed.ts) ALREADY EXIST and are verified. Do NOT create or modify any of those. Build ONLY the OTHER feature pages + server actions that USE them — import the clients from '@/lib/supabase/server' (RLS-enforced), read table/column names from supabase/migrations, and link from the existing /dashboard.";
+      systemPrompt += deterministicBackendInstructions();
       // The prompt alone doesn't stop a planned `database-schema`/`auth` workstream from re-authoring
       // these — the live run proved codegen wrote COMPETING migrations (00001_initial_schema.sql) that
       // collide with ours. Prune every generated-backend path from the workstreams (by prefix, so a

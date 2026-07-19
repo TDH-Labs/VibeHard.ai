@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs } from "./cli.ts";
+import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs, deterministicBackendInstructions } from "./cli.ts";
 import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
@@ -244,5 +244,30 @@ describe("missingWorkstreamFiles — the workstream post-condition (e2e-9 root c
     const d = dir();
     writeFileSync(join(d, "package.json"), "{}");
     expect(missingWorkstreamFiles(d, ["./package.json", "/package.json"])).toEqual([]);
+  });
+});
+
+describe("deterministicBackendInstructions — codegen must know the admin client's REAL export name (2026-07-19)", () => {
+  test("THE BUG THIS CLOSES: names createAdminClient explicitly, from '@/lib/supabase/admin' — not createClient (that's server.ts's export)", () => {
+    const s = deterministicBackendInstructions();
+    expect(s).toContain("import { createAdminClient } from '@/lib/supabase/admin'");
+    expect(s).toContain("NOT `createClient`");
+  });
+
+  test("still tells codegen the normal, RLS-scoped path (server.ts's createClient) — the fix adds admin guidance, doesn't remove the existing instruction", () => {
+    const s = deterministicBackendInstructions();
+    expect(s).toContain("import { createClient } from '@/lib/supabase/server'");
+  });
+
+  test("frames the admin client as the RARE exception, never a normal-feature default — so codegen doesn't reach for the RLS-bypassing client out of habit", () => {
+    const s = deterministicBackendInstructions();
+    expect(s).toContain("RARE admin-only path");
+    expect(s).toContain("never for a normal user feature");
+  });
+
+  test("still marks the generated backend files hands-off (unchanged from before this fix)", () => {
+    const s = deterministicBackendInstructions();
+    expect(s).toContain("ALREADY GENERATED — do NOT rewrite them");
+    expect(s).toContain("lib/supabase/{client,server,admin}.ts");
   });
 });
