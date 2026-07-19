@@ -58,12 +58,13 @@ describe("assembleBuildEnv — SPEC decision #8 explicit allowlist", () => {
     );
   });
 
-  test("flyApiToken/vibehardSecretsKey/flyOrg/flyRegion are set only when explicitly provided (ship's deploy-time needs, SPEC decision #8)", () => {
+  test("flyApiToken/vibehardSecretsKey/flyOrg/flyRegion/supabaseManagementToken are set only when explicitly provided (ship's deploy-time needs, SPEC decision #8)", () => {
     const empty = assembleBuildEnv({ byoKey: null, integrations: {}, integrationKeyNames: [] });
     expect(empty.FLY_API_TOKEN).toBeUndefined();
     expect(empty.VIBEHARD_SECRETS_KEY).toBeUndefined();
     expect(empty.FLY_ORG).toBeUndefined();
     expect(empty.FLY_REGION).toBeUndefined();
+    expect(empty.SUPABASE_ACCESS_TOKEN).toBeUndefined();
 
     const full = assembleBuildEnv({
       byoKey: null,
@@ -73,11 +74,19 @@ describe("assembleBuildEnv — SPEC decision #8 explicit allowlist", () => {
       vibehardSecretsKey: "master-key-value",
       flyOrg: "personal",
       flyRegion: "iad",
+      supabaseManagementToken: "sbp_management-token",
     });
     expect(full.FLY_API_TOKEN).toBe("fo1_deploy-token");
     expect(full.VIBEHARD_SECRETS_KEY).toBe("master-key-value");
     expect(full.FLY_ORG).toBe("personal");
     expect(full.FLY_REGION).toBe("iad");
+    expect(full.SUPABASE_ACCESS_TOKEN).toBe("sbp_management-token");
+  });
+
+  test("THE BUG THIS CLOSES: every sandboxed build runs VIBEHARD_MANAGED=1 unconditionally, so a ship with no supabaseManagementToken WOULD die inside the sandbox exactly as it did live 2026-07-19 — 'missing SUPABASE_ACCESS_TOKEN (or SUPABASE_PAT)' — even though the platform HOST had SUPABASE_PAT set; nothing forwarded it. This just proves VIBEHARD_MANAGED really is unconditional — the actual forwarding is proven by the test above.", () => {
+    const env = assembleBuildEnv({ byoKey: null, integrations: {}, integrationKeyNames: [] });
+    expect(env.VIBEHARD_MANAGED).toBe("1");
+    expect(env.SUPABASE_ACCESS_TOKEN).toBeUndefined();
   });
 
   test("THE CONTRACT THIS CLOSES: the result never contains anything beyond the explicit allowlist — no ambient process.env leakage", () => {
@@ -88,6 +97,7 @@ describe("assembleBuildEnv — SPEC decision #8 explicit allowlist", () => {
       design: "brutalist",
       flyApiToken: "fo1_deploy-token",
       vibehardSecretsKey: "master-key-value",
+      supabaseManagementToken: "sbp_management-token",
     });
     const allowlist = new Set([
       "VIBEHARD_MANAGED",
@@ -97,6 +107,7 @@ describe("assembleBuildEnv — SPEC decision #8 explicit allowlist", () => {
       "STRIPE_SECRET_KEY",
       "FLY_API_TOKEN",
       "VIBEHARD_SECRETS_KEY",
+      "SUPABASE_ACCESS_TOKEN",
     ]);
     for (const key of Object.keys(env)) expect(allowlist.has(key)).toBe(true);
     // and nothing UNEXPLAINED ever sneaks in, even if the test process's own env has it set —

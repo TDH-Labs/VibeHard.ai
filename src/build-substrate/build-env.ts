@@ -49,6 +49,16 @@ export interface BuildEnvParts {
   vibehardSecretsKey?: string;
   flyOrg?: string;
   flyRegion?: string;
+  /** The Supabase Management API token (SUPABASE_ACCESS_TOKEN / SUPABASE_PAT convention) —
+   *  needed because assembleBuildEnv ALWAYS sets VIBEHARD_MANAGED=1 (every sandboxed build
+   *  auto-provisions a Supabase project per app), and SupabaseManagementClient throws without
+   *  this token. THE BUG THIS CLOSES (found live 2026-07-19, acceptance test prompt C's ship):
+   *  the platform HOST has SUPABASE_PAT set — but nothing forwarded it into the sandbox, so
+   *  every managed-mode ship died "missing SUPABASE_ACCESS_TOKEN (or SUPABASE_PAT)" the moment
+   *  it reached backend provisioning. Same class as flyApiToken/vibehardSecretsKey above
+   *  (both "found live 2026-07-11 the hard way") — an allowlist is only as good as its coverage
+   *  of what ship actually needs, and this field was missing from it. */
+  supabaseManagementToken?: string;
 }
 
 /** The operator's own platform LLM key — same priority order as src/config/models.ts's
@@ -73,5 +83,6 @@ export function assembleBuildEnv(parts: BuildEnvParts): Record<string, string> {
   if (parts.vibehardSecretsKey) env.VIBEHARD_SECRETS_KEY = parts.vibehardSecretsKey;
   if (parts.flyOrg) env.FLY_ORG = parts.flyOrg;
   if (parts.flyRegion) env.FLY_REGION = parts.flyRegion;
+  if (parts.supabaseManagementToken) env.SUPABASE_ACCESS_TOKEN = parts.supabaseManagementToken;
   return env;
 }

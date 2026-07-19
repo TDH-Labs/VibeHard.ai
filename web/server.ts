@@ -1383,6 +1383,7 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
     vibehardSecretsKey: process.env.VIBEHARD_SECRETS_KEY,
     flyOrg: process.env.FLY_ORG,
     flyRegion: process.env.FLY_REGION,
+    supabaseManagementToken: process.env.SUPABASE_ACCESS_TOKEN ?? process.env.SUPABASE_PAT,
   };
   // Pre-flight balance check (found live 2026-07-09: a build died mid-plan when the platform's
   // OpenRouter account ran to $0) — BEFORE any durable "running" state is written below, so a

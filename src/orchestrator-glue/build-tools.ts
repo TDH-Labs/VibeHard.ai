@@ -67,6 +67,10 @@ function chatDispatchEnvParts(): BuildEnvParts {
     vibehardSecretsKey: process.env.VIBEHARD_SECRETS_KEY,
     flyOrg: process.env.FLY_ORG,
     flyRegion: process.env.FLY_REGION,
+    // Found live 2026-07-19 (acceptance test prompt C's chat "ship"): every sandboxed build runs
+    // VIBEHARD_MANAGED=1 (assembleBuildEnv), so `ship` needs this to actually provision a
+    // Supabase project — see build-env.ts's supabaseManagementToken doc for the full story.
+    supabaseManagementToken: process.env.SUPABASE_ACCESS_TOKEN ?? process.env.SUPABASE_PAT,
   };
 }
 
