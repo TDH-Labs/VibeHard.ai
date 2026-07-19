@@ -17,7 +17,9 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync }
 import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/index.ts";
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
-import { PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
+import { authorizeRecordRequest, PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
+import { PgRecordStore } from "../src/platform/pg-store.ts";
+import type { DeploymentRecord } from "../src/substrate/types.ts";
 import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, readPlatformBuildSha, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
 import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
@@ -829,6 +831,42 @@ const server = Bun.serve({
       if (!active || active.app !== resolved.app) return json({ stopRequested: true });
       await buildStore.patchActive(resolved.tenantId, { workerHeartbeatAt: new Date().toISOString() });
       return json({ stopRequested: active.stopRequested === true });
+    }
+
+    // build-substrate: the sandboxed `ship`'s ONLY durable read/write of its own DeploymentRecord
+    // (src/substrate/record-client.ts). THE BUG THIS CLOSES (found live 2026-07-19, acceptance
+    // test prompt C): without this, every sandboxed ship fell back to a local file that never
+    // survives the sandbox's teardown, so it could never tell a redeploy from a first deploy —
+    // it re-provisioned a BRAND NEW Supabase project every single time, silently abandoning the
+    // previous one (data loss) and eventually exhausting the org's project quota. Same auth
+    // posture as build-checkpoint-ping (reusable dispatch token, bearer header here since GET/
+    // DELETE have no body; bad/wrong-app token → bare 404, never 403 — see authorizeRecordRequest).
+    if (path === "/api/internal/deployment-record") {
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+      const resolved = token ? await dispatchTokenStore.resolve(token) : null;
+      const auth = authorizeRecordRequest(resolved, url.searchParams.get("app"));
+      if (!auth.ok) return json({ error: "not found" }, 404);
+      const records = new PgRecordStore(platformDb.sql, auth.tenantId);
+      const app = url.searchParams.get("app")!; // authorizeRecordRequest already proved this is non-null and matches the token's own app
+      if (req.method === "GET") return json({ record: await records.get(app) });
+      if (req.method === "DELETE") {
+        await records.remove(app);
+        return json({ ok: true });
+      }
+      if (req.method === "PUT") {
+        let record: unknown;
+        try {
+          ({ record } = await req.json());
+        } catch {
+          return json({ error: "invalid request body" }, 400);
+        }
+        if (!record || typeof record !== "object" || (record as DeploymentRecord).app !== app) {
+          return json({ error: "record.app must match the ?app= query param" }, 400);
+        }
+        await records.put(record as DeploymentRecord);
+        return json({ ok: true });
+      }
+      return json({ error: "method not allowed" }, 405);
     }
 
     // Public: tells the frontend whether to render Clerk's UI (+ the publishable key, which is

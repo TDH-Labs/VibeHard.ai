@@ -26,3 +26,4 @@ export { SupabaseBackendProvider, refFromUrl, resolveDbUrl, type SupabaseEnv, ty
 export { VercelHostProvider, bunRunner, sanitizeProjectName, firstVercelUrl, type CommandRunner, type CommandResult, type VercelHostOptions } from "./vercel.ts";
 export { FlyHostProvider, renderFlyToml, type FlyHostOptions } from "./fly.ts";
 export { deployApp, defaultSubstrateDeps, parseMigrations, tablesFromMigrations, type DeployAppOptions } from "./deploy-app.ts";
+export { httpRecordStore, type HttpRecordStoreOptions } from "./record-client.ts";

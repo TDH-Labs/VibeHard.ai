@@ -220,6 +220,32 @@ describe("defaultSubstrateDeps — records store selection (EPIC #33c)", () => {
       await db.close();
     }
   });
+
+  test("an explicit `records` override wins over BOTH the sql and file fallback (2026-07-19: cli.ts ship passes httpRecordStore here when sandboxed — see the option's own doc for why the fallbacks alone silently discarded every sandboxed deploy's provisioning state)", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const db = new PGlite();
+    try {
+      const sql = pgliteSql(db);
+      await ensurePlatformSchema(sql);
+      await ensureSubstrateSchema(sql);
+      let gets = 0;
+      const custom = {
+        get: async () => {
+          gets++;
+          return null;
+        },
+        put: async () => {},
+        remove: async () => {},
+      };
+      // sql IS provided (which would normally select PgRecordStore) — records must still win.
+      const deps = defaultSubstrateDeps({ sql, scope: "tenant-1", records: custom });
+      expect(deps.records).toBe(custom);
+      await deps.records.get("my-app");
+      expect(gets).toBe(1);
+    } finally {
+      await db.close();
+    }
+  });
 });
 
 describe("isBackendlessWorkspace — deterministic 'does this app need a backend at all' (2026-07-19)", () => {

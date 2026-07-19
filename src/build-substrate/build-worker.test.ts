@@ -224,6 +224,35 @@ describe("E2BBuildWorker.dispatch — cooperative stop-check ping (build-substra
     expect(sandbox.files.get("/home/user/checkpoint.sh")).not.toContain("build-checkpoint-ping");
   });
 
+  test("no stopCheckToken/platformBaseUrl → the cli command ALSO gets no record-store env — ship falls back to today's non-durable default, unchanged", async () => {
+    const sandbox = new FakeSandbox("sbx-10b");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    await worker.dispatch(baseOpts);
+    const cli = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"))!;
+    expect(cli.opts?.envs?.VIBEHARD_PLATFORM_BASE_URL).toBeUndefined();
+    expect(cli.opts?.envs?.VIBEHARD_RECORD_TOKEN).toBeUndefined();
+  });
+
+  test("both set → the cli command gets VIBEHARD_PLATFORM_BASE_URL + VIBEHARD_RECORD_TOKEN (the SAME reusable dispatch token as the stop-check ping) so ship can reach httpRecordStore (found live 2026-07-19: without this, every sandboxed ship re-provisioned a brand new Supabase project per app instead of reusing the last one)", async () => {
+    const sandbox = new FakeSandbox("sbx-10c");
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+      platformBaseUrl: "https://vibehard.example",
+    });
+    await worker.dispatch({ ...baseOpts, stopCheckToken: "ping-tok-xyz" });
+    const cli = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"))!;
+    expect(cli.opts?.envs?.VIBEHARD_PLATFORM_BASE_URL).toBe("https://vibehard.example");
+    expect(cli.opts?.envs?.VIBEHARD_RECORD_TOKEN).toBe("ping-tok-xyz");
+  });
+
   test("both stopCheckToken and platformBaseUrl set → the checkpoint script pings the platform, token never in the command text", async () => {
     const sandbox = new FakeSandbox("sbx-11");
     const worker = new E2BBuildWorker({

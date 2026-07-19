@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { ensureDispatchTokenSchema, InMemoryDispatchTokenStore, PgDispatchTokenStore, type DispatchTokenStore } from "./dispatch-token-store.ts";
+import { authorizeRecordRequest, ensureDispatchTokenSchema, InMemoryDispatchTokenStore, PgDispatchTokenStore, type DispatchTokenStore } from "./dispatch-token-store.ts";
 import { pgliteSql, type Sql } from "../platform/pg-store.ts";
 
 const dbs: Array<{ close: () => Promise<void> }> = [];
@@ -54,3 +54,21 @@ function contractTests(name: string, makeStore: () => Promise<DispatchTokenStore
 
 contractTests("InMemoryDispatchTokenStore (fake)", async () => new InMemoryDispatchTokenStore());
 contractTests("PgDispatchTokenStore (real pglite)", async () => new PgDispatchTokenStore(await freshSql()));
+
+describe("authorizeRecordRequest — /api/internal/deployment-record's scope enforcement (2026-07-19)", () => {
+  test("a resolved token requesting ITS OWN app → authorized, tenantId surfaced", () => {
+    expect(authorizeRecordRequest({ tenantId: "t-1", app: "myapp" }, "myapp")).toEqual({ ok: true, tenantId: "t-1" });
+  });
+
+  test("a resolved token requesting a DIFFERENT app → refused (a stale/copy-pasted token must never touch another app's record)", () => {
+    expect(authorizeRecordRequest({ tenantId: "t-1", app: "myapp" }, "someone-elses-app")).toEqual({ ok: false, status: 404 });
+  });
+
+  test("an unresolved (bad/expired) token → refused, same 404 the checkpoint-ping endpoint uses (never a 403 — that would confirm the app exists)", () => {
+    expect(authorizeRecordRequest(null, "myapp")).toEqual({ ok: false, status: 404 });
+  });
+
+  test("no app named in the request at all → refused", () => {
+    expect(authorizeRecordRequest({ tenantId: "t-1", app: "myapp" }, null)).toEqual({ ok: false, status: 404 });
+  });
+});

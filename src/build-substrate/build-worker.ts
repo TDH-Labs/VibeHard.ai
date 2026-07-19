@@ -317,11 +317,18 @@ export class E2BBuildWorker implements BuildWorker {
 
       const tee = lineTee(scope, this.opts.buildLogStore);
       const cliArgs = [d.mode, ...cliPositionalArgs(d.mode, WORKSPACE_DIR, d.args ?? [])].map(shQuote).join(" ");
+      // VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN (found live 2026-07-19, acceptance test
+      // prompt C): `cli.ts ship` uses these to reach httpRecordStore — the SAME reusable
+      // dispatch token as the checkpoint ping (`canPing` above), reused for a second purpose
+      // (see DispatchTokenStore's own doc: resolving it only ever reveals which (tenantId, app)
+      // it belongs to). Without a durable record store, `ship` can't tell a redeploy from a
+      // first deploy and re-provisions a whole new backend every time — see record-client.ts.
+      const recordEnv: Record<string, string> = canPing ? { VIBEHARD_PLATFORM_BASE_URL: this.opts.platformBaseUrl!, VIBEHARD_RECORD_TOKEN: d.stopCheckToken! } : {};
       const run = await sandbox.runCommand(`bun ${CLI_PATH} ${cliArgs}`, {
         timeoutMs,
         // VIBEHARD_APP_NAME: the tenant-scoped deploy identity (see deployAppName) — inside the
         // sandbox nothing else knows it, and basename-derived names collide globally.
-        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT, VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR, VIBEHARD_APP_NAME: deployAppName(d.app, d.tenantId) },
+        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT, VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR, VIBEHARD_APP_NAME: deployAppName(d.app, d.tenantId), ...recordEnv },
         onStdout: tee.onChunk,
         onStderr: tee.onChunk,
       });

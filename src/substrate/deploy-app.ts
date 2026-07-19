@@ -19,7 +19,7 @@ import { VercelHostProvider } from "./vercel.ts";
 import { FlyHostProvider } from "./fly.ts";
 import { provisionAndDeploy, type DeployOutcome, type SubstrateDeps } from "./orchestrator.ts";
 import { PgRecordStore, PgSecretsStore, type Sql } from "../platform/pg-store.ts";
-import type { Migration } from "./types.ts";
+import type { Migration, RecordStore } from "./types.ts";
 
 /** Read the workspace's Supabase migrations (sorted by filename), each file → one Migration. */
 export function parseMigrations(workspacePath: string): Migration[] {
@@ -65,6 +65,18 @@ export function defaultSubstrateDeps(
     appName?: string;
     sql?: Sql; // durable-DB query runner; when set, records + secrets use the Pg-backed stores
     scope?: string; // tenant id the Pg-backed stores are scoped under (defaults to appName, then "default")
+    /** An explicit RecordStore override — wins over the sql/file fallback below. THE SEAM THIS
+     *  EXISTS FOR (found live 2026-07-19, acceptance test prompt C): `deployApp`'s only real
+     *  caller, `cli.ts ship`, runs as a bare subprocess with no live `sql` connection — on the
+     *  platform host OR (production) inside an ephemeral E2B sandbox. Without this, EVERY
+     *  sandboxed ship fell back to FileRecordStore under `~/.vibehard/deployments`, a path
+     *  outside the workspace the build-worker's checkpoint tars — so it never survived a
+     *  teardown, and every ship of the SAME app silently provisioned a BRAND NEW Supabase
+     *  project instead of reusing the last one (data loss + orphaned projects burning quota).
+     *  cli.ts now passes an httpRecordStore (record-client.ts) here when the sandbox has been
+     *  given a platform base URL + dispatch token, restoring cross-dispatch durability without
+     *  ever handing the sandbox a raw DB connection. */
+    records?: RecordStore;
   } = {},
 ): SubstrateDeps {
   const stateDir = opts.stateDir ?? join(homedir(), ".vibehard");
@@ -72,7 +84,7 @@ export function defaultSubstrateDeps(
   const passphrase = process.env.VIBEHARD_SECRETS_KEY ?? "";
   const scope = opts.scope ?? opts.appName ?? "default";
   const secrets = opts.sql ? new PgSecretsStore(opts.sql, passphrase, scope) : new LocalEncryptedSecretsStore(join(stateDir, "secrets"), passphrase);
-  const records = opts.sql ? new PgRecordStore(opts.sql, scope) : new FileRecordStore(join(stateDir, "deployments"));
+  const records = opts.records ?? (opts.sql ? new PgRecordStore(opts.sql, scope) : new FileRecordStore(join(stateDir, "deployments")));
   return {
     // Managed mode → auto-CREATE a Supabase project per app (Management API); else adopt the
     // project named in the environment (single-project v1). Managed needs no SUPABASE_URL/keys.
@@ -96,6 +108,7 @@ export interface DeployAppOptions {
   managed?: boolean; // force managed (auto-create a project); defaults to the VIBEHARD_MANAGED env flag
   sql?: Sql; // durable-DB query runner; when set, secrets use PgSecretsStore (EPIC #33b)
   scope?: string; // tenant id the Pg-backed secrets are scoped under
+  records?: RecordStore; // see defaultSubstrateDeps' own doc — the sandboxed-ship durability seam
 }
 
 /** Pure-ish (fs reads): does this workspace need a backend at all? A client-only app — no
@@ -122,7 +135,7 @@ export async function deployApp(workspacePath: string, opts: DeployAppOptions = 
   const managed = opts.managed ?? process.env.VIBEHARD_MANAGED === "1";
   const deps =
     opts.deps ??
-    defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app, sql: opts.sql, scope: opts.scope });
+    defaultSubstrateDeps({ stateDir: opts.stateDir, onStep: opts.onStep, workspacePath, managed, appName: app, sql: opts.sql, scope: opts.scope, records: opts.records });
   const migrations = parseMigrations(workspacePath);
   const rlsTables = tablesFromMigrations(migrations);
   const rlsEnabledTables = rlsEnabledTablesFromMigrations(migrations);

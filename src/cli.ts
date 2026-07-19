@@ -48,7 +48,7 @@ import { reviewFrontHalf, llmAdversary } from "./spec-review/index.ts";
 import { workstreamBrief } from "./build/workstream-brief.ts";
 import { applyTemplate, isTemplateOwnedPath, persistWorkspaceTemplate, pickTemplate, templateBlock, type AppTemplate } from "./build/template.ts";
 import { runProdScan } from "./prod-feedback/index.ts";
-import { deployApp } from "./substrate/index.ts";
+import { deployApp, httpRecordStore } from "./substrate/index.ts";
 import { LocalBuildRunner, Platform, planFor } from "./platform/index.ts";
 import {
   capabilitiesFromSpec,
@@ -1628,7 +1628,16 @@ export async function main(argv: string[]): Promise<number> {
       // /home/user/workspace, so the basename-derived Fly app name was literally "workspace" —
       // a name owned by some other Fly user → `fly deploy` "unauthorized" on every sandbox
       // ship). Local CLI use keeps the basename default.
-      const outcome = await deployApp(dir, { app: process.env.VIBEHARD_APP_NAME || undefined, onStep: (m) => console.log(`   · ${m}`) });
+      // VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN (found live 2026-07-19, acceptance test
+      // prompt C): inside a sandbox, ship has no live DB connection and no local state that
+      // survives teardown — without a durable records store it can never tell a redeploy from a
+      // first deploy, and re-provisions a whole NEW Supabase project every single time (data
+      // loss, orphaned projects, quota exhaustion — exactly what happened here). Local CLI use
+      // (these env vars unset) keeps today's file-backed default, unchanged.
+      const recordsBaseUrl = process.env.VIBEHARD_PLATFORM_BASE_URL;
+      const recordsToken = process.env.VIBEHARD_RECORD_TOKEN;
+      const records = recordsBaseUrl && recordsToken ? httpRecordStore({ baseUrl: recordsBaseUrl, token: recordsToken }) : undefined;
+      const outcome = await deployApp(dir, { app: process.env.VIBEHARD_APP_NAME || undefined, records, onStep: (m) => console.log(`   · ${m}`) });
       if (outcome.live) {
         console.log(`\n✅ LIVE → ${outcome.url}`);
         return 0;

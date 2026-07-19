@@ -128,6 +128,30 @@ Format per entry:
   finding now carries its own output tail too) · <this commit> · proptest.test.ts
 - status: fixed
 
+## platform.ship-never-reuses-backend-across-sandboxes
+- first seen: 2026-07-19 · acceptance test prompt C (Supabase lunch tracker), 2nd/3rd ship
+  attempts · production-wide since VIBEHARD_BUILD_WORKER=e2b went live (2026-07-11) — every
+  tenant's every redeploy, not just this session's test builds
+- symptom: repeated ship attempts for the SAME app each showed "provisioning backend
+  (reuse=false)" and created a NEW Supabase project; eventually the org's free-tier 2-project
+  cap was hit: "adamrmatar (2 project limit) ... delete, pause or upgrade."
+- root cause: `cli.ts ship` is `deployApp`'s only caller and runs as a bare subprocess with no
+  live DB connection — on the platform host, or (production) inside a fresh E2B sandbox.
+  Without an explicit `sql`, `defaultSubstrateDeps` falls back to `FileRecordStore` under
+  `~/.vibehard/deployments` — OUTSIDE the workspace directory the build-worker's checkpoint
+  tars — so it never survives a sandbox teardown. Every sandboxed ship, forever, saw no prior
+  record and re-provisioned from scratch: a genuine data-loss/orphaned-infrastructure bug (a
+  redeploy abandons the previous backend and its data), not merely a quota nuisance.
+- fix: httpRecordStore (src/substrate/record-client.ts) — a RecordStore over a new, narrow,
+  tokened `/api/internal/deployment-record` endpoint (mirrors the existing checkpoint-ping
+  pattern exactly: the SAME reusable dispatch token, "bad/wrong-app token → bare 404" posture,
+  never a raw DB connection into the sandbox). E2BBuildWorker.dispatch injects
+  VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN; cli.ts ship constructs the client when
+  present; defaultSubstrateDeps/DeployAppOptions gained a `records` override that wins over the
+  sql/file fallback. Locked by tests at every seam: the HTTP client, the override wiring, the
+  env injection, and the endpoint's pure scope-enforcement (authorizeRecordRequest).
+- status: fixed, pending live re-verification (needs a freed Supabase project slot to re-ship C)
+
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer
 - symptom: "Model deepseek-v3.2 is not supported" at the first LLM call (OpenCode Zen);

@@ -74,3 +74,19 @@ export class InMemoryDispatchTokenStore implements DispatchTokenStore {
     return { tenantId: row.tenantId, app: row.app };
   }
 }
+
+/** Pure: authorize a `/api/internal/deployment-record` request from an already-`resolve()`d
+ *  token against the `app` the request names. THE SCOPE ENFORCEMENT THIS EXISTS FOR: the token
+ *  is reusable and cheap to leak into logs/error messages (by design — "resolving it only ever
+ *  reveals which (tenantId, app) it belongs to"), so the endpoint must still refuse a token
+ *  presented for a DIFFERENT app than it was minted for — a stale or copy-pasted token must
+ *  never read/write another app's deployment record. Same "opaque token IS the credential, no
+ *  session cookie, bad token → bare 404" posture as build-checkpoint-ping (never 403 — a 403
+ *  would confirm the app exists to whoever's probing). */
+export function authorizeRecordRequest(
+  resolved: { tenantId: string; app: string } | null,
+  requestedApp: string | null,
+): { ok: true; tenantId: string } | { ok: false; status: 404 } {
+  if (!resolved || !requestedApp || resolved.app !== requestedApp) return { ok: false, status: 404 };
+  return { ok: true, tenantId: resolved.tenantId };
+}
