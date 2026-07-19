@@ -1623,7 +1623,12 @@ export async function main(argv: string[]): Promise<number> {
     // 2. provision (customer-owned Supabase) → migrate → VERIFY LIVE RLS → deploy (Vercel) → live URL
     console.log("\n── provisioning + deploying ──");
     try {
-      const outcome = await deployApp(dir, { onStep: (m) => console.log(`   · ${m}`) });
+      // VIBEHARD_APP_NAME: the dispatcher's tenant-scoped identity for this app (found live
+      // 2026-07-19, acceptance A2 ship: inside a sandbox the workspace is ALWAYS
+      // /home/user/workspace, so the basename-derived Fly app name was literally "workspace" —
+      // a name owned by some other Fly user → `fly deploy` "unauthorized" on every sandbox
+      // ship). Local CLI use keeps the basename default.
+      const outcome = await deployApp(dir, { app: process.env.VIBEHARD_APP_NAME || undefined, onStep: (m) => console.log(`   · ${m}`) });
       if (outcome.live) {
         console.log(`\n✅ LIVE → ${outcome.url}`);
         return 0;

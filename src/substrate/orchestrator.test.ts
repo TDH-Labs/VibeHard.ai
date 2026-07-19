@@ -76,7 +76,10 @@ describe("provisionAndDeploy — the deterministic sequence", () => {
   test("happy path → live, record marked live, migration recorded, secrets stored", async () => {
     const r = await provisionAndDeploy(await input(), deps());
     expect(r).toMatchObject({ live: true, url: "https://app.example.com", abortedAt: null });
-    expect(r.record).toMatchObject({ status: "live", projectRef: "proj-1", hostRef: "host-1", appliedMigrations: ["0001"], secretsRef: "ref-myapp" });
+    // hostRef is now "myapp" (seeded from the app identity), not fakeHost's own "host-1"
+    // fallback — see seedHostRef: the app name reaches host.deploy on the FIRST call now,
+    // never undefined, so the host provider never has to invent a name itself.
+    expect(r.record).toMatchObject({ status: "live", projectRef: "proj-1", hostRef: "myapp", appliedMigrations: ["0001"], secretsRef: "ref-myapp" });
   });
 
   test("the service-role key NEVER goes into the host env — only url + anon key", async () => {
@@ -184,5 +187,36 @@ describe("backendless (client-only) deploys — found live 2026-07-19, acceptanc
     const { tmpdir } = await import("node:os");
     const bare = mkdtempSync(join(tmpdir(), "vibehard-nosentinel-"));
     await expect(provisionAndDeploy(await input({ backendless: true, workspacePath: bare, migrations: [] }), deps())).rejects.toThrow(/sentinel/);
+  });
+});
+
+describe("host name seeding — first deploy uses the APP identity, never the workspace basename (2026-07-19)", () => {
+  test("no prior hostRef → host.deploy receives the sanitized app name (both paths: backendless and full)", async () => {
+    const seen: Array<string | null> = [];
+    const host = fakeHost({
+      deploy: async (_ws, _env, hostRef) => {
+        seen.push(hostRef);
+        return { url: "https://app.example.com", hostRef: hostRef ?? "host-1" };
+      },
+    });
+    await provisionAndDeploy(await input({ app: "Accept A2!", backendless: true, migrations: [], rlsTables: [] }), deps({ host }));
+    await provisionAndDeploy(await input({ app: "My App" }), deps({ host }));
+    expect(seen).toEqual(["accept-a2", "my-app"]);
+  });
+
+  test("a prior hostRef still wins (idempotent redeploy unchanged)", async () => {
+    const seen: Array<string | null> = [];
+    const host = fakeHost({
+      deploy: async (_ws, _env, hostRef) => {
+        seen.push(hostRef);
+        return { url: "https://app.example.com", hostRef: hostRef ?? "host-1" };
+      },
+    });
+    const records = memRecords();
+    const d = deps({ host, records });
+    const first = await provisionAndDeploy(await input({ app: "myapp" }), d);
+    expect(first.record.hostRef).toBe("myapp");
+    await provisionAndDeploy(await input({ app: "myapp" }), d);
+    expect(seen).toEqual(["myapp", "myapp"]); // second deploy reuses the recorded ref
   });
 });

@@ -67,6 +67,19 @@ function freshRecord(input: DeployInput, now: string): DeploymentRecord {
   };
 }
 
+/** First-deploy host name seed: the APP identity, host-safe (lowercase alnum + dashes, ≤30).
+ *  Never the workspace basename — see the step-6 comment. */
+function seedHostRef(app: string): string {
+  return (
+    app
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 30)
+      .replace(/-+$/, "") || "app"
+  );
+}
+
 export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps): Promise<DeployOutcome> {
   const now = deps.now ?? (() => new Date().toISOString());
   const step = (m: string): void => deps.onStep?.(m);
@@ -93,7 +106,7 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     // deploy the frontend and stop. appEnv only; no Supabase vars exist to inject.
     if (input.backendless) {
       step("client-only app — no backend to provision; deploying the frontend only");
-      const deployed = await deps.host.deploy(input.workspacePath, { ...(input.appEnv ?? {}) }, record.hostRef);
+      const deployed = await deps.host.deploy(input.workspacePath, { ...(input.appEnv ?? {}) }, record.hostRef ?? seedHostRef(input.app));
       record = { ...record, url: deployed.url, hostRef: deployed.hostRef, status: "live", updatedAt: now() };
       await deps.records.put(record);
       step(`live at ${deployed.url}`);
@@ -132,7 +145,11 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
     record = { ...record, secretsRef, updatedAt: now() };
     await deps.records.put(record);
 
-    // 6. deploy the frontend (idempotent on hostRef). Inject url + anon under the canonical
+    // 6. deploy the frontend (idempotent on hostRef; first deploy seeds the host name from the
+    //    APP identity, never the workspace directory basename — in a sandbox that basename is
+    //    always "workspace", a Fly app name owned by someone else entirely; found live
+    //    2026-07-19, acceptance A2's ship died "unauthorized" on exactly that). Inject url +
+    //    anon under the canonical
     //    AND the framework-public names (Next's NEXT_PUBLIC_*, Vite's VITE_*) so the
     //    generated app finds them however it reads them. EVERY value here is url or anon
     //    (public, RLS-gated) — the service-role key is never injected (§16/R6.2).
@@ -148,7 +165,7 @@ export async function provisionAndDeploy(input: DeployInput, deps: SubstrateDeps
       VITE_SUPABASE_URL: secrets.url,
       VITE_SUPABASE_ANON_KEY: secrets.anonKey,
     };
-    const deployed = await deps.host.deploy(input.workspacePath, hostEnv, record.hostRef);
+    const deployed = await deps.host.deploy(input.workspacePath, hostEnv, record.hostRef ?? seedHostRef(input.app));
     record = { ...record, url: deployed.url, hostRef: deployed.hostRef, updatedAt: now() };
     await deps.records.put(record);
 

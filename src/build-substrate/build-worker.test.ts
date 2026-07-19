@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { E2BBuildWorker, workerVersionMismatch, type CreateSandbox, type SandboxHandle, type DispatchOptions } from "./build-worker.ts";
+import { E2BBuildWorker, deployAppName, workerVersionMismatch, type CreateSandbox, type SandboxHandle, type DispatchOptions } from "./build-worker.ts";
 import { InMemoryBuildLogStore } from "./build-log-store.ts";
 import { STOP_EXIT_CODE } from "./stop-signal.ts";
 
@@ -396,5 +396,27 @@ describe("version handshake — a stale worker template is refused, never silent
     });
     await worker.dispatch(baseOpts);
     expect(sandbox.commands.some((c) => c.cmd.includes(".build-sha"))).toBe(false);
+  });
+});
+
+describe("deployAppName — the deploy identity comes from the dispatch, never the filesystem (2026-07-19: every sandboxed ship tried to deploy the Fly app 'workspace' — the basename of /home/user/workspace — owned by another Fly user → unauthorized)", () => {
+  test("tenant-scoped, host-safe, stable", () => {
+    expect(deployAppName("accept-a2", "bf410bdb-4107-46d6-aba3-f49b96955aa8")).toBe("accept-a2-bf410b");
+    expect(deployAppName("My Cool App!", "T-123")).toBe("my-cool-app-t123");
+    expect(deployAppName("a-very-long-application-name-that-keeps-going", "bf410bdb")).toBe("a-very-long-applicat-bf410b");
+    expect(deployAppName("", "")).toBe("app-t");
+  });
+
+  test("the dispatch env carries VIBEHARD_APP_NAME derived from (app, tenant)", async () => {
+    const sandbox = new FakeSandbox("sbx-name", () => 0);
+    const worker = new E2BBuildWorker({
+      createSandbox: fakeCreateSandbox(sandbox),
+      workspaceStore: fakeWorkspaceStore(),
+      buildLogStore: new InMemoryBuildLogStore(),
+      fetchEnv: async () => ({}),
+    });
+    await worker.dispatch({ tenantId: "bf410bdb-4107", app: "accept-a2", mode: "ship", secretsToken: "tok" });
+    const cli = sandbox.commands.find((c) => c.cmd.includes("bun src/cli.ts"));
+    expect(cli?.opts?.envs?.VIBEHARD_APP_NAME).toBe("accept-a2-bf410b");
   });
 });

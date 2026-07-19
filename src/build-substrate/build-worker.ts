@@ -120,6 +120,20 @@ export function cliPositionalArgs(mode: BuildMode, workspaceDir: string, args: s
   return [workspaceDir, ...args];
 }
 
+/** Pure: the tenant-scoped deploy identity for an app, passed into the sandbox as
+ *  VIBEHARD_APP_NAME (cli.ts ship → deployApp → the host provider's app/project name).
+ *  THE BUG THIS CLOSES (found live 2026-07-19, acceptance A2's ship): inside a sandbox the
+ *  workspace path is always /home/user/workspace, and every name-derivation downstream used
+ *  the directory BASENAME — so every sandboxed ship tried to deploy a Fly app literally named
+ *  "workspace" (owned by another Fly user) and died "unauthorized". The name must come from
+ *  the dispatch identity (app + tenant), never the filesystem. Host-safe: lowercase
+ *  alphanumerics + dashes, ≤28 chars (Fly's own limit is ~30; the provider slices further). */
+export function deployAppName(app: string, tenantId: string): string {
+  const base = app.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20).replace(/-+$/, "") || "app";
+  const scope = tenantId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 6) || "t";
+  return `${base}-${scope}`;
+}
+
 /** Buffers partial chunks into complete lines before appending to the durable log — matching
  *  web/server.ts's existing `pump()` line-buffering discipline for the SAME reason: E2B's
  *  onStdout/onStderr deliver arbitrary chunks, not necessarily line-aligned. `flush()` must be
@@ -305,7 +319,9 @@ export class E2BBuildWorker implements BuildWorker {
       const cliArgs = [d.mode, ...cliPositionalArgs(d.mode, WORKSPACE_DIR, d.args ?? [])].map(shQuote).join(" ");
       const run = await sandbox.runCommand(`bun ${CLI_PATH} ${cliArgs}`, {
         timeoutMs,
-        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT, VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR },
+        // VIBEHARD_APP_NAME: the tenant-scoped deploy identity (see deployAppName) — inside the
+        // sandbox nothing else knows it, and basename-derived names collide globally.
+        envs: { ...env, VIBEHARD_CHECKPOINT_CMD: CHECKPOINT_SCRIPT, VIBEHARD_HOST_LOCK_DIR: HOST_LOCK_DIR, VIBEHARD_APP_NAME: deployAppName(d.app, d.tenantId) },
         onStdout: tee.onChunk,
         onStderr: tee.onChunk,
       });
