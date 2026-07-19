@@ -19,8 +19,11 @@ echo "release: stamping $(cat .build-sha)"
 
 fly deploy -a vibehard-platform
 
-# Requires E2B_API_KEY in the environment; reads e2b.toml (pinned template_id → in-place update).
-npx --yes @e2b/cli template build
+# Requires E2B_API_KEY in the environment. `template create` REBUILDS an existing template by
+# name (e2b CLI ≥2.x; the old `template build` verb is deprecated and — trap — exits 0 having
+# done NOTHING but print a banner). CPU/memory must be restated or the rebuild would reset them
+# to defaults (2 vCPU/1GB); 4/4096 matches the live template.
+npx --yes @e2b/cli template create vibehard-build-worker -d e2b.Dockerfile --cpu-count 4 --memory-mb 4096
 
 curl -sf -o /dev/null https://vibehard-platform.fly.dev/api/auth-config && echo "release: health ok"
 echo "release: platform + worker template published from $(cat .build-sha)"
