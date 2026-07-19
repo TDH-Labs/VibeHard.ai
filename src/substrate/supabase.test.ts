@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { refFromUrl, resolveDbUrl, SupabaseBackendProvider, type DbExecutor, type SupabaseEnv } from "./supabase.ts";
+import { probeRlsOnce, refFromUrl, resolveDbUrl, SupabaseBackendProvider, type DbExecutor, type SupabaseEnv } from "./supabase.ts";
 import type { SupabaseManagementClient } from "./supabase-management.ts";
 import type { BackendSecrets, DeploymentRecord, SecretsStore } from "./types.ts";
 
@@ -249,10 +249,80 @@ describe("verifyLiveRls — the live anonymous probe", () => {
   });
   test("transport/network errors FAIL CLOSED (inconclusive ⇒ not enforced)", async () => {
     const throwing = (async () => { throw new Error("network down"); }) as unknown as typeof fetch;
-    const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl: throwing });
+    const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl: throwing, sleepImpl: async () => {} });
     const r = await p.verifyLiveRls(h, ["x"], ["x"]);
     expect(r.enforced).toBe(false);
     expect(r.inconclusive).toEqual(["x"]);
+  });
+});
+
+describe("probeRlsOnce — pure per-probe verdict (2026-07-19)", () => {
+  const fetchOnce = (r: { status: number; body: unknown }) => (async () => ({ ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.body })) as unknown as typeof fetch;
+
+  test("200 + rows → leak; 200 + [] → secure; 401/403 → secure; other status → inconclusive; unexpected 200 shape → inconclusive", async () => {
+    expect(await probeRlsOnce(fetchOnce({ status: 200, body: [{ id: 1 }] }), "u", "k")).toBe("leak");
+    expect(await probeRlsOnce(fetchOnce({ status: 200, body: [] }), "u", "k")).toBe("secure");
+    expect(await probeRlsOnce(fetchOnce({ status: 401, body: {} }), "u", "k")).toBe("secure");
+    expect(await probeRlsOnce(fetchOnce({ status: 403, body: {} }), "u", "k")).toBe("secure");
+    expect(await probeRlsOnce(fetchOnce({ status: 404, body: { message: "not found" } }), "u", "k")).toBe("inconclusive");
+    expect(await probeRlsOnce(fetchOnce({ status: 503, body: {} }), "u", "k")).toBe("inconclusive");
+    expect(await probeRlsOnce(fetchOnce({ status: 200, body: { not: "an array" } }), "u", "k")).toBe("inconclusive");
+  });
+
+  test("a transport error (fetch throws) → inconclusive, never thrown out (fail-closed, not fail-crashed)", async () => {
+    const throwing = (async () => { throw new Error("network down"); }) as unknown as typeof fetch;
+    expect(await probeRlsOnce(throwing, "u", "k")).toBe("inconclusive");
+  });
+});
+
+describe("verifyLiveRls — readiness retry for a just-provisioned project (found live 2026-07-19, acceptance test prompt C: migrations apply over a direct Postgres connection and succeed immediately, but PostgREST — a SEPARATE service — needs a moment to notice brand-new tables; the very same tables returned a clean 200+[] by hand ~2 minutes later, proving this was transient propagation lag, not a real leak)", () => {
+  const h = { projectRef: "abc123" };
+
+  function countingFetch(byTable: Record<string, Array<{ status: number; body: unknown }>>): { fetchImpl: typeof fetch; calls: Record<string, number> } {
+    const calls: Record<string, number> = {};
+    const fetchImpl = (async (url: string) => {
+      const table = new URL(url).pathname.split("/rest/v1/")[1] ?? "";
+      const n = (calls[table] = (calls[table] ?? 0) + 1);
+      const seq = byTable[table] ?? [];
+      const r = seq[Math.min(n - 1, seq.length - 1)] ?? { status: 404, body: { message: "not found" } };
+      return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.body };
+    }) as unknown as typeof fetch;
+    return { fetchImpl, calls };
+  }
+
+  test("inconclusive on early attempts, then resolves secure → NOT recorded as inconclusive (the retry that closes this class of failure)", async () => {
+    const { fetchImpl, calls } = countingFetch({
+      teams: [{ status: 404, body: {} }, { status: 404, body: {} }, { status: 200, body: [] }], // 3rd attempt: PostgREST has caught up
+    });
+    const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl, sleepImpl: async () => {} });
+    const r = await p.verifyLiveRls(h, ["teams"], ["teams"]);
+    expect(r).toEqual({ enforced: true, leakedTables: [], inconclusive: [] });
+    expect(calls.teams).toBe(3); // stopped retrying the moment it got a conclusive answer
+  });
+
+  test("STILL inconclusive after the full retry budget → fail-closed, exactly as before (the guarantee is NOT weakened — it just isn't triggered by a transient readiness gap anymore)", async () => {
+    const { fetchImpl, calls } = countingFetch({ orders: [] }); // every attempt 404s (falls through to the default)
+    const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl, sleepImpl: async () => {} });
+    const r = await p.verifyLiveRls(h, ["orders"], ["orders"]);
+    expect(r.enforced).toBe(false);
+    expect(r.inconclusive).toEqual(["orders"]);
+    expect(calls.orders).toBe(8); // bounded — retried the full budget, never more
+  });
+
+  test("a genuine LEAK on the FIRST attempt is recorded immediately — zero retries; retrying a real leak would only waste time, never change the verdict", async () => {
+    const { fetchImpl, calls } = countingFetch({ secrets: [{ status: 200, body: [{ id: 1 }] }] });
+    const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl, sleepImpl: async () => {} });
+    const r = await p.verifyLiveRls(h, ["secrets"], ["secrets"]);
+    expect(r.leakedTables).toEqual(["secrets"]);
+    expect(calls.secrets).toBe(1);
+  });
+
+  test("a genuine DENY (401/403) on the first attempt is ALSO immediate — zero retries", async () => {
+    const { fetchImpl, calls } = countingFetch({ users: [{ status: 401, body: {} }] });
+    const p = new SupabaseBackendProvider({ env, executorFactory: () => fakeExecutor().exec, fetchImpl, sleepImpl: async () => {} });
+    const r = await p.verifyLiveRls(h, ["users"], ["users"]);
+    expect(r.enforced).toBe(true);
+    expect(calls.users).toBe(1);
   });
 });
 

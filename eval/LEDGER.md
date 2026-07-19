@@ -152,6 +152,25 @@ Format per entry:
   env injection, and the endpoint's pure scope-enforcement (authorizeRecordRequest).
 - status: fixed, pending live re-verification (needs a freed Supabase project slot to re-ship C)
 
+## platform.rls-probe-races-postgrest-schema-cache
+- first seen: 2026-07-19 · acceptance test prompt C, the first ship ever to reach real backend
+  provisioning (a brand-new managed Supabase project, not an adopted pre-existing one)
+- symptom: "deploy aborted at verify-live-rls: live RLS NOT enforced — could not prove RLS for:
+  teams, users, orders (failing closed)" — immediately after migrations applied successfully.
+- root cause (confirmed by hand): migrations run over a DIRECT Postgres connection and were
+  ready instantly; the live-RLS probe goes through PostgREST — a SEPARATE service that needs a
+  moment to pick up brand-new tables (schema-cache reload) right after a project is created.
+  Probing the SAME three tables by hand ~2 minutes later returned a clean 200+[] from all
+  three — proving this was transient propagation lag, not a real security gap, and that the app
+  was actually secure the whole time.
+- fix: verifyLiveRls retries a genuinely INCONCLUSIVE table (bounded: 8 attempts × 5s) before
+  recording it — a real LEAK or a real DENY is still conclusive on the FIRST attempt and is
+  NEVER retried, so the fail-closed guarantee is unchanged, only the transient-lag false
+  positive is removed. Locked by tests: retry-then-resolves, retry-exhausted-still-fails-closed,
+  and zero retries for both leak and deny.
+- status: fixed, pending live re-verification (re-ship C — the durable record now correctly
+  reuses the already-provisioned project, per platform.ship-never-reuses-backend-across-sandboxes)
+
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer
 - symptom: "Model deepseek-v3.2 is not supported" at the first LLM call (OpenCode Zen);

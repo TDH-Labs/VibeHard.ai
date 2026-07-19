@@ -56,9 +56,41 @@ export interface SupabaseProviderOptions {
   management?: SupabaseManagementClient; // injectable (managed mode); defaults to a real client
   orgId?: string; // SUPABASE_ORG_ID — optional; the sole org is auto-discovered otherwise
   secretsStore?: SecretsStore; // managed mode: persist a created project's connection so a redeploy can reload it
+  /** Injectable delay for verifyLiveRls's readiness retry — defaults to a real sleep; tests pass a
+   *  no-op so the retry logic runs instantly. See verifyLiveRls's own doc for why it retries. */
+  sleepImpl?: (ms: number) => Promise<void>;
 }
 
 const EMPTY_ENV: SupabaseEnv = { url: "", anonKey: "", serviceKey: "" };
+
+// verifyLiveRls readiness retry (2026-07-19): bounded wait for PostgREST's schema-cache reload on
+// a just-created managed project — see verifyLiveRls's own doc for the live evidence. 8 attempts ×
+// 5s = up to 35s of extra latency, and ONLY when a table is genuinely inconclusive (the happy path
+// pays nothing). Not precision-measured against Supabase's own SLA — a conservative first cut;
+// tighten later if the benchmark (eval/) shows it's short or needlessly long.
+const RLS_READY_ATTEMPTS = 8;
+const RLS_READY_DELAY_MS = 5000;
+
+export type RlsProbeVerdict = "leak" | "secure" | "inconclusive";
+
+/** Pure(ish) — one anonymous REST probe of a single table → a verdict. Isolated from
+ *  verifyLiveRls's retry loop so the DECISION (what a given response means) is unit-testable
+ *  without faking a whole retry/backoff sequence. */
+export async function probeRlsOnce(fetchImpl: typeof fetch, url: string, anonKey: string): Promise<RlsProbeVerdict> {
+  try {
+    const res = await fetchImpl(url, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` } });
+    if (res.ok) {
+      const body = (await res.json().catch(() => null)) as unknown;
+      if (Array.isArray(body) && body.length > 0) return "leak"; // anon SAW rows → leak
+      if (!Array.isArray(body)) return "inconclusive"; // unexpected 200 shape → can't prove denial
+      return "secure"; // 200 + [] on an RLS-enabled table → anon denied → secure
+    }
+    if (res.status === 401 || res.status === 403) return "secure"; // anon explicitly denied
+    return "inconclusive"; // 404/5xx/other — e.g. PostgREST hasn't caught up to a brand-new table yet
+  } catch {
+    return "inconclusive"; // transport error → FAIL CLOSED (never silently treated as enforced)
+  }
+}
 
 const PLACEHOLDER = /your[-_ ]?password|\[|\]/i;
 
@@ -154,6 +186,7 @@ export class SupabaseBackendProvider implements BackendProvider {
   private readonly management?: SupabaseManagementClient;
   private readonly orgId?: string;
   private readonly secretsStore?: SecretsStore;
+  private readonly sleepImpl: (ms: number) => Promise<void>;
 
   constructor(opts: SupabaseProviderOptions = {}) {
     this.managed = opts.managed ?? false;
@@ -166,6 +199,7 @@ export class SupabaseBackendProvider implements BackendProvider {
     this.env = opts.env ?? (this.managed ? { ...EMPTY_ENV } : envFromProcess());
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.executorFactory = opts.executorFactory ?? (() => bunExecutor(resolveDbUrl(this.env)));
+    this.sleepImpl = opts.sleepImpl ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
   /**
@@ -242,6 +276,18 @@ export class SupabaseBackendProvider implements BackendProvider {
    * had rows, so a fresh app passed trivially); (2) LIVE — a real anonymous REST query that returns
    * rows is a leak (CVE-2025-48757). A 200-empty on an RLS-enabled table or a 401/403 is "denied".
    * Anything we cannot prove (transport error, odd response) is INCONCLUSIVE → enforced=false → abort.
+   *
+   * A genuinely INCONCLUSIVE table gets a bounded retry (RLS_READY_ATTEMPTS × RLS_READY_DELAY_MS)
+   * before it's finally recorded as inconclusive — found live 2026-07-19 (acceptance test prompt C,
+   * the FIRST time verifyLiveRls ever ran against a freshly `managed`-provisioned project, not an
+   * adopted pre-existing one): migrations apply over a DIRECT Postgres connection and succeeded
+   * immediately, but the probe here goes through PostgREST — a SEPARATE service fronting the DB,
+   * which needs a moment to notice brand-new tables (schema-cache reload) on a project that was
+   * JUST created. The very next request against the SAME project, made by hand ~2 minutes later,
+   * got a clean 200+[] from all three tables — proving this was transient propagation lag, not a
+   * real security gap. This does NOT weaken the guarantee: a genuine LEAK (200+rows) or a genuine
+   * DENY (401/403) is conclusive on the FIRST attempt and is never retried — only "we couldn't tell
+   * either way" gets a chance to resolve itself before the fail-closed abort fires.
    */
   async verifyLiveRls(_handle: BackendHandle, tables: string[], rlsEnabled: string[] = []): Promise<LiveRlsResult> {
     const enabled = new Set(rlsEnabled);
@@ -257,21 +303,14 @@ export class SupabaseBackendProvider implements BackendProvider {
         continue;
       }
       const url = `${this.env.url}/rest/v1/${encodeURIComponent(t)}?select=*&limit=1`;
-      try {
-        const res = await this.fetchImpl(url, { headers: { apikey: this.env.anonKey, Authorization: `Bearer ${this.env.anonKey}` } });
-        if (res.ok) {
-          const body = (await res.json().catch(() => null)) as unknown;
-          if (Array.isArray(body) && body.length > 0) leakedTables.push(t); // anon SAW rows → leak
-          else if (!Array.isArray(body)) inconclusive.push(t); // unexpected 200 shape → can't prove denial
-          // 200 + [] on an RLS-enabled table → anon denied → secure
-        } else if (res.status === 401 || res.status === 403) {
-          // anon explicitly denied → secure
-        } else {
-          inconclusive.push(t); // 404/5xx/other → could not prove denial
-        }
-      } catch {
-        inconclusive.push(t); // transport error → FAIL CLOSED (was: silently treated as enforced)
+      let verdict: RlsProbeVerdict = "inconclusive";
+      for (let attempt = 1; attempt <= RLS_READY_ATTEMPTS; attempt++) {
+        verdict = await probeRlsOnce(this.fetchImpl, url, this.env.anonKey);
+        if (verdict !== "inconclusive") break; // leak/secure are conclusive proof — never retried
+        if (attempt < RLS_READY_ATTEMPTS) await this.sleepImpl(RLS_READY_DELAY_MS);
       }
+      if (verdict === "leak") leakedTables.push(t);
+      else if (verdict === "inconclusive") inconclusive.push(t);
     }
     return { enforced: leakedTables.length === 0 && inconclusive.length === 0, leakedTables, inconclusive };
   }
