@@ -36,6 +36,13 @@
  * markdown-fence stripping + escaped-tag unescaping + trailing newline on file
  * content (message-parser.ts:60-75,151-159); `<bolt-quick-actions>` button blocks
  * (currently pass through as prose).
+ *
+ * OBSERVED IN PRODUCTION (not from bolt.diy — a separate model artifact, fixed
+ * here): some models pattern-match `<boltAction>...</boltAction>`'s XML-tag shape
+ * against training data that CDATA-wraps embedded code, and emit a stray
+ * `<![CDATA[` / `]]>` marker around (or, seen live, only a trailing `]]>` with no
+ * matching open) the file content. Uncaught, that marker lands verbatim in the
+ * written file and breaks its build. `stripCdataArtifacts` below removes it.
  */
 import type { EngineEvent } from "../../types.ts";
 
@@ -57,6 +64,19 @@ function attr(rawAttrs: string, name: string): string | undefined {
   return new RegExp(`${name}\\s*=\\s*"([^"]*)"`, "i").exec(rawAttrs)?.[1];
 }
 
+// Anchored to string edges with only whitespace beyond the marker, so a legitimate
+// code file that happens to contain the literal text "]]>" mid-body is untouched —
+// only a marker sitting at the very start/end of the captured content is stripped.
+const CDATA_OPEN_RE = /^\s*<!\[CDATA\[\s*\n?/;
+const CDATA_CLOSE_RE = /\n?\s*\]\]>\s*$/;
+
+/** Strip a stray CDATA wrapper the model sometimes emits around file content (open
+ *  and close are stripped independently — production has shown the close marker
+ *  appear alone, with no matching open tag). See header comment for detail. */
+function stripCdataArtifacts(content: string): string {
+  return content.replace(CDATA_OPEN_RE, "").replace(CDATA_CLOSE_RE, "");
+}
+
 function pushText(out: BoltSegment[], text: string): void {
   if (text.length > 0) out.push({ kind: "text", text });
 }
@@ -65,7 +85,7 @@ function pushText(out: BoltSegment[], text: string): void {
 function pushActions(out: BoltSegment[], inner: string): void {
   for (const m of inner.matchAll(ACTION_RE)) {
     const attrs = m[1] ?? "";
-    const content = m[2] ?? "";
+    const content = stripCdataArtifacts(m[2] ?? "");
     const type = attr(attrs, "type");
     const filePath = attr(attrs, "filePath");
 

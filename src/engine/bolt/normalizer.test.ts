@@ -103,6 +103,48 @@ describe("parseBoltStream — supabase actions (security-critical routing)", () 
   });
 });
 
+describe("parseBoltStream — stray CDATA marker (production incident regression)", () => {
+  // Live: a model emitted a valid app/update-password/page.tsx body followed by a
+  // lone trailing "]]>" with no matching open tag — the marker landed verbatim in
+  // the written file and broke `npm run build` ("Expression expected"). The close
+  // marker must be stripped even without a paired open.
+  test("a trailing close marker with no matching open is stripped", () => {
+    const stream = [
+      '<boltArtifact id="auth" title="Update password">',
+      '<boltAction type="file" filePath="app/update-password/page.tsx">',
+      "'use client'\nexport default function Page() {\n  return <main>ok</main>\n}\n]]>",
+      "</boltAction>",
+      "</boltArtifact>",
+    ].join("");
+    const file = parseBoltStream(stream).find((s) => s.kind === "file");
+    expect(file?.content).toBe("'use client'\nexport default function Page() {\n  return <main>ok</main>\n}");
+  });
+
+  test("a full CDATA wrapper (matching open + close) is stripped", () => {
+    const stream = [
+      '<boltArtifact id="a" title="t">',
+      '<boltAction type="file" filePath="x.ts">',
+      "<![CDATA[\nconst x = 1;\n]]>",
+      "</boltAction>",
+      "</boltArtifact>",
+    ].join("");
+    const file = parseBoltStream(stream).find((s) => s.kind === "file");
+    expect(file?.content).toBe("const x = 1;");
+  });
+
+  test("a literal ']]>' inside real code (not at the edges) is left alone", () => {
+    const stream = [
+      '<boltArtifact id="a" title="t">',
+      '<boltAction type="file" filePath="x.ts">',
+      'const marker = "]]>"\nconst after = 1;',
+      "</boltAction>",
+      "</boltArtifact>",
+    ].join("");
+    const file = parseBoltStream(stream).find((s) => s.kind === "file");
+    expect(file?.content).toBe('const marker = "]]>"\nconst after = 1;');
+  });
+});
+
 describe("segmentToEvent (pure)", () => {
   test("first write is create, repeat write is edit", () => {
     const seen = new Set<string>();
