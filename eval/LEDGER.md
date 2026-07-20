@@ -229,6 +229,37 @@ Format per entry:
   message instead of ~10 minutes with a misleading "could not prove RLS" abort three layers away.
 - status: fixed, pending live re-verification (re-ship C)
 
+## platform.escalation-ticket-never-reaches-platform-from-sandbox
+- first seen: 2026-07-20 · acceptance test prompt C, C6 (second retry after the CDATA-marker fix)
+  · app-mrsjtehj
+- symptom: the build held ("⏸ HELD BY THE GATES"), but the UI's "why" showed nothing — `/api/held`
+  returned `{state: null, findings: []}` for a build record that DID have a ticket id
+  (`rec.ticket === "esc-129dwbk"`), confirmed present in Postgres's `tenant_builds` row.
+- root cause: the THIRD instance of the exact same defect as the record-store and secrets-store
+  bugs above. `runAutoFixAndReport` opens the ticket via `localSink().open(...)` — a bare
+  `LocalEscalationSink` writing to `~/.vibehard/queue` on WHATEVER machine the gate/fix loop is
+  actually running on. In production that's an ephemeral E2B sandbox, not the platform box.
+  `/api/held` then asked the PLATFORM's own local queue for that same ticket id and found nothing
+  — the sandbox and its ticket file were both destroyed the instant the build held. Confirmed by
+  direct inspection: the platform's own `~/.vibehard/queue` directory's last-modified time
+  (20:46 the day before) predated the build entirely; whatever wrote `esc-129dwbk` did so
+  somewhere this box never saw. Every E2B-dispatched held build has therefore been silently
+  unexplainable in production since E2B dispatch went live — "held by the gates" with zero
+  findings shown, defeating the exact transparency ("every gate, shown") the product promises.
+- fix: `httpEscalationSink` (escalation/http-client.ts) — direct sibling of httpRecordStore/
+  httpSecretsStore, same dispatch token, new `/api/internal/escalation-ticket` endpoint, backed by
+  a new `PgEscalationSink` (durable, Postgres). `resolveEscalationSink()` in cli.ts picks the HTTP
+  sink when a dispatch token is present (E2B), else keeps the existing local-file sink unchanged —
+  a LOCAL (non-E2B) dispatch runs on the SAME box as the platform, so that path was never actually
+  broken. `/api/held` checks Postgres first, falls back to the local file for that unchanged path.
+  Deliberately narrower than the full EscalationSink over HTTP: only open()/get() are reachable
+  from a sandboxed dispatch token — claim()/resolve()/list() are reviewer actions that would need
+  to enumerate beyond one (tenantId, app)'s scope, so they throw rather than being silently
+  stubbed. Locked by tests: pg-store.test.ts (PgEscalationSink open/claim/resolve/list/durability),
+  http-client.test.ts (open idempotency, get, claim/resolve/list refusal), cli.test.ts
+  (resolveEscalationSink's env-based branching, including partial-config fail-closed-to-local).
+- status: fixed, pending live re-verification (re-ship C)
+
 ## infra.model-slug-delisted
 - first seen: 2026-07-17 · /tmp/debug-e2e-10 (first attempt) · pomodoro-timer
 - symptom: "Model deepseek-v3.2 is not supported" at the first LLM call (OpenCode Zen);
