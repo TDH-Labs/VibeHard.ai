@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { ensurePlatformSchema, ensureSubstrateSchema, pgliteSql, PgRecordStore, PgSecretsStore, PgTenantStore, type Sql } from "./pg-store.ts";
+import { ensureEscalationSchema, ensurePlatformSchema, ensureSubstrateSchema, pgliteSql, PgEscalationSink, PgRecordStore, PgSecretsStore, PgTenantStore, type Sql } from "./pg-store.ts";
 import type { Tenant } from "./types.ts";
 import type { BackendSecrets, DeploymentRecord } from "../substrate/types.ts";
+import { ticketId, type EscalationPacket } from "../escalation/index.ts";
 
 // Each test gets a fresh embedded Postgres (pglite) — same engine as prod Postgres, no Docker/network.
 const dbs: Array<{ close: () => Promise<void> }> = [];
@@ -136,5 +137,89 @@ describe("PgSecretsStore — encrypted-at-rest in Postgres", () => {
   test("missing passphrase → constructor throws (fail-closed)", async () => {
     const { sql } = await store();
     expect(() => new PgSecretsStore(sql, "", "tenant-A")).toThrow(/passphrase/);
+  });
+});
+
+// 2026-07-20: the durable equivalent of LocalEscalationSink — see its own class comment (the bug
+// this closes: an E2B-dispatched build's ticket used to be lost the instant its sandbox tore down).
+const packet = (over: Partial<EscalationPacket> = {}): EscalationPacket => ({
+  workspacePath: "/home/user/workspace",
+  createdAt: "2026-07-20T00:00:00.000Z",
+  reason: "deploy blocked by the gate chain",
+  items: [{ ref: "app/update-password/page.tsx:1:sast-1", finding: { tool: "sast", file: "app/update-password/page.tsx", line: 1, ruleId: "sast-1", severity: "high", message: "x" }, specialty: "security", slice: null }],
+  specialties: ["security"],
+  blocking: 1,
+  ...over,
+});
+
+describe("PgEscalationSink — durable escalation queue, the third instance of the sandbox-durability defect", () => {
+  async function store(scope = "tenant-A"): Promise<PgEscalationSink> {
+    const sql = await freshSql();
+    await ensureEscalationSchema(sql);
+    return new PgEscalationSink(sql, scope);
+  }
+
+  test("open() → get() round-trips the ticket in needs-human state", async () => {
+    const s = await store();
+    const p = packet();
+    const ticket = await s.open(p, "2026-07-20T00:00:00.000Z");
+    expect(ticket.state).toBe("needs-human");
+    expect(ticket.id).toBe(ticketId(p));
+    expect(await s.get(ticket.id)).toEqual(ticket);
+  });
+
+  test("open() is idempotent — re-queuing the identical packet returns the SAME ticket, doesn't reset its state", async () => {
+    const s = await store();
+    const p = packet();
+    const first = await s.open(p, "2026-07-20T00:00:00.000Z");
+    await s.claim(first.id, "alice");
+    const second = await s.open(p, "2026-07-20T01:00:00.000Z"); // re-queue after it was already claimed
+    expect(second.state).toBe("claimed"); // NOT reset back to needs-human
+    expect(second.claimedBy).toBe("alice");
+  });
+
+  test("claim() then resolve() carries the full needs-human → claimed → resolved lifecycle", async () => {
+    const s = await store();
+    const ticket = await s.open(packet());
+    const claimed = await s.claim(ticket.id, "alice");
+    expect(claimed.state).toBe("claimed");
+    expect(claimed.claimedBy).toBe("alice");
+    const resolved = await s.resolve(ticket.id, [
+      { ref: ticket.packet.items[0]!.ref, verdict: "approved", reviewer: "alice", justification: "reviewed, safe", decidedAt: "2026-07-20T02:00:00.000Z" },
+    ]);
+    expect(resolved.state).toBe("resolved");
+    expect(await s.get(ticket.id)).toEqual(resolved); // persisted, not just returned in-memory
+  });
+
+  test("get(unknown) → null", async () => {
+    expect(await (await store()).get("esc-nope")).toBeNull();
+  });
+
+  test("list() returns all tickets for this tenant, optionally filtered by state", async () => {
+    const s = await store();
+    const a = await s.open(packet({ workspacePath: "/a" }));
+    await s.open(packet({ workspacePath: "/b" }));
+    await s.claim(a.id, "alice");
+    expect((await s.list()).length).toBe(2);
+    expect((await s.list("claimed")).map((t) => t.id)).toEqual([a.id]);
+  });
+
+  test("scoped by tenant — the SAME packet in two tenants gets two independent tickets", async () => {
+    const sql = await freshSql();
+    await ensureEscalationSchema(sql);
+    const a = new PgEscalationSink(sql, "tenant-A");
+    const b = new PgEscalationSink(sql, "tenant-B");
+    const p = packet();
+    await a.claim((await a.open(p)).id, "alice");
+    const bTicket = await b.open(p);
+    expect(bTicket.state).toBe("needs-human"); // tenant B's own ticket, unaffected by tenant A's claim
+  });
+
+  test("DURABILITY: a fresh sink over the SAME db sees a ticket opened by a DIFFERENT sink instance — this is the actual bug fixed (the sandbox's write and the platform's later read are different processes)", async () => {
+    const sql = await freshSql();
+    await ensureEscalationSchema(sql);
+    const opened = await new PgEscalationSink(sql, "tenant-A").open(packet());
+    const reread = await new PgEscalationSink(sql, "tenant-A").get(opened.id);
+    expect(reread).toEqual(opened);
   });
 });

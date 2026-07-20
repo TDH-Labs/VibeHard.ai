@@ -32,3 +32,4 @@ export {
   type TicketState,
 } from "./queue.ts";
 export { GitHubEscalationSink, type GitHubEscalationSinkOptions } from "./github.ts";
+export { httpEscalationSink, type HttpEscalationSinkOptions } from "./http-client.ts";

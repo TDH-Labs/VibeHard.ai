@@ -11,7 +11,7 @@ import { deployGate, FAST_GATES, GATES, runGate } from "./gate/index.ts";
 import { printReport, SUBPROCESS_TIMEOUT_MS } from "@vibehard/gate-check";
 import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
 import { formatBenchReport, runBenchmark, type BenchCase } from "./eval/benchmark.ts";
-import { buildEscalationPacket, GitHubEscalationSink, LocalEscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
+import { buildEscalationPacket, GitHubEscalationSink, httpEscalationSink, LocalEscalationSink, type EscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
 import { SPECIALTIES } from "./escalation/routing.ts";
 import { FileReviewerStore, makeReviewer, matchesPacket, parseSpecialties } from "./reviewer/reviewer.ts";
@@ -126,6 +126,30 @@ function queuePath(): string {
 }
 function localSink(): LocalEscalationSink {
   return new LocalEscalationSink(queuePath());
+}
+
+/**
+ * The escalation sink `runAutoFixAndReport` (and the operator `queue`/`claim`/`resolve` commands)
+ * actually use. A LOCAL (non-E2B) dispatch runs as a subprocess on the SAME box as the platform,
+ * so `localSink()`'s file under `~/.vibehard/queue` is already durable enough — the platform's own
+ * later read is a file read on the SAME disk. An E2B-dispatched build is a genuinely different,
+ * ephemeral machine with no local state that survives its own teardown and no direct DB access by
+ * design (build-env.ts's allowlist deliberately excludes DATABASE_URL from a sandbox's env) — it
+ * needs the platform's tokened HTTP endpoint instead, the same dispatch token already forwarded
+ * for record/secrets (VIBEHARD_PLATFORM_BASE_URL/VIBEHARD_RECORD_TOKEN/VIBEHARD_DISPATCH_APP).
+ *
+ * THE BUG THIS CLOSES (found live 2026-07-20, acceptance test prompt C, second retry after the
+ * CDATA-marker fix): every call site here used to be bare `localSink()`, so an E2B-dispatched
+ * build's `open()` wrote its ticket to the SANDBOX's own ephemeral disk — gone the instant the
+ * sandbox tore down. `/api/held` (running on the platform) could never find it: "held by the
+ * gates" with zero findings shown, for every single E2B-dispatched held build in production.
+ */
+export function resolveEscalationSink(): EscalationSink {
+  const baseUrl = process.env.VIBEHARD_PLATFORM_BASE_URL;
+  const token = process.env.VIBEHARD_RECORD_TOKEN;
+  const app = process.env.VIBEHARD_DISPATCH_APP;
+  if (baseUrl && token && app) return httpEscalationSink({ baseUrl, token, app });
+  return localSink();
 }
 function reviewerStore(): FileReviewerStore {
   return new FileReviewerStore(process.env.VIBEHARD_REVIEWERS_DIR ?? join(homedir(), ".vibehard", "reviewers"));
@@ -574,7 +598,7 @@ export async function runAutoFixAndReport(target: string): Promise<number> {
     }
     console.log(`\n🛑 auto-fix could not resolve everything in ${result.attempts} attempt(s).`);
     if (result.escalation) {
-      const ticket = await localSink().open(result.escalation);
+      const ticket = await resolveEscalationSink().open(result.escalation);
       await notifier().notifyOpened(ticket); // best-effort reviewer ping
       console.log(`  ::held ${ticket.id}`); // machine-parseable: links this build to its review ticket
       console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);

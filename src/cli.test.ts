@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs, deterministicBackendInstructions } from "./cli.ts";
+import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs, deterministicBackendInstructions, resolveEscalationSink } from "./cli.ts";
 import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
@@ -269,5 +269,38 @@ describe("deterministicBackendInstructions — codegen must know the admin clien
     const s = deterministicBackendInstructions();
     expect(s).toContain("ALREADY GENERATED — do NOT rewrite them");
     expect(s).toContain("lib/supabase/{client,server,admin}.ts");
+  });
+});
+
+describe("resolveEscalationSink — an E2B sandbox's held-ticket write must reach the SAME store the platform reads (2026-07-20)", () => {
+  const DISPATCH_VARS = ["VIBEHARD_PLATFORM_BASE_URL", "VIBEHARD_RECORD_TOKEN", "VIBEHARD_DISPATCH_APP"] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of DISPATCH_VARS) saved[k] = process.env[k];
+  });
+  afterEach(() => {
+    for (const k of DISPATCH_VARS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k]!;
+    }
+  });
+
+  test("THE BUG THIS CLOSES: with a dispatch token present (E2B), returns the HTTP sink, not the local file one", () => {
+    process.env.VIBEHARD_PLATFORM_BASE_URL = "https://vibehard.example";
+    process.env.VIBEHARD_RECORD_TOKEN = "tok-abc";
+    process.env.VIBEHARD_DISPATCH_APP = "accept-c6";
+    expect(resolveEscalationSink().name).toBe("http-escalation");
+  });
+
+  test("any ONE of the three dispatch vars missing → falls back to the local file sink (fail-closed on partial config, not a silent wrong-token call)", () => {
+    delete process.env.VIBEHARD_PLATFORM_BASE_URL;
+    process.env.VIBEHARD_RECORD_TOKEN = "tok-abc";
+    process.env.VIBEHARD_DISPATCH_APP = "accept-c6";
+    expect(resolveEscalationSink().name).toBe("local");
+  });
+
+  test("no dispatch vars at all (local dispatch, or a bare laptop `vibehard build`) → the local file sink, unchanged from before this fix", () => {
+    for (const k of DISPATCH_VARS) delete process.env[k];
+    expect(resolveEscalationSink().name).toBe("local");
   });
 });

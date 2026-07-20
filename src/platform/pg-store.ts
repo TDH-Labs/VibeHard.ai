@@ -11,6 +11,7 @@
 import type { Tenant, TenantStore } from "./types.ts";
 import type { BackendSecrets, DeploymentRecord } from "../substrate/types.ts";
 import { sealJson, unsealJson } from "../substrate/seal.ts";
+import { claimTicket, openTicket, resolveTicket, ticketId, type EscalationPacket, type EscalationSink, type EscalationTicket, type ReviewDecision, type TicketState } from "../escalation/index.ts";
 
 export type Row = Record<string, unknown>;
 /** Minimal query-runner the stores depend on. pglite (tests) and postgres.js (prod) both adapt to it. */
@@ -81,6 +82,14 @@ export async function ensureSubstrateSchema(sql: Sql): Promise<void> {
   await sql(`create table if not exists app_secrets (scope text not null, app text not null, blob text not null, primary key (scope, app))`);
 }
 
+/** Escalation tickets, scoped by tenant, looked up by the ticket's own (content-hash) id — same
+ *  key shape as LocalEscalationSink's one-file-per-ticket model. Which (tenantId, app) a caller is
+ *  allowed to touch is enforced one layer up (authorizeRecordRequest / the Clerk session's own
+ *  tenantId), not by a column here — `EscalationPacket` itself carries no app id to key on. */
+export async function ensureEscalationSchema(sql: Sql): Promise<void> {
+  await sql(`create table if not exists escalation_tickets (scope text not null, id text not null, data text not null, primary key (scope, id))`);
+}
+
 /**
  * Postgres-backed deployment records — the async durable equivalent of the file RecordStore. Scoped
  * per tenant (matching the file store's per-tenant rooting); the record is stored as JSON so its shape
@@ -147,5 +156,87 @@ export class PgSecretsStore {
 
   async remove(app: string): Promise<void> {
     await this.sql(`delete from app_secrets where scope = $1 and app = $2`, [this.scope, app]);
+  }
+}
+
+/**
+ * Postgres-backed escalation queue — the async durable equivalent of LocalEscalationSink.
+ *
+ * THE BUG THIS CLOSES (found live 2026-07-20, acceptance test prompt C, second retry): a held
+ * build's escalation ticket is opened by `runAutoFixAndReport` (cli.ts) from WHEREVER the gate/fix
+ * loop actually runs — in production that's an ephemeral E2B sandbox, not the platform box. Local-
+ * EscalationSink writes the ticket to `~/.vibehard/queue` on WHATEVER machine is running, which for
+ * a sandboxed build is the sandbox's own disk. `/api/held` then asks the PLATFORM's own
+ * LocalEscalationSink for that ticket id and finds nothing — the sandbox and its ticket file were
+ * both destroyed the moment the build held. Every E2B-dispatched held build has therefore been
+ * silently unexplainable: "held by the gates" with zero findings shown, defeating the exact
+ * transparency ("every gate, shown") the product promises. Same architectural defect as the
+ * deployment-record and backend-secrets bugs fixed the day before; this is the third instance.
+ *
+ * Reuses the SAME pure state-machine (openTicket/claimTicket/resolveTicket) LocalEscalationSink
+ * uses — only the persistence changed, not the transition rules.
+ */
+export class PgEscalationSink implements EscalationSink {
+  readonly name = "pg";
+  constructor(
+    private readonly sql: Sql,
+    private readonly scope: string,
+  ) {}
+
+  /** Store an already-built ticket verbatim — the internal HTTP endpoint's PUT uses this: the
+   *  sandboxed client (http-client.ts) runs the pure open()/idempotency check on ITS side (it
+   *  knows the packet; the endpoint doesn't) and PUTs the resulting ticket as-is. */
+  async put(t: EscalationTicket): Promise<void> {
+    await this.sql(
+      `insert into escalation_tickets (scope, id, data) values ($1, $2, $3)
+       on conflict (scope, id) do update set data = excluded.data`,
+      [this.scope, t.id, JSON.stringify(t)],
+    );
+  }
+
+  async open(packet: EscalationPacket, now: string = new Date().toISOString()): Promise<EscalationTicket> {
+    const existing = await this.get(ticketId(packet));
+    if (existing) return existing; // idempotent: re-queuing the same escalation is a no-op
+    const t = openTicket(packet, now);
+    await this.put(t);
+    return t;
+  }
+  async claim(id: string, reviewer: string, now: string = new Date().toISOString()): Promise<EscalationTicket> {
+    const t = claimTicket(await this.require(id), reviewer, now);
+    await this.put(t);
+    return t;
+  }
+  async resolve(id: string, decisions: ReviewDecision[], now: string = new Date().toISOString()): Promise<EscalationTicket> {
+    const t = resolveTicket(await this.require(id), decisions, now);
+    await this.put(t);
+    return t;
+  }
+  async get(id: string): Promise<EscalationTicket | null> {
+    const rows = await this.sql(`select data from escalation_tickets where scope = $1 and id = $2`, [this.scope, id]);
+    if (!rows[0]) return null;
+    try {
+      return JSON.parse(String(rows[0].data)) as EscalationTicket;
+    } catch {
+      return null;
+    }
+  }
+  async list(state?: TicketState): Promise<EscalationTicket[]> {
+    const rows = await this.sql(`select data from escalation_tickets where scope = $1`, [this.scope]);
+    const out: EscalationTicket[] = [];
+    for (const r of rows) {
+      try {
+        const t = JSON.parse(String(r.data)) as EscalationTicket;
+        if (!state || t.state === state) out.push(t);
+      } catch {
+        /* skip an unreadable/partial row */
+      }
+    }
+    return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  private async require(id: string): Promise<EscalationTicket> {
+    const t = await this.get(id);
+    if (!t) throw new Error(`no such ticket: ${id}`);
+    return t;
   }
 }

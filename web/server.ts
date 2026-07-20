@@ -18,7 +18,7 @@ import { Platform, StripeBillingProvider, StripeClient } from "../src/platform/i
 import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type BuildRecord } from "../src/platform/build-store.ts";
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
 import { authorizeRecordRequest, PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
-import { PgRecordStore, PgSecretsStore } from "../src/platform/pg-store.ts";
+import { PgEscalationSink, PgRecordStore, PgSecretsStore } from "../src/platform/pg-store.ts";
 import type { BackendSecrets, DeploymentRecord } from "../src/substrate/types.ts";
 import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, readPlatformBuildSha, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
@@ -33,7 +33,7 @@ import { isBlocking } from "../src/types.ts";
 import { byoModelFactory, defaultModelFactory } from "../src/engine/bolt/driver.ts";
 import { configForStage } from "../src/config/models.ts";
 import { applyBillingDecision, decideBillingEvent, parseStripeEvent, verifyStripeSignature } from "../src/platform/billing-webhook.ts";
-import { LocalEscalationSink } from "../src/escalation/index.ts";
+import { LocalEscalationSink, type EscalationTicket } from "../src/escalation/index.ts";
 import { translateFindings, llmTranslator } from "../src/translate/index.ts";
 import { requiredCredentialsForApp } from "../src/credentials/index.ts";
 import { verifySentinel } from "../src/gate/index.ts";
@@ -907,6 +907,44 @@ const server = Bun.serve({
       return json({ error: "method not allowed" }, 405);
     }
 
+    // build-substrate: the sandboxed build's ONLY durable read/write of its own escalation ticket
+    // (src/escalation/http-client.ts) — third sibling of deployment-record/backend-secrets above;
+    // read deployment-record's comment first. THE BUG THIS CLOSES (found live 2026-07-20,
+    // acceptance test prompt C, second retry): `runAutoFixAndReport` opens a held build's ticket
+    // via LocalEscalationSink, wherever the gate/fix loop runs — in production, an ephemeral E2B
+    // sandbox with no durable state of its own. The ticket file landed on the sandbox's disk and
+    // was destroyed the instant the build held; `/api/held` then asked the PLATFORM's own local
+    // queue for that id and found nothing. Every E2B-dispatched held build was therefore silently
+    // unexplainable — "held by the gates" with zero findings shown. Same auth posture as the two
+    // siblings (reusable dispatch token, bad/wrong-app token → bare 404). Scoped narrower than the
+    // full EscalationSink on purpose: only GET/PUT of exactly one ticket id, matching what a build
+    // sandbox's own open()/get() ever need — claim/resolve/list are reviewer actions and stay off
+    // this endpoint entirely (see http-client.ts's header comment).
+    if (path === "/api/internal/escalation-ticket") {
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+      const resolved = token ? await dispatchTokenStore.resolve(token) : null;
+      const auth = authorizeRecordRequest(resolved, url.searchParams.get("app"));
+      if (!auth.ok) return json({ error: "not found" }, 404);
+      const id = url.searchParams.get("id");
+      if (!id) return json({ error: "id required" }, 400);
+      const tickets = new PgEscalationSink(platformDb.sql, auth.tenantId);
+      if (req.method === "GET") return json({ ticket: await tickets.get(id) });
+      if (req.method === "PUT") {
+        let ticket: unknown;
+        try {
+          ({ ticket } = await req.json());
+        } catch {
+          return json({ error: "invalid request body" }, 400);
+        }
+        if (!ticket || typeof ticket !== "object" || (ticket as EscalationTicket).id !== id) {
+          return json({ error: "ticket.id must match the ?id= query param" }, 400);
+        }
+        await tickets.put(ticket as EscalationTicket);
+        return json({ ok: true });
+      }
+      return json({ error: "method not allowed" }, 405);
+    }
+
     // Public: tells the frontend whether to render Clerk's UI (+ the publishable key, which is
     // public-safe) or the legacy login form. No auth required.
     if (path === "/api/auth-config") {
@@ -1146,8 +1184,14 @@ const server = Bun.serve({
       const app = url.searchParams.get("app");
       const rec = (await buildStore.listBuilds(auth.user.tenantId)).find((b) => b.app === app);
       if (!rec?.ticket) return json({ state: null, findings: [] });
-      const sink = new LocalEscalationSink(process.env.VIBEHARD_QUEUE_DIR ?? join(homedir(), ".vibehard", "queue"));
-      const ticket = await sink.get(rec.ticket);
+      // Durable (Postgres) FIRST — where an E2B-dispatched build's ticket lands (via
+      // httpEscalationSink → /api/internal/escalation-ticket; see that endpoint's header comment
+      // for the bug this fixes). Fall back to the local queue for a LOCAL (non-E2B) dispatch,
+      // which runs on this same box and has always written there durably enough (same disk as
+      // this read) — unchanged behavior for that path.
+      const ticket =
+        (await new PgEscalationSink(platformDb.sql, auth.user.tenantId).get(rec.ticket)) ??
+        (await new LocalEscalationSink(process.env.VIBEHARD_QUEUE_DIR ?? join(homedir(), ".vibehard", "queue")).get(rec.ticket));
       if (!ticket) return json({ state: null, findings: [] });
       // the dictionary handles the common cases synchronously; anything it can't place (source
       // === "generic") gets one bounded LLM pass so "held" is never a wall of "a reviewer can

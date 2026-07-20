@@ -11,7 +11,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
-import { ensurePlatformSchema, ensureSubstrateSchema, pgliteSql, type Sql } from "./pg-store.ts";
+import { ensureEscalationSchema, ensurePlatformSchema, ensureSubstrateSchema, pgliteSql, type Sql } from "./pg-store.ts";
 import { ensureBuildSchema } from "./build-store.ts";
 import { ensureUserSchema } from "./user-store.ts";
 import { ensureTenantKvSchema } from "./tenant-kv.ts";
@@ -36,6 +36,7 @@ export function postgresSql(connectionString: string): { sql: Sql; close: () => 
 async function ensureAllSchema(sql: Sql): Promise<void> {
   await ensurePlatformSchema(sql);
   await ensureSubstrateSchema(sql);
+  await ensureEscalationSchema(sql);
   await ensureBuildSchema(sql);
   await ensureUserSchema(sql);
   await ensureTenantKvSchema(sql);
