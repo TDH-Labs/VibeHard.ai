@@ -55,6 +55,26 @@ Format per entry:
 - fix: per-workstream post-condition (retry once, then abort) · 1af75bc · cli.test.ts (missingWorkstreamFiles)
 - status: fixed
 
+## codegen.stray-cdata-marker
+- first seen: 2026-07-19 · acceptance test prompt C (accept-c5, second attempt after the one
+  permitted chat retry) · Supabase team lunch tracker
+- symptom: `npm run build` exited 1 — "Expression expected" at
+  `app/update-password/page.tsx:122:1`. The file's actual component code was complete and
+  correct; line 122 was a lone `]]>` with no matching opening tag anywhere in the file.
+- root cause: `normalizer.ts`'s `pushActions()` captures a `<boltAction>` tag's inner text with a
+  pure regex (`m[2]`) and writes it to disk completely unmodified (`engine.ts` → `Bun.write`) — by
+  design, zero content sanitization. The model (OpenRouter-routed) pattern-matched the
+  `<boltAction>...</boltAction>` XML-tag shape against training data that CDATA-wraps embedded
+  code, and emitted a stray `]]>` artifact with no paired `<![CDATA[`. Nothing in the pipeline
+  anticipated or stripped it, so it landed verbatim in the written file. Distinct from the
+  already-flagged-but-unhit "markdown-fence stripping" deferred item in the same file's header —
+  this is a new artifact class, not a recurrence of a known one.
+- fix: `stripCdataArtifacts()` strips a leading `<![CDATA[` and/or trailing `]]>` independently
+  (either can appear without the other), anchored to the edges of the captured content so a real
+  file that legitimately contains the literal text `]]>` mid-body is untouched · b8928d0 ·
+  normalizer.test.ts (trailing-close-only, matched-pair, literal-mid-body-untouched)
+- status: fixed, pending live re-verification (re-ship C)
+
 ## deploy.port-contract-unenforced
 - first seen: 2026-07-13 · /tmp/debug-e2e-9 · pomodoro-timer
 - symptom: verify sandbox-boot-failed 502 across 4+ fix attempts; app healthy when booted with
