@@ -91,6 +91,20 @@ describe("checkMigrations — the 'teams is not a view' incident, caught in mill
     const r = await checkMigrations(ws);
     expect(r.passed).toBe(true);
   });
+  test("a standard Supabase RLS policy using auth.uid() passes — NOT a false positive", async () => {
+    // Found live (2026-07-21, this check's first live smoke test): a bare pglite has no `auth`
+    // schema, so this exact standard, CORRECT Supabase pattern failed with "schema auth does not
+    // exist" until checkMigrations was seeded with the real migrate gate's SUPABASE_STUBS.
+    const ws = workspace();
+    write(ws, "supabase/migrations/0001_tasks.sql", 'create table "tasks" (id uuid primary key default gen_random_uuid(), user_id uuid not null);');
+    write(
+      ws,
+      "supabase/migrations/0002_rls.sql",
+      'alter table "tasks" enable row level security;\ncreate policy "tasks_own_rows" on "tasks" for all using (auth.uid() = user_id) with check (auth.uid() = user_id);',
+    );
+    const r = await checkMigrations(ws);
+    expect(r).toEqual({ passed: true, findings: [] });
+  });
   test("a migration treating a TABLE as a VIEW fails exactly like the live incident", async () => {
     const ws = workspace();
     write(ws, "supabase/migrations/0001_teams.sql", "create table teams (id uuid primary key);");

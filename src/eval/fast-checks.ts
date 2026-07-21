@@ -25,6 +25,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DERIVED_DIRS } from "../gate/scan-scope.ts";
 import { parseMigrations } from "../substrate/deploy-app.ts";
+import { neutralize, SUPABASE_STUBS } from "@vibehard/gate-check";
 
 export interface FastFinding {
   check: "stray-marker" | "typecheck" | "migration-ddl";
@@ -101,20 +102,31 @@ export async function typecheckOnly(workspacePath: string): Promise<{ passed: bo
   return { passed: false, findings };
 }
 
-/** Execute every generated migration, in order, against a fresh EMBEDDED Postgres (pglite — a
- *  real Postgres engine, already a dependency, no network/Docker) — the exact check the `migrate`
- *  gate does live, in milliseconds instead of minutes. Skipped when there's no supabase/migrations
- *  dir (not every generated stack has one). */
+/**
+ * Execute every generated migration, in order, against a fresh EMBEDDED Postgres (pglite — a real
+ * Postgres engine, already a dependency, no network/Docker) — the exact check the `migrate` gate
+ * does live, in milliseconds instead of minutes. Skipped when there's no supabase/migrations dir
+ * (not every generated stack has one).
+ *
+ * Seeded with the SAME `SUPABASE_STUBS`/`neutralize` the real `migrate` gate uses (migrate.ts) —
+ * NOT a fresh ad hoc stub. Found live running this check's first live smoke test (2026-07-21): a
+ * bare pglite has no `auth` schema at all (that's Supabase-specific, not vanilla Postgres), so a
+ * migration correctly using `auth.uid()` in an RLS policy — the standard, CORRECT Supabase
+ * pattern, not a bug — failed with "schema auth does not exist". Reusing the real gate's stub
+ * closes that false positive and keeps this check's environment identical to what actually
+ * decides pass/fail later, so the two can never quietly diverge.
+ */
 export async function checkMigrations(workspacePath: string): Promise<{ passed: boolean; findings: FastFinding[] }> {
   const migrations = parseMigrations(workspacePath);
   if (!migrations.length) return { passed: true, findings: [] };
   const { PGlite } = await import("@electric-sql/pglite");
   const db = new PGlite();
   try {
+    await db.exec(SUPABASE_STUBS);
     const findings: FastFinding[] = [];
     for (const m of migrations) {
       try {
-        await db.exec(m.sql);
+        await db.exec(neutralize(m.sql));
       } catch (e) {
         findings.push({ check: "migration-ddl", file: join("supabase/migrations", m.id), message: e instanceof Error ? e.message : String(e) });
         break; // a later migration likely depends on this one — no point reporting cascading noise
