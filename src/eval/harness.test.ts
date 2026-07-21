@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, afterEach } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runEval, formatReport, gateScorer, type EvalCase, type EvalDeps } from "./harness.ts";
+import { runEval, formatReport, gateScorer, layeredGateScorer, type EvalCase, type EvalDeps } from "./harness.ts";
 
 const corpus: EvalCase[] = [
   { id: "a", prompt: "app a" },
@@ -140,6 +142,35 @@ describe("runEval — mustImplement feature-coverage scoring (2026-07-09: was de
       results: [{ id: "todo", built: true, passed: false, blockingGates: [], missingFeatures: ["per-user tasks"], partialFeatures: [], featureCheckError: undefined }],
     });
     expect(text).toContain("missing: per-user tasks");
+  });
+});
+
+describe("layeredGateScorer — fast checks fail FAST, before the real (expensive) gate chain", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  test("a stray marker fails immediately — no real gate chain ever runs", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "vibehard-layered-"));
+    dirs.push(ws);
+    writeFileSync(join(ws, "app.ts"), "export const ok = 1;\n]]>");
+    const r = await layeredGateScorer(ws);
+    expect(r.passed).toBe(false);
+    expect(r.blockingGates).toEqual(["fast:stray-marker"]);
+  });
+
+  test("a migration hallucinating a table as a view fails fast, same shape as the live incident", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "vibehard-layered-"));
+    dirs.push(ws);
+    writeFileSync(join(ws, "app.ts"), "export const ok = 1;\n");
+    const migrationsDir = join(ws, "supabase", "migrations");
+    mkdirSync(migrationsDir, { recursive: true });
+    writeFileSync(join(migrationsDir, "0001_teams.sql"), "create table teams (id uuid primary key);");
+    writeFileSync(join(migrationsDir, "0002_alias.sql"), "alter view teams rename to team_alias;");
+    const r = await layeredGateScorer(ws);
+    expect(r.passed).toBe(false);
+    expect(r.blockingGates).toEqual(["fast:migration-ddl"]);
   });
 });
 

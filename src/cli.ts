@@ -9,7 +9,7 @@ import { formatWithOptions } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, FAST_GATES, GATES, runGate } from "./gate/index.ts";
 import { printReport, SUBPROCESS_TIMEOUT_MS } from "@vibehard/gate-check";
-import { runEval, cliBuild, formatReport, type EvalCase } from "./eval/harness.ts";
+import { runEval, cliBuild, formatReport, layeredGateScorer, type EvalCase } from "./eval/harness.ts";
 import { formatBenchReport, runBenchmark, type BenchCase } from "./eval/benchmark.ts";
 import { buildEscalationPacket, GitHubEscalationSink, httpEscalationSink, LocalEscalationSink, type EscalationSink, type ReviewDecision, type ReviewVerdict, type TicketState } from "./escalation/index.ts";
 import { nullNotifier, slackNotifier, type Notifier } from "./escalation/notify.ts";
@@ -764,7 +764,11 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     console.log(`running LIVE eval over ${corpus.length} prompt(s) — this generates + gates each app…\n`);
-    const report = await runEval(corpus, { build: cliBuild(import.meta.path) });
+    // layeredGateScorer (not the bare gateScorer): a model-spontaneous bug (a stray protocol
+    // artifact, a TS error, a migration that doesn't apply to a real Postgres) fails in SECONDS
+    // via fast-checks.ts, before ever paying for the full Docker + sandbox gate chain — the whole
+    // point of running eval locally instead of a live E2B cycle.
+    const report = await runEval(corpus, { build: cliBuild(import.meta.path), gate: layeredGateScorer });
     console.log(formatReport(report));
     return report.successRate === 1 ? 0 : 1;
   }

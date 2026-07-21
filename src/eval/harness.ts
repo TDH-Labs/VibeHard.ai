@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { runGate } from "../gate/index.ts";
 import { llmFunctionalReviewer, type FunctionalCheck } from "../functest/functest.ts";
 import { configForStage } from "../config/models.ts";
+import { fastPreCheck } from "./fast-checks.ts";
 
 /** One prompt to evaluate. `mustImplement` is feature-coverage the scorer checks (2026-07-09: was
  *  declared in the schema but never actually wired to a scorer — a corpus case could pass purely
@@ -86,6 +87,22 @@ export function cliBuild(cliEntry: string): EvalDeps["build"] {
 export async function gateScorer(dir: string): Promise<{ passed: boolean; blockingGates: string[] }> {
   const r = await runGate(dir);
   return { passed: r.passed, blockingGates: r.verdicts.filter((v) => v.status === "block").map((v) => v.gate) };
+}
+
+/**
+ * The regression-harness scorer: fast-checks.ts's deterministic checks run FIRST — seconds, no
+ * Docker, no LLM — and only fall through to the real (expensive) gate chain if they pass. A
+ * model-spontaneous bug (a stray protocol artifact, a TS error, a migration that doesn't apply to
+ * a real Postgres) fails HERE, in seconds, instead of costing a full live cycle to discover.
+ * `blockingGates` synthesizes one entry per distinct fast-check kind that fired, so a report line
+ * reads the same shape as a real gate-chain failure ("blocked by: fast:stray-marker").
+ */
+export async function layeredGateScorer(dir: string): Promise<{ passed: boolean; blockingGates: string[] }> {
+  const fast = await fastPreCheck(dir);
+  if (!fast.passed) {
+    return { passed: false, blockingGates: [...new Set(fast.findings.map((f) => `fast:${f.check}`))] };
+  }
+  return gateScorer(dir);
 }
 
 /** Default feature-coverage checker: the real LLM functional reviewer, same one `vibehard functest`
