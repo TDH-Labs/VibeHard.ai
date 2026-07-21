@@ -23,9 +23,17 @@
  * work from starving itself on one machine.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-const DEFAULT_LOCK_DIR = "/root/.vibehard/.host-lock";
+// homedir(), not a hardcoded "/root": on the E2B sandbox / Fly host (running as root) this
+// resolves to /root anyway, unchanged — but a bare "/root" broke every local, non-sandboxed CLI
+// run on a real developer machine outright (EROFS: read-only file system, mkdir '/root' — found
+// live 2026-07-21 running the eval regression harness locally), since a normal user can't write
+// there. Matches every other local-state path in this codebase (cli.ts's queue/reviewer dirs,
+// fleet.ts's fleet dir, deploy-app.ts's stateDir, platform.ts's baseDir) — this was the one
+// outlier that hardcoded the sandbox's home instead of asking for the CURRENT process's home.
+const DEFAULT_LOCK_DIR = join(homedir(), ".vibehard", ".host-lock");
 const DEFAULT_STALE_MS = 10 * 60_000; // a lock older than this is presumed abandoned (crashed holder)
 const DEFAULT_POLL_MS = 500;
 const DEFAULT_MAX_WAIT_MS = 5 * 60_000; // never block a build forever waiting for the lock
@@ -102,8 +110,14 @@ export interface HostLockOptions {
  * fail-closed default — so if the lock can't be acquired within `MAX_WAIT_MS` (a genuinely
  * stuck, not-yet-stale holder), this proceeds WITHOUT it rather than hang a build forever.
  */
+/** Exported so a test can assert the DEFAULT resolves under the CURRENT process's home (not a
+ *  hardcoded sandbox path) without touching the real lock dir via a full withHostLock() call. */
+export function resolveLockDir(opts: Pick<HostLockOptions, "lockDir"> = {}): string {
+  return opts.lockDir ?? process.env.VIBEHARD_HOST_LOCK_DIR ?? DEFAULT_LOCK_DIR;
+}
+
 export async function withHostLock<T>(fn: () => Promise<T> | T, opts: HostLockOptions = {}): Promise<T> {
-  const lockDir = opts.lockDir ?? process.env.VIBEHARD_HOST_LOCK_DIR ?? DEFAULT_LOCK_DIR;
+  const lockDir = resolveLockDir(opts);
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const maxWaitMs = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;

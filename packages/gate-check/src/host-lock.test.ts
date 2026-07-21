@@ -1,8 +1,34 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { isHostLockHeld, withHostLock } from "./host-lock.ts";
+import { isHostLockHeld, resolveLockDir, withHostLock } from "./host-lock.ts";
+
+describe("resolveLockDir — the default must follow the CURRENT process's home, never a hardcoded sandbox path", () => {
+  const saved = process.env.VIBEHARD_HOST_LOCK_DIR;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.VIBEHARD_HOST_LOCK_DIR;
+    else process.env.VIBEHARD_HOST_LOCK_DIR = saved;
+  });
+
+  test("with no override, resolves under homedir() — not a bare '/root'", () => {
+    delete process.env.VIBEHARD_HOST_LOCK_DIR;
+    // Regression lock (found live 2026-07-21 running the eval harness locally): a hardcoded
+    // "/root/.vibehard/.host-lock" default worked on the E2B sandbox/Fly host (which runs AS
+    // root) but crashed every local, non-sandboxed run outright — EROFS, a normal user can't
+    // write to /root. The default must track the CURRENT process's home, same as every other
+    // local-state path in this codebase (queue/reviewer/fleet/deploy-app/platform dirs).
+    expect(resolveLockDir()).toBe(join(homedir(), ".vibehard", ".host-lock"));
+  });
+  test("VIBEHARD_HOST_LOCK_DIR env override still wins", () => {
+    process.env.VIBEHARD_HOST_LOCK_DIR = "/tmp/env-override";
+    expect(resolveLockDir()).toBe("/tmp/env-override");
+  });
+  test("an explicit opts.lockDir wins over everything (tests use this to stay isolated)", () => {
+    process.env.VIBEHARD_HOST_LOCK_DIR = "/tmp/env-override";
+    expect(resolveLockDir({ lockDir: "/tmp/explicit" })).toBe("/tmp/explicit");
+  });
+});
 
 describe("withHostLock — cross-process mutex for heavy host subprocess work (EPIC #32, 2026-07-09)", () => {
   const dirs: string[] = [];
