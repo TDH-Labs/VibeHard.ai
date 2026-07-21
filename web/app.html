@@ -456,8 +456,8 @@ const fmtT=s=>Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
 $("#toggle-log").onclick=()=>{const c=$("#console");const open=c.style.display==="block";c.style.display=open?"none":"block";$("#toggle-log").textContent=(open?"▸ Show":"▾ Hide")+" live log"};
 
 // ── per-gate checklist (parsed from the build's `gate: ✓ <name>` lines) ──
-const GATE_LABELS={sast:"Code security",secrets:"Secret scan","depvuln":"Dependency CVEs",rls:"Data isolation (RLS)","migrate":"Database migrations","rls-enforce":"Tenant isolation attack",compliance:"Compliance posture",pii:"Personal-data leaks","prod-readiness":"Production readiness","proptest":"Acceptance tests",verify:"Build & boot check",completeness:"Feature completeness"};
-const GATE_ORDER=["sast","secrets","depvuln","rls","migrate","rls-enforce","compliance","pii","prod-readiness","proptest","verify","completeness"];
+const GATE_LABELS={"fast-precheck":"Quick pre-check",sast:"Code security",secrets:"Secret scan","depvuln":"Dependency CVEs",rls:"Data isolation (RLS)","migrate":"Database migrations","rls-enforce":"Tenant isolation attack",compliance:"Compliance posture",pii:"Personal-data leaks","prod-readiness":"Production readiness","proptest":"Acceptance tests",verify:"Build & boot check",completeness:"Feature completeness"};
+const GATE_ORDER=["fast-precheck","sast","secrets","depvuln","rls","migrate","rls-enforce","compliance","pii","prod-readiness","proptest","verify","completeness"];
 let gateState={};
 function renderGates(){
   const ic={pass:'<span style="color:var(--amber-text)">✓</span>',block:'<span style="color:var(--red)">✗</span>',warn:'<span style="color:var(--amber-text)">⚠</span>'};

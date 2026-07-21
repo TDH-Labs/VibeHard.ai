@@ -23,9 +23,9 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { DERIVED_DIRS } from "../gate/scan-scope.ts";
+import { DERIVED_DIRS } from "./scan-scope.ts";
 import { parseMigrations } from "../substrate/deploy-app.ts";
-import { neutralize, SUPABASE_STUBS } from "@vibehard/gate-check";
+import { neutralize, SUPABASE_STUBS, type GateVerdict } from "@vibehard/gate-check";
 
 export interface FastFinding {
   check: "stray-marker" | "typecheck" | "migration-ddl";
@@ -146,4 +146,15 @@ export async function fastPreCheck(workspacePath: string): Promise<{ passed: boo
   const [tsc, migrate] = await Promise.all([typecheckOnly(workspacePath), checkMigrations(workspacePath)]);
   const findings = [...marker, ...tsc.findings, ...migrate.findings];
   return { passed: findings.length === 0, findings };
+}
+
+/** Render fastPreCheck's findings as a GateVerdict — so the LIVE auto-fix loop (autofix.ts) can
+ *  slot a fast-check failure into the SAME shape a real gate reports, and the fixer/escalation
+ *  packet/journal (all of which only know how to read a GateVerdict) never need to know this
+ *  finding came from a pre-check instead of a container-run scanner. Severity is always "high" —
+ *  every fast-check finding is something that would fail the real gate chain outright (a build
+ *  that doesn't compile, a migration that doesn't apply), never an advisory. */
+export function fastCheckVerdict(findings: FastFinding[], ranAt: string): GateVerdict {
+  const asFindings = findings.map((f) => ({ tool: "fast-precheck", ruleId: f.check, severity: "high" as const, file: f.file, message: f.message }));
+  return { gate: "fast-precheck", status: asFindings.length ? "block" : "pass", findings: asFindings, blocking: asFindings.length, ranAt };
 }

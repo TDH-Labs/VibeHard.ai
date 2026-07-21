@@ -7,6 +7,7 @@
  */
 import { isBlocking, type Finding, type Gate, type GateVerdict } from "../types.ts";
 import { runGate, GATES, FAST_GATES, type PipelineResult } from "../gate/index.ts";
+import { fastCheckVerdict, fastPreCheck } from "../gate/fast-checks.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
 import { captureSurface, tamperReason } from "./anti-tamper.ts";
@@ -101,6 +102,12 @@ export type GateRunner = (workspacePath: string) => Promise<PipelineResult>;
 export interface AutoFixOptions {
   gate?: GateRunner; // the inner-loop (fast) runner; default = FAST_GATES (cheap in-place verify)
   fullGate?: GateRunner; // the convergence (full) runner; default = GATES (real container verify)
+  /** Runs BEFORE `gate` every round; default = fast-checks.ts's fastPreCheck (stray protocol
+   *  artifacts, a bare `tsc --noEmit`, migration DDL against an embedded Postgres) — seconds, no
+   *  Docker, no sandbox boot. A model-spontaneous bug that would fail the real gate chain anyway
+   *  fails HERE first, so the loop doesn't pay a full round's cost just to learn that. Injectable
+   *  for tests, same reason `gate`/`fullGate` are. */
+  fastCheck?: GateRunner;
   gates?: Gate[];
   fixer?: Fixer;
   /** Max fix→re-gate cycles before escalating (§18 retry budget). */
@@ -189,9 +196,19 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   // Fast inner loop (verify = cheap in-place build), full verification ONCE at convergence.
   const gate: GateRunner = opts.gate ?? ((p) => runGate(p, opts.gates ?? FAST_GATES));
   const fullGate: GateRunner = opts.fullGate ?? opts.gate ?? ((p) => runGate(p, opts.gates ?? GATES));
-  // The cheap inner gate, then CONFIRM with the full suite when it passes — so a reported "pass"
-  // is always a TRUE pass (the full verifier still gates it; the proxy only speeds iteration).
+  const fastCheck: GateRunner =
+    opts.fastCheck ??
+    (async (p) => {
+      const r = await fastPreCheck(p);
+      return r.passed ? { passed: true, verdicts: [] } : { passed: false, verdicts: [fastCheckVerdict(r.findings, new Date().toISOString())] };
+    });
+  // Three tiers now, cheapest first: fastCheck (seconds, no Docker) → gate (cheap in-place build)
+  // → fullGate (real container verify), CONFIRMED only when everything cheaper already passed —
+  // so a reported "pass" is always a TRUE pass, and a doomed round fails at the cheapest tier
+  // that can already tell.
   const gateConfirmed: GateRunner = async (p) => {
+    const pre = await fastCheck(p);
+    if (!pre.passed) return pre;
     const r = await gate(p);
     return r.passed ? await fullGate(p) : r;
   };

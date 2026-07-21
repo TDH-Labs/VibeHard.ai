@@ -187,6 +187,84 @@ describe("autoFix loop", () => {
     expect(r.log.some((l) => /no progress for 3 rounds/.test(l))).toBe(true);
   });
 
+  describe("fastCheck — the cheapest tier, ahead of gate/fullGate (2026-07-21, live-loop wiring)", () => {
+    test("a fastCheck failure is fixed, THEN (only once it passes) gate/fullGate legitimately run", async () => {
+      const cf = countingFixer();
+      const r = await autoFix("/ws", {
+        fastCheck: scriptedGate([blockN(1), PASS]), // blocks once, the fixer round after "fixes" it
+        gate: scriptedGate([PASS]),
+        fullGate: scriptedGate([PASS]),
+        fixer: cf.fixer,
+        budget: 3,
+        now: ts,
+      });
+      expect(r.fixed).toBe(true); // fastCheck passed round 2 → falls through to gate/fullGate
+      expect(cf.calls()).toBe(1); // the fixer WAS invoked for the fastCheck-reported finding
+    });
+
+    test("fastCheck's blocking finding is reported under the 'fast-precheck' gate name, same shape as any other gate", async () => {
+      const r = await autoFix("/ws", {
+        fastCheck: scriptedGate([blockN(1)]),
+        gate: async () => {
+          throw new Error("must not reach the real gate while fastCheck blocks");
+        },
+        fixer: async () => {},
+        budget: 1,
+        now: ts,
+      });
+      expect(r.fixed).toBe(false);
+      expect(r.finalVerdicts[0]!.gate).toBe("verify"); // blockN's own gate name — fastCheck here is a test double, not the real one
+      expect(r.escalation?.items.length).toBeGreaterThan(0); // still escalates normally
+    });
+
+    test("a fastCheck pass falls through to gate/fullGate exactly like before this tier existed", async () => {
+      const cf = countingFixer();
+      const r = await autoFix("/ws", {
+        fastCheck: scriptedGate([PASS]),
+        gate: scriptedGate([BLOCK, PASS]),
+        fixer: cf.fixer,
+        budget: 3,
+        now: ts,
+      });
+      expect(r.fixed).toBe(true);
+      expect(cf.calls()).toBe(1);
+    });
+
+    test("the DEFAULT (real, non-injected) fastCheck catches a real stray-marker bug in an actual workspace, before gate/fullGate ever run", async () => {
+      const ws = mkdtempSync(join(tmpdir(), "vibehard-fastcheck-live-"));
+      budgetTmps.push(ws);
+      writeFileSync(join(ws, "page.tsx"), "export default function Page() { return null }\n]]>");
+      const explode: GateRunner = async () => {
+        throw new Error("must not reach the real gate chain — the real default fastPreCheck should catch this first");
+      };
+      // A no-op fixer: the stray marker is never actually removed, so the REAL fastPreCheck
+      // keeps blocking every round — gate/fullGate (both stubbed to throw) are never reached,
+      // proving interception holds across the whole loop, not just round 1.
+      const r = await autoFix(ws, { gate: explode, fullGate: explode, fixer: async () => {}, budget: 1, now: ts });
+      expect(r.fixed).toBe(false);
+      expect(r.finalVerdicts[0]!.gate).toBe("fast-precheck");
+      expect(r.finalVerdicts[0]!.findings[0]!.ruleId).toBe("stray-marker");
+      expect(r.finalVerdicts[0]!.findings[0]!.message).toContain("]]>");
+    });
+
+    test("the DEFAULT fastCheck converges once the fix actually clears it, then real gate/fullGate take over", async () => {
+      const ws = mkdtempSync(join(tmpdir(), "vibehard-fastcheck-live-"));
+      budgetTmps.push(ws);
+      writeFileSync(join(ws, "page.tsx"), "export default function Page() { return null }\n]]>");
+      let fixed = false;
+      const fixer: Fixer = async () => {
+        writeFileSync(join(ws, "page.tsx"), "export default function Page() { return null }\n");
+        fixed = true;
+      };
+      // gate/fullGate return PASS unconditionally — once the marker's gone, the real fastCheck
+      // passes too, so gateConfirmed legitimately reaches them (proving the tiers compose, not
+      // that fastCheck alone decides "fixed").
+      const r = await autoFix(ws, { gate: async () => (fixed ? PASS : BLOCK), fullGate: async () => PASS, fixer, budget: 2, now: ts });
+      expect(r.fixed).toBe(true);
+      expect(r.attempts).toBe(1); // one fixer round: clears the stray marker fastCheck was blocking on
+    });
+  });
+
   test("steady progress that doesn't converge in time stops at the NTE ceiling (hard cap)", async () => {
     const cf = countingFixer();
     const r = await autoFix("/ws", {

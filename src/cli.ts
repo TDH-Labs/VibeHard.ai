@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { formatWithOptions } from "node:util";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { deployGate, FAST_GATES, GATES, runGate } from "./gate/index.ts";
+import { fastCheckVerdict, fastPreCheck } from "./gate/fast-checks.ts";
 import { printReport, SUBPROCESS_TIMEOUT_MS } from "@vibehard/gate-check";
 import { runEval, cliBuild, formatReport, layeredGateScorer, type EvalCase } from "./eval/harness.ts";
 import { formatBenchReport, runBenchmark, type BenchCase } from "./eval/benchmark.ts";
@@ -587,6 +588,18 @@ export async function runAutoFixAndReport(target: string): Promise<number> {
       // convergence pass re-proves anyway (measured live, benchmark run 1: a healthy build
       // spent most of its 95+ minutes in redundant full verifies). The final bar is unchanged:
       // fullGate must still go green before "gate green" prints, and ship re-gates again.
+      // The cheapest tier, ahead of both: fast-checks.ts's deterministic checks (stray protocol
+      // artifacts, a bare tsc, migration DDL against an embedded Postgres) — seconds, no Docker.
+      // Explicitly wired (not left to autoFix's own default) so it prints through the SAME
+      // printGateVerdict every other gate uses — the web dashboard's per-gate checklist parses
+      // that exact "gate: <glyph> <name>" shape, and a fast-precheck round should show up in it
+      // exactly like any other gate's, not silently.
+      fastCheck: async (p) => {
+        const r = await fastPreCheck(p);
+        const verdict = fastCheckVerdict(r.findings, new Date().toISOString());
+        printGateVerdict(verdict);
+        return { passed: r.passed, verdicts: [verdict] };
+      },
       gate: (p) => runGate(p, FAST_GATES, printGateVerdict), // emit each gate's pass/fail live
       fullGate: (p) => runGate(p, GATES, printGateVerdict),
       humanAvailable: async () => false,

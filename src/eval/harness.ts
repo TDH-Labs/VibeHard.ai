@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { runGate } from "../gate/index.ts";
 import { llmFunctionalReviewer, type FunctionalCheck } from "../functest/functest.ts";
 import { configForStage } from "../config/models.ts";
-import { fastPreCheck } from "./fast-checks.ts";
+import { fastPreCheck } from "../gate/fast-checks.ts";
 
 /** One prompt to evaluate. `mustImplement` is feature-coverage the scorer checks (2026-07-09: was
  *  declared in the schema but never actually wired to a scorer — a corpus case could pass purely
