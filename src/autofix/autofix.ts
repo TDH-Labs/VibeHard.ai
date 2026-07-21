@@ -69,12 +69,12 @@ function fileHashes(root: string): Map<string, string> {
 
 /** KEYSTONE OF INDUCTION: a finding present before a fix and GONE after = the fix cleared it
  *  (verifier-gated). Record the (failure → the files that changed) pair as fleet evidence. */
-function captureResolutions(ws: string, stack: string | undefined, prev: Finding[], currentSigs: Set<string>, preFixHashes: Map<string, string>): void {
+async function captureResolutions(ws: string, stack: string | undefined, prev: Finding[], currentSigs: Set<string>, preFixHashes: Map<string, string>): Promise<void> {
   if (!prev.length) return;
   const now = fileHashes(ws);
   const changed = [...now].filter(([p, h]) => preFixHashes.get(p) !== h).map(([p]) => p);
   for (const f of prev) {
-    if (!currentSigs.has(sigOf(f))) recordResolution(stack, sigOf(f), { message: f.message, files: changed });
+    if (!currentSigs.has(sigOf(f))) await recordResolution(stack, sigOf(f), { message: f.message, files: changed });
   }
 }
 
@@ -241,14 +241,14 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
     // human-engineer pattern: iterate cheap, verify full only at convergence.
     const r = await gateConfirmed(workspacePath);
     if (r.passed) {
-      captureResolutions(workspacePath, fleetStack, prevBlocking, new Set(), preFixHashes);
+      await captureResolutions(workspacePath, fleetStack, prevBlocking, new Set(), preFixHashes);
       note(`gate green (full verification) after ${attempts} fix attempt(s)`);
       return { fixed: true, attempts, finalVerdicts: r.verdicts, escalation: null, log };
     }
 
     const blocking = r.verdicts.flatMap((v) => v.findings).filter(isBlocking);
     const currentSigs = new Set(blocking.map(sigOf));
-    captureResolutions(workspacePath, fleetStack, prevBlocking, currentSigs, preFixHashes); // what the last fix cleared
+    await captureResolutions(workspacePath, fleetStack, prevBlocking, currentSigs, preFixHashes); // what the last fix cleared
     const signature = blocking.map(fingerprint).sort().join("|");
     const blocked = r.verdicts.filter((v) => v.status === "block").map((v) => `${v.gate}(${v.blocking})`).join(", ");
 
@@ -278,7 +278,7 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       const sig = `${f.tool}:${f.ruleId}`;
       if (!recordedSignals.has(sig)) {
         recordedSignals.add(sig);
-        recordCandidate(fleetStack, sig, fleetAppId);
+        await recordCandidate(fleetStack, sig, fleetAppId);
       }
     }
     note(`attempt ${attempts}/${nte}: blocked by ${blocked} — applying fixes`);

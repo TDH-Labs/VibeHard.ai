@@ -107,7 +107,7 @@ export function llmArchitect(opts: LlmArchitectOptions = {}): Architect {
       : `SRS/PRD:\n${JSON.stringify(summary)}\n\nReturn the SAD JSON.`;
 
     // Inject the fleet's PLANNING-phase learned conventions (e.g. Supabase Auth, never Clerk).
-    const system = ARCHITECT_SYSTEM_PROMPT + (opts.template ? architectTemplateBlock(opts.template) : "") + fleetBlock(undefined, "planning");
+    const system = ARCHITECT_SYSTEM_PROMPT + (opts.template ? architectTemplateBlock(opts.template) : "") + (await fleetBlock(undefined, "planning"));
     const { text, finishReason } = await generateTextResilient({ model: modelFactory(config), system, prompt: user, maxOutputTokens: 12000 });
     // A "length" finishReason means the model truncated mid-JSON → unparseable → empty design,
     // which reviewArchitecture flags (no-workstreams) so the loop retries. The concise prompt keeps

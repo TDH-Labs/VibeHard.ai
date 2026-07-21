@@ -434,7 +434,7 @@ async function buildFromArchitecture(target: string, arch: Architecture, provide
       : isDownloadableTool
         ? selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget)
         : selectSystemPrompt(arch.stack, arch.prd.spec.deployTarget) + designBlock(designPresetKey)) +
-    fleetBlock(arch.stack, "codegen") +
+    (await fleetBlock(arch.stack, "codegen")) +
     steeringBlock(readWorkspaceSteering(target));
 
   // GOLDEN TEMPLATE (Phase 1): vendor the verified skeleton BEFORE codegen, tell codegen it's
@@ -1141,7 +1141,7 @@ export async function main(argv: string[]): Promise<number> {
       (newSpec.deployTarget === "downloadable-tool"
         ? selectSystemPrompt(arch.stack, newSpec.deployTarget)
         : selectSystemPrompt(arch.stack, newSpec.deployTarget) + designBlock(process.env.VIBEHARD_DESIGN ?? pickDesignPreset(newSpec))) +
-        fleetBlock(arch.stack, "codegen") +
+        (await fleetBlock(arch.stack, "codegen")) +
         steeringBlock(readWorkspaceSteering(target)),
       newSpec.deployTarget !== "downloadable-tool" && process.env.VIBEHARD_LANG !== "python" ? newSpec.clientOnlyStorage : undefined,
     );
@@ -1236,7 +1236,7 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (sub === "approve") {
-      const c = approveConvention(argv[2] ?? "");
+      const c = await approveConvention(argv[2] ?? "");
       console.log(c ? `✓ approved '${c.id}' — now LIVE (injected into builds) + a regression fixture was dropped.` : `no pending convention with id '${argv[2]}'`);
       return c ? 0 : 1;
     }

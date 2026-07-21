@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approveConvention, coerceConvention, isAbstract, llmInductor, pendingConventions, runInduction, sanitizeUntrusted } from "./induct.ts";
-import { loadConventions, recordCandidate, recordResolution, type Candidate } from "./fleet.ts";
+import { __resetFleetStoreForTests, loadConventions, recordCandidate, recordResolution, type Candidate } from "./fleet.ts";
 import type { EngineConfig } from "../types.ts";
 
 describe("sanitizeUntrusted — audit2: build-error text can't inject the induction LLM", () => {
@@ -41,8 +41,12 @@ describe("sanitizeUntrusted — audit2: build-error text can't inject the induct
   });
 });
 
+// DATABASE_URL is unset here (see fleet.test.ts's identical comment): resolveFleetStore() prefers
+// Postgres over the local file whenever it's set, and Bun auto-loads the repo's .env — which is
+// the LIVE PLATFORM's own DATABASE_URL. Left set, these tests would read/write production.
 let FLEET: string;
 let FIX: string;
+let savedDbUrl: string | undefined;
 const dirs: string[] = [];
 beforeEach(() => {
   FLEET = mkdtempSync(join(tmpdir(), "vibehard-fleet-"));
@@ -50,11 +54,17 @@ beforeEach(() => {
   dirs.push(FLEET, FIX);
   process.env.VIBEHARD_FLEET_DIR = FLEET;
   process.env.VIBEHARD_FIXTURES_DIR = FIX;
+  savedDbUrl = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  __resetFleetStoreForTests();
 });
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  if (savedDbUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = savedDbUrl;
   delete process.env.VIBEHARD_FLEET_DIR;
   delete process.env.VIBEHARD_FIXTURES_DIR;
+  __resetFleetStoreForTests();
 });
 
 const cand = (over: Partial<Candidate> = {}): Candidate => ({ key: "next-supabase::verify:x", stack: "next-supabase", signal: "verify:x", builds: 3, apps: [], resolutions: [], ...over });
@@ -98,10 +108,10 @@ describe("abstractability filter (universal vs specific)", () => {
     expect(isAbstract("Await async dynamic APIs before calling methods on them.", withEvidence)).toBe(true);
   });
   test("runInduction drops a proposal that leaked app-specifics", async () => {
-    recordResolution("next-supabase", "verify:spec-leak", { message: "x", files: ["app/attendance/Roster.tsx"] });
-    recordCandidate("next-supabase", "verify:spec-leak", "a");
-    recordCandidate("next-supabase", "verify:spec-leak", "b");
-    recordCandidate("next-supabase", "verify:spec-leak", "c");
+    await recordResolution("next-supabase", "verify:spec-leak", { message: "x", files: ["app/attendance/Roster.tsx"] });
+    await recordCandidate("next-supabase", "verify:spec-leak", "a");
+    await recordCandidate("next-supabase", "verify:spec-leak", "b");
+    await recordCandidate("next-supabase", "verify:spec-leak", "c");
     const leaky = async () => ({ id: "leaky", stack: "next-supabase", phase: "codegen" as const, rule: "Sync the roster grid for attendance.", addresses: "verify:spec-leak", builds: 3 });
     const proposed = await runInduction({ inductor: leaky });
     expect(proposed.some((p) => p.id === "leaky")).toBe(false); // rejected — not abstract
@@ -111,31 +121,31 @@ describe("abstractability filter (universal vs specific)", () => {
 describe("induction pipeline (verifier-gated, review-queued)", () => {
   test("only promotable candidates are induced, and proposals go to PENDING — never auto-live", async () => {
     // a candidate that recurred 3× with fix evidence (verifier-gated)
-    recordResolution("next-supabase", "verify:new-thing", { message: "boom", files: ["lib/a.ts"] });
-    recordCandidate("next-supabase", "verify:new-thing");
-    recordCandidate("next-supabase", "verify:new-thing");
-    recordCandidate("next-supabase", "verify:new-thing");
+    await recordResolution("next-supabase", "verify:new-thing", { message: "boom", files: ["lib/a.ts"] });
+    await recordCandidate("next-supabase", "verify:new-thing");
+    await recordCandidate("next-supabase", "verify:new-thing");
+    await recordCandidate("next-supabase", "verify:new-thing");
 
-    const before = loadConventions().length;
+    const before = (await loadConventions()).length;
     const fakeInductor = async () => ({ id: "fix-new-thing", stack: "next-supabase", phase: "codegen" as const, rule: "Do the thing that prevents new-thing failures.", addresses: "verify:new-thing", builds: 3 });
     const proposed = await runInduction({ inductor: fakeInductor });
 
     expect(proposed.map((p) => p.id)).toContain("fix-new-thing");
     expect(pendingConventions().some((p) => p.id === "fix-new-thing")).toBe(true);
-    expect(loadConventions().length).toBe(before); // NOT live yet — operator must approve
+    expect((await loadConventions()).length).toBe(before); // NOT live yet — operator must approve
   });
 
   test("approve → goes live AND drops a regression fixture (the harness lock)", async () => {
     const fakeInductor = async () => ({ id: "fix-it", stack: "next-supabase", phase: "codegen" as const, rule: "A real actionable convention.", addresses: "verify:z", builds: 3 });
-    recordResolution("next-supabase", "verify:z", { message: "x", files: ["a.ts"] });
-    recordCandidate("next-supabase", "verify:z");
-    recordCandidate("next-supabase", "verify:z");
-    recordCandidate("next-supabase", "verify:z");
+    await recordResolution("next-supabase", "verify:z", { message: "x", files: ["a.ts"] });
+    await recordCandidate("next-supabase", "verify:z");
+    await recordCandidate("next-supabase", "verify:z");
+    await recordCandidate("next-supabase", "verify:z");
     await runInduction({ inductor: fakeInductor });
 
-    const approved = approveConvention("fix-it");
+    const approved = await approveConvention("fix-it");
     expect(approved?.id).toBe("fix-it");
-    expect(loadConventions().some((c) => c.id === "fix-it")).toBe(true); // now live
+    expect((await loadConventions()).some((c) => c.id === "fix-it")).toBe(true); // now live
     expect(pendingConventions().some((p) => p.id === "fix-it")).toBe(false); // out of the queue
     expect(existsSync(join(FIX, "learned-fix-it.log"))).toBe(true); // regression fixture dropped
   });

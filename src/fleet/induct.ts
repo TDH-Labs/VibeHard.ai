@@ -130,7 +130,7 @@ export async function runInduction(opts: InductorOptions & { threshold?: number;
   const pending = readPending();
   const have = new Set([...pending.map((p) => p.id), ...pending.map((p) => p.addresses)]);
   const proposed: Convention[] = [];
-  for (const c of promotable(opts.threshold)) {
+  for (const c of await promotable(opts.threshold)) {
     if (have.has(c.signal)) continue; // already proposed for this signal
     const conv = await inductor(c);
     // verifier-gated diversity (promotable) got us here; the abstractability filter rejects a
@@ -148,11 +148,11 @@ export async function runInduction(opts: InductorOptions & { threshold?: number;
 
 /** Operator approves a pending convention → it goes LIVE (into the store) AND drops a regression
  *  fixture so the harness locks it (a later convention that breaks this failure-class is caught). */
-export function approveConvention(id: string): Convention | null {
+export async function approveConvention(id: string): Promise<Convention | null> {
   const pending = readPending();
   const conv = pending.find((c) => c.id === id);
   if (!conv) return null;
-  addConvention(conv); // live — now injected into builds
+  await addConvention(conv); // live — now injected into builds
   try {
     mkdirSync(fixturesDir(), { recursive: true });
     writeFileSync(join(fixturesDir(), `learned-${conv.id}.log`), `# regression fixture for learned convention '${conv.id}' (${conv.addresses})\n# auto-generated on approval; the harness asserts this failure class stays localizable.\n`);

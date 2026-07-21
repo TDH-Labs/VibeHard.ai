@@ -19,6 +19,7 @@ import { PgBuildProgressStore, type ActiveBuild, type BuildProgressStore, type B
 import { PgSecretsTokenStore } from "../src/build-substrate/secrets-token-store.ts";
 import { authorizeRecordRequest, PgDispatchTokenStore } from "../src/build-substrate/dispatch-token-store.ts";
 import { PgEscalationSink, PgRecordStore, PgSecretsStore } from "../src/platform/pg-store.ts";
+import { PgFleetStore, type Candidate } from "../src/fleet/store.ts";
 import type { BackendSecrets, DeploymentRecord } from "../src/substrate/types.ts";
 import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, readPlatformBuildSha, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
@@ -940,6 +941,52 @@ const server = Bun.serve({
           return json({ error: "ticket.id must match the ?id= query param" }, 400);
         }
         await tickets.put(ticket as EscalationTicket);
+        return json({ ok: true });
+      }
+      return json({ error: "method not allowed" }, 405);
+    }
+
+    // build-substrate: a sandboxed build's read of the platform-wide learned conventions
+    // (src/fleet/http-client.ts). Fourth sibling of the three above — but UNLIKE those three,
+    // fleet data is deliberately global, not scoped to one tenant/app (see fleet/store.ts's header
+    // for why), so authorization here is just "does this token resolve at all" — any active
+    // dispatch may read the shared conventions, there is no per-app data to leak. THE BUG THIS
+    // CLOSES (found live 2026-07-20, sandbox-durability audit): fleet.ts's conventions lived at
+    // `~/.vibehard/fleet/conventions.json` on WHATEVER machine ran the CLI — for an E2B sandbox,
+    // an always-fresh, always-empty disk. Every build's codegen/architecture prompt silently ran
+    // with ZERO learned conventions injected, no error, the entire time E2B dispatch has been live.
+    if (path === "/api/internal/fleet-conventions" && req.method === "GET") {
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+      const resolved = token ? await dispatchTokenStore.resolve(token) : null;
+      if (!resolved) return json({ error: "not found" }, 404);
+      return json({ conventions: await new PgFleetStore(platformDb.sql).getConventions() });
+    }
+
+    // build-substrate: a sandboxed build's read+write of ONE fleet candidate (recordCandidate/
+    // recordResolution, during the auto-fix loop) — same global-scope reasoning as
+    // fleet-conventions above. THE BUG THIS CLOSES: candidates.json had the IDENTICAL defect —
+    // every sandboxed build's "this gate failure recurred" counter reset to a fresh, empty file
+    // every time, so the promotion threshold (3 independent builds) could never be reached; no
+    // convention has been auto-promoted from a live E2B build since dispatch went live.
+    if (path === "/api/internal/fleet-candidates") {
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+      const resolved = token ? await dispatchTokenStore.resolve(token) : null;
+      if (!resolved) return json({ error: "not found" }, 404);
+      const key = url.searchParams.get("key");
+      if (!key) return json({ error: "key required" }, 400);
+      const candidates = new PgFleetStore(platformDb.sql);
+      if (req.method === "GET") return json({ candidate: await candidates.getCandidate(key) });
+      if (req.method === "PUT") {
+        let candidate: unknown;
+        try {
+          ({ candidate } = await req.json());
+        } catch {
+          return json({ error: "invalid request body" }, 400);
+        }
+        if (!candidate || typeof candidate !== "object" || (candidate as Candidate).key !== key) {
+          return json({ error: "candidate.key must match the ?key= query param" }, 400);
+        }
+        await candidates.putCandidate(candidate as Candidate);
         return json({ ok: true });
       }
       return json({ error: "method not allowed" }, 405);
