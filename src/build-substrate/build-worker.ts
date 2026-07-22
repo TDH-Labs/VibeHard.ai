@@ -93,7 +93,16 @@ const WORKSPACE_DIR = "/home/user/workspace";
 const CHECKPOINT_SCRIPT = "/home/user/checkpoint.sh";
 const PUSH_SCRIPT = "/home/user/push.sh";
 const CLI_PATH = "src/cli.ts"; // relative to the template image's own baked-in VibeHard checkout
-const DEFAULT_TIMEOUT_MS = 60 * 60_000; // 1h — real builds run 45+ min (docs/ROADMAP.md observed)
+// 90m. THE BUG THIS CLOSES (found live 2026-07-22): the old 1h budget only had margin for
+// autoFix's OWN 45-min internal ceiling (docs/ROADMAP.md's "real builds run 45+ min" observation),
+// not the front-half (spec/PRD/SRS/architecture/codegen) that runs BEFORE autoFix is ever called.
+// A real build's front-half + a full 45-min autoFix run (main loop + the 5-attempt no-human
+// extension, which shares the SAME internal ceiling but can still overrun it by one in-flight
+// round) totaled ~57+ minutes — close enough to the old 1h cap that E2B's OWN external kill won
+// the race against autoFix's graceful internal escalation, which never got to run: the sandbox
+// was torn down mid-round with NO escalation ticket ever written — a silent "error", not the
+// helpful "held, here's why" the same failure produces when autoFix gets to finish on its own.
+const DEFAULT_TIMEOUT_MS = 90 * 60_000;
 const FINAL_PUSH_ATTEMPTS = 3;
 // REAL BUG found live 2026-07-11 (first real end-to-end dispatch, not just a fake-sandbox unit
 // test): @vibehard/gate-check's host-lock.ts hardcodes DEFAULT_LOCK_DIR = "/root/.vibehard/
