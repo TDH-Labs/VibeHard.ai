@@ -12,6 +12,7 @@ import type { Finding } from "../types.ts";
 import { isSensitive, type Spec } from "../spec/index.ts";
 import type { Prd } from "../prd/index.ts";
 import type { Architecture } from "../architecture/index.ts";
+import { coerceDataModel } from "../backend/model.ts";
 
 const f = (ruleId: string, severity: Finding["severity"], message: string): Finding => ({
   tool: "spec-review",
@@ -21,10 +22,22 @@ const f = (ruleId: string, severity: Finding["severity"], message: string): Find
   message,
 });
 
-const ownsDataLayer = (arch: Architecture): boolean =>
-  arch.workstreams.some(
-    (w) => w.files.some((file) => /migration|schema|\.sql$/i.test(file)) || /\b(schema|migration|database|db|rls)\b/i.test(w.responsibility),
-  );
+const ownsDataLayer = (arch: Architecture): boolean => {
+  if (
+    arch.workstreams.some(
+      (w) => w.files.some((file) => /migration|schema|\.sql$/i.test(file)) || /\b(schema|migration|database|db|rls)\b/i.test(w.responsibility),
+    )
+  ) {
+    return true;
+  }
+  // Phase 1 (golden templates): for a Supabase stack, the data layer (migrations/RLS/auth/clients)
+  // is generated DETERMINISTICALLY from arch.dataModel (src/backend), not planned by the architect
+  // — the architect is deliberately expected to plan FEATURE workstreams only now. Found live
+  // 2026-07-22: a plan with zero db-owning workstreams still gets a real, verified schema/RLS layer
+  // (cli.ts's wantsDetBackend runs unconditionally for Supabase + a non-empty data model), so firing
+  // here is a false positive that hard-blocks an otherwise-buildable plan with nothing wrong with it.
+  return /supabase/i.test(arch.stack) && coerceDataModel(arch.dataModel).entities.length > 0;
+};
 
 export function crossCheck(spec: Spec, prd: Prd, arch: Architecture): Finding[] {
   const out: Finding[] = [];

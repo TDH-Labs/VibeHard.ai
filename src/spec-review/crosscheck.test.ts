@@ -64,6 +64,22 @@ describe("crossCheck — spec ↔ PRD ↔ architecture consistency", () => {
     expect(crossCheck(nonSensitive, prd({ spec: nonSensitive }), noData).find((x) => x.ruleId === "architecture-misses-data-layer")?.severity).toBe("medium");
   });
 
+  test("Supabase stack + a non-empty dataModel → NO data-layer finding even with no db-owning workstream (2026-07-22, real live block): Phase 1's deterministic backend generates the schema/RLS regardless of what the architect planned", () => {
+    const noDbWorkstream = arch({
+      workstreams: [ws("auth-pages", ["app/auth/signin/page.tsx"], "sign in/up"), ws("orders", ["app/actions/orders.ts"], "order CRUD")],
+      dataModel: { entities: [{ name: "Team", access: "tenant", fields: [] }, { name: "Order", access: "tenant", fields: [] }] },
+    });
+    expect(crossCheck(spec(), prd(), noDbWorkstream).map((x) => x.ruleId)).not.toContain("architecture-misses-data-layer");
+  });
+
+  test("Supabase stack but an EMPTY/absent dataModel → the finding still fires — nothing will actually generate a schema", () => {
+    const emptyModel = arch({
+      workstreams: [ws("api", ["api.ts"], "REST"), ws("ui", ["ui.tsx"], "frontend")],
+      dataModel: { entities: [] },
+    });
+    expect(crossCheck(spec(), prd(), emptyModel).map((x) => x.ruleId)).toContain("architecture-misses-data-layer");
+  });
+
   test("clientOnlyStorage → NO data-layer finding (2026-07-17, fired on e2e-9 and e2e-11): the browser IS the storage, and the 'fix' this finding suggests is the exact backend client-only-app-has-backend blocks", () => {
     const clientOnly = spec({ clientOnlyStorage: true });
     const noData = arch({ workstreams: [ws("timer", ["hooks/useTimer.ts"], "countdown"), ws("ui", ["app/page.tsx"], "frontend")] });
