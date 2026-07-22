@@ -410,6 +410,57 @@ describe("autoFix loop", () => {
     expect(gatedAfterTamper).toBe(false); // rejected BEFORE re-gating — a gamed green is unreachable
   });
 
+  describe("tamper retry (2026-07-22) — a rejected fix gets ONE warned second chance before escalating", () => {
+    test("a genuine fix on the warned retry recovers — no escalation, no human needed", async () => {
+      const dir = wsWithFeatures(0);
+      writeFileSync(join(dir, "app.ts"), "export const x = 1;\n");
+      let calls = 0;
+      const fixer: Fixer = async () => {
+        calls++;
+        // round 1: "fixes" the finding by suppressing instead of fixing → REJECTED as tampering
+        // the warned retry: a genuine fix, no suppression → should be accepted
+        writeFileSync(join(dir, "app.ts"), calls === 1 ? "export const x = 1 as any;\n" : "export const x: number = 1;\n");
+      };
+      const r = await autoFix(dir, { gate: scriptedGate([BLOCK, PASS]), fixer, budget: 5, now: ts });
+      expect(r.fixed).toBe(true);
+      expect(r.escalation).toBeNull();
+      expect(calls).toBe(2); // the original attempt + exactly one warned retry
+      expect(r.log.some((l) => /REJECTED as tampering/.test(l) && /retrying once with an explicit warning/.test(l))).toBe(true);
+      expect(r.log.some((l) => /warned retry cleared the tampering/.test(l))).toBe(true);
+    });
+
+    test("tampering AGAIN on the warned retry escalates for real — no further retries", async () => {
+      const dir = wsWithFeatures(0);
+      writeFileSync(join(dir, "app.ts"), "export const x = 1;\n");
+      let calls = 0;
+      const fixer: Fixer = async () => {
+        calls++;
+        // every attempt, including the warned retry, reaches for the same suppression
+        writeFileSync(join(dir, "app.ts"), `export const x = ${calls} as any;\n`);
+      };
+      const r = await autoFix(dir, { gate: scriptedGate([BLOCK]), fixer, budget: 5, now: ts });
+      expect(r.fixed).toBe(false);
+      expect(r.escalation).not.toBeNull();
+      expect(calls).toBe(2); // the original attempt + exactly one warned retry, then it gives up
+      expect(r.log.some((l) => /REJECTED as tampering AGAIN after a warned retry/.test(l))).toBe(true);
+    });
+
+    test("tamperRetryBudget: 0 disables the retry — matches the old immediate-escalation behavior", async () => {
+      const dir = wsWithFeatures(0);
+      writeFileSync(join(dir, "app.ts"), "export const x = 1;\n");
+      let calls = 0;
+      const fixer: Fixer = async () => {
+        calls++;
+        writeFileSync(join(dir, "app.ts"), "export const x = 1 as any;\n");
+      };
+      const r = await autoFix(dir, { gate: scriptedGate([BLOCK]), fixer, budget: 5, tamperRetryBudget: 0, now: ts });
+      expect(r.fixed).toBe(false);
+      expect(r.escalation).not.toBeNull();
+      expect(calls).toBe(1); // no retry at all — escalates on the very first tamper
+      expect(r.log.some((l) => /retrying once/.test(l))).toBe(false);
+    });
+  });
+
   test("a human IS available → holds immediately, no extra loops", async () => {
     const r = await autoFix("/ws", {
       gate: scriptedGate([BLOCK]),

@@ -118,6 +118,34 @@ describe("generateBackend — deterministic, correct-by-construction", () => {
     expect(s.indexOf('insert("Child"')).toBeLessThan(s.indexOf('insert("Invoice"'));
   });
 
+  test("seed: a tenant-root field beyond `name` doesn't emit a reference to the (out-of-scope) row-loop variable `i` (regression: real TS2304 \"Cannot find name 'i'\" in a live build's scripts/seed.ts — the tenant is a single row inserted outside any `for` loop, but valueExpr()'s branches assume one)", () => {
+    const model: DataModel = coerceDataModel({
+      tenantEntity: "Team",
+      tenantField: "teamId",
+      roleField: "role",
+      adminRole: "admin",
+      entities: [
+        {
+          name: "Team",
+          access: "tenant",
+          fields: [
+            { name: "name", type: "text" },
+            { name: "teamName", type: "text" }, // ends with "name" → valueExpr returns fullName(i)
+            { name: "inviteCode", type: "text" }, // untyped-text default branch → also references i
+          ],
+        },
+      ],
+    });
+    const dir = ws();
+    generateSeed(dir, model);
+    const s = readFileSync(join(dir, "scripts/seed.ts"), "utf8");
+    const tenantLine = s.split("\n").find((l) => l.includes('.from("Team").insert'));
+    expect(tenantLine).toBeDefined();
+    expect(tenantLine).toContain("fullName(i)"); // confirms this fixture reproduces the i-referencing branch
+    // `i` must already be declared by the time the tenant insert line uses it
+    expect(s.slice(0, s.indexOf(tenantLine!))).toMatch(/const i = 0;/);
+  });
+
   test("dashboard: an overview page with KPI counts + recent items, from the model", () => {
     const dir = ws();
     const r = generateDashboard(dir, MODEL);

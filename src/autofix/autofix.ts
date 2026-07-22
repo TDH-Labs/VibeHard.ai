@@ -10,7 +10,7 @@ import { runGate, GATES, FAST_GATES, type PipelineResult } from "../gate/index.t
 import { fastCheckVerdict, fastPreCheck } from "../gate/fast-checks.ts";
 import { buildEscalationPacket, type EscalationPacket } from "../escalation/index.ts";
 import { defaultFixer, type Fixer } from "./fixer.ts";
-import { captureSurface, tamperReason } from "./anti-tamper.ts";
+import { captureSurface, tamperReason, type ProtectedSurface } from "./anti-tamper.ts";
 import { recordRound } from "../journal/journal.ts";
 import { recordCandidate, recordResolution } from "../fleet/fleet.ts";
 import { readFileSync, readdirSync, existsSync, writeFileSync } from "node:fs";
@@ -129,6 +129,11 @@ export interface AutoFixOptions {
    *  not a new failure mode. Found live 2026-07-09: a real build went silent for ~7 hours
    *  with zero forward progress and zero error. */
   maxDurationMs?: number;
+  /** How many warned retries a tampering rejection gets before escalating for real (default 1),
+   *  shared across the main loop and the no-human extension. Every rejection still re-verifies
+   *  against the untampered surface; a SECOND tamper on the same round always escalates — this
+   *  only gives the fixer one genuine second chance after being told exactly what it did wrong. */
+  tamperRetryBudget?: number;
   now?: string;
   onStep?: (msg: string) => void;
   /** build-substrate W3: called (and awaited) once per completed autofix iteration — the
@@ -204,6 +209,37 @@ function fingerprint(f: Finding): string {
   return `${f.tool}:${f.ruleId}:${f.file}:${f.line ?? "?"}`;
 }
 
+/** ONE warned retry after a tampering rejection (shared budget across the main loop AND the
+ *  no-human extension — same guarantee, same strictness, so it must be the same call). Every fix
+ *  prompt already forbids suppression outright (fixer.ts's buildFixPrompt) — a single stochastic
+ *  slip doesn't mean the model can't self-correct once told EXACTLY what it did wrong. This does
+ *  NOT weaken "never accept a gamed gate": the retry is re-verified against the SAME `before`
+ *  surface, and a SECOND tamper on the same round escalates for real, no further retries. */
+async function retryAfterTamper(
+  fixer: Fixer,
+  workspacePath: string,
+  verdicts: GateVerdict[],
+  before: ProtectedSurface,
+  blocking: Finding[],
+  firstReason: string,
+  note: (m: string) => void,
+): Promise<string | null> {
+  const warning: Finding = {
+    tool: "anti-tamper",
+    ruleId: "tampering-rejected",
+    severity: "critical",
+    file: "",
+    message: `Your previous fix attempt was REJECTED: ${firstReason}. Undo whatever change caused that (remove the suppression directive / restore whatever was deleted or weakened), then provide a GENUINE fix for the issues below — do not suppress, delete, or weaken anything.`,
+  };
+  const rewarned: GateVerdict[] = [...verdicts, { gate: "anti-tamper", status: "block", findings: [warning], blocking: 1, ranAt: new Date().toISOString() }];
+  try {
+    await applyFixWithRetry(fixer, workspacePath, rewarned, note);
+  } catch (e) {
+    return `the fixer errored twice on the warned retry: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  return tamperReason(before, captureSurface(workspacePath, blocking));
+}
+
 export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}): Promise<AutoFixResult> {
   // Fast inner loop (verify = cheap in-place build), full verification ONCE at convergence.
   const gate: GateRunner = opts.gate ?? ((p) => runGate(p, opts.gates ?? FAST_GATES));
@@ -227,6 +263,8 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
   const fixer: Fixer = opts.fixer ?? defaultFixer();
   const nte = opts.budget ?? defaultBudgetFor(workspacePath);
   const maxDurationMs = opts.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
+  const tamperRetryBudget = opts.tamperRetryBudget ?? 1;
+  let tamperRetriesUsed = 0;
   const startedAt = Date.now();
   const log: string[] = [];
   const note = (m: string): void => {
@@ -323,10 +361,26 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
       break;
     }
     // ANTI-TAMPER (audit CRITICAL-1): a fix may not clear a gate by deleting the flagged file/table.
-    // If it shrank protected surface, REJECT the round and escalate — a gamed green is never accepted.
+    // If it shrank protected surface, REJECT the round — a gamed green is never accepted. Give it
+    // ONE warned retry (bounded, shared with the extension phase) before escalating: still
+    // re-verified against the SAME untampered surface, still rejected for real on a second tamper.
     tampered = tamperReason(beforeSurface, captureSurface(workspacePath, blocking));
     if (tampered) {
-      stopReason = `fix REJECTED as tampering — ${tampered}`;
+      const firstReason = tampered;
+      if (tamperRetriesUsed < tamperRetryBudget && Date.now() - startedAt <= maxDurationMs) {
+        tamperRetriesUsed++;
+        note(`fix REJECTED as tampering — ${firstReason}; retrying once with an explicit warning before escalating`);
+        attempts++;
+        tampered = await retryAfterTamper(fixer, workspacePath, r.verdicts, beforeSurface, blocking, firstReason, note);
+        if (!tampered) {
+          note(`warned retry cleared the tampering — continuing`);
+          await opts.onRoundComplete?.(attempts);
+          continue;
+        }
+        stopReason = `fix REJECTED as tampering AGAIN after a warned retry — ${tampered}`;
+      } else {
+        stopReason = `fix REJECTED as tampering — ${firstReason}`;
+      }
       note(`${stopReason}; escalating (a gate made green by removing protected code is not a fix)`);
       break;
     }
@@ -386,8 +440,26 @@ export async function autoFix(workspacePath: string, opts: AutoFixOptions = {}):
         note(`fixer errored twice: ${e instanceof Error ? e.message : String(e)} — stopping extra attempts`);
         break;
       }
-      const extraTamper = tamperReason(beforeExtraSurface, captureSurface(workspacePath, extraBlocking));
+      let extraTamper = tamperReason(beforeExtraSurface, captureSurface(workspacePath, extraBlocking));
       if (extraTamper) {
+        const firstReason = extraTamper;
+        if (tamperRetriesUsed < tamperRetryBudget && Date.now() - startedAt <= maxDurationMs) {
+          tamperRetriesUsed++;
+          note(`fix REJECTED as tampering — ${firstReason}; retrying once with an explicit warning before escalating`);
+          attempts++;
+          extraTamper = await retryAfterTamper(fixer, workspacePath, final.verdicts, beforeExtraSurface, extraBlocking, firstReason, note);
+          if (!extraTamper) {
+            note(`warned retry cleared the tampering — continuing`);
+            await normalizeDockerfile(workspacePath, note);
+            await opts.onRoundComplete?.(attempts);
+            final = await gateConfirmed(workspacePath);
+            if (final.passed) {
+              note(`gate green after ${attempts} fix attempt(s) (no-human extension)`);
+              return { fixed: true, attempts, finalVerdicts: final.verdicts, escalation: null, log };
+            }
+            continue;
+          }
+        }
         note(`fix REJECTED as tampering — ${extraTamper}`);
         stopReason = `${stopReason}; an extension-round fix was rejected as tampering (${extraTamper})`;
         break; // escalate with `final` — the real, pre-tamper verdicts

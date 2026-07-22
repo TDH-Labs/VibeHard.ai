@@ -104,6 +104,13 @@ function seedScript(model: DataModel, rows = 4): string {
     const tenantFields = (te?.fields ?? []).filter((f) => !f.references).map((f) => `${JSON.stringify(f.name)}: ${valueExpr(model, te!, f)}`);
     tenantSetup = [
       `  // 1) the demo tenant`,
+      // valueExpr()'s branches assume a `for (let i ...)` row loop is in scope (fullName(i), i % 2,
+      // the numeric/date/default-text expressions) — but the tenant is a SINGLE row, inserted outside
+      // any loop. Without this, a tenant field like a "name"-suffixed or untyped column emits a
+      // reference to `i` that doesn't exist here → real TS2304 "Cannot find name 'i'" in the generated
+      // script (found live: an app whose tenant entity had a plain "team_name" field). Bind it to 0 —
+      // the same value every field's expression would take on the first row of an actual loop.
+      `  const i = 0;`,
       `  const { data: t, error: te } = await sb.from(${JSON.stringify(model.tenantEntity)}).insert({ ${["name: 'Demo Organization'", ...tenantFields.filter((x) => !x.startsWith('"name"'))].join(", ")} }).select('id').single();`,
       `  if (te) { console.error('tenant', te.message); return; }`,
       `  const tenantId = t.id as string;`,
