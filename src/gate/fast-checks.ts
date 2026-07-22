@@ -86,13 +86,47 @@ export function scanForStrayMarkers(workspacePath: string): FastFinding[] {
   return findings;
 }
 
+/** A safe subset of semver-range syntax — digits, dots, letters (prerelease tags), and the range
+ *  operators npm/bunx accept (^ ~ < > = | space -). Guards the `--package typescript@<version>`
+ *  spec below against anything unexpected reaching a bunx package spec, since the value can come
+ *  from a generated (LLM- or fixer-touched) package.json, not just our own trusted templates. */
+const SAFE_VERSION_RANGE = /^[A-Za-z0-9. ^~<>=|-]+$/;
+
+/** The workspace's OWN declared `typescript` version (dependencies or devDependencies), or a
+ *  known-good fallback (the templates' own pin) when package.json is absent, unreadable, or
+ *  declares nothing usable. Never "whatever's currently latest on npm" — see typecheckOnly. */
+function declaredTypescriptVersion(workspacePath: string): string {
+  const FALLBACK = "5.7.3";
+  try {
+    const pkg = JSON.parse(readFileSync(join(workspacePath, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const v = pkg.devDependencies?.typescript ?? pkg.dependencies?.typescript;
+    if (typeof v === "string" && SAFE_VERSION_RANGE.test(v.trim())) return v.trim();
+    return FALLBACK;
+  } catch {
+    return FALLBACK;
+  }
+}
+
 /** Run `tsc --noEmit` directly against the workspace — the single largest class of generated-app
  *  build failure, caught in seconds instead of the ~10 minutes a from-scratch npm ci + next build
  *  costs. Skipped (passed: true, no findings) when there's no tsconfig.json — not every generated
- *  stack is TypeScript. */
+ *  stack is TypeScript.
+ *
+ *  Pinned to the WORKSPACE's own declared typescript version (never a bare `bunx tsc`): this runs
+ *  before any install step (that's the whole point — seconds, not minutes), so there is no
+ *  node_modules/typescript for bunx to find yet, and a bare `bunx tsc` silently fetches whatever
+ *  npm currently tags "latest" — completely unrelated to what the generated app actually declares
+ *  or will be built with. Found live 2026-07-22: npm's "latest" typescript had moved to a new
+ *  major that REMOVED the `baseUrl` compiler option (TS5102) — the golden template's tsconfig.json
+ *  is fine against the app's real, pinned 5.7.3, but a floating "latest" tsc failed it outright,
+ *  a false positive the auto-fix loop burned 6 attempts on before correctly giving up and escalating. */
 export async function typecheckOnly(workspacePath: string): Promise<{ passed: boolean; findings: FastFinding[] }> {
   if (!(await Bun.file(join(workspacePath, "tsconfig.json")).exists())) return { passed: true, findings: [] };
-  const proc = Bun.spawnSync(["bunx", "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe" });
+  const tsVersion = declaredTypescriptVersion(workspacePath);
+  const proc = Bun.spawnSync(["bunx", "--package", `typescript@${tsVersion}`, "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe" });
   if ((proc.exitCode ?? 1) === 0) return { passed: true, findings: [] };
   const out = `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`.trim();
   // tsc prints one diagnostic per line ("file.ts(12,3): error TS2345: ..."); surface each as its

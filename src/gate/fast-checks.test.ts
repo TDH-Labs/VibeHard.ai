@@ -78,6 +78,24 @@ describe("typecheckOnly — the largest class of build failure, caught in second
     expect(r.passed).toBe(false);
     expect(r.findings.some((f) => f.check === "typecheck" && /TS2322/.test(f.message))).toBe(true);
   }, 20_000);
+
+  test("checks against the WORKSPACE's own declared typescript version, not whatever bunx resolves to bare (2026-07-22, real live block: npm's 'latest' typescript removed the baseUrl option — TS5102 — false-failing the golden template's valid tsconfig.json before any install ever ran)", async () => {
+    const ws = workspace();
+    write(ws, "package.json", JSON.stringify({ devDependencies: { typescript: "5.7.3" } }));
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", baseUrl: ".", paths: { "@/*": ["./*"] } } }));
+    write(ws, "index.ts", "export const x: number = 1;\n");
+    const r = await typecheckOnly(ws);
+    expect(r).toEqual({ passed: true, findings: [] });
+  }, 30_000);
+
+  test("a malformed/unsafe typescript version in package.json falls back to the known-good default rather than reaching bunx unsanitized", async () => {
+    const ws = workspace();
+    write(ws, "package.json", JSON.stringify({ devDependencies: { typescript: "git+https://evil.example/x.git" } }));
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", baseUrl: ".", paths: { "@/*": ["./*"] } } }));
+    write(ws, "index.ts", "export const x: number = 1;\n");
+    const r = await typecheckOnly(ws);
+    expect(r).toEqual({ passed: true, findings: [] }); // fell back to the safe pin, baseUrl still resolves fine
+  }, 30_000);
 });
 
 describe("checkMigrations — the 'teams is not a view' incident, caught in milliseconds via embedded Postgres", () => {
