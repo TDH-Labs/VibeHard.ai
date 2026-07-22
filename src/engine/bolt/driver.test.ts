@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { MockLanguageModelV3 } from "ai/test";
 import { simulateReadableStream, type LanguageModel } from "ai";
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
-import { defaultModelFactory, liveBoltDriver } from "./driver.ts";
+import { defaultModelFactory, generateTextResilient, liveBoltDriver } from "./driver.ts";
 import { BoltEngine } from "./engine.ts";
 import { VIBEHARD_SYSTEM_PROMPT } from "./prompt.ts";
 import type { EngineConfig, EngineEvent } from "../../types.ts";
@@ -87,6 +87,26 @@ describe("liveBoltDriver", () => {
     expect(calls).toBe(2); // failed once, retried from scratch, succeeded
   });
 
+  test("retries an OpenRouter 'Upstream error from <provider>' passthrough (2026-07-22, real live block: a codegen call died on this with zero retry, discarding 3 already-completed workstreams)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doStream: async () => {
+        calls++;
+        if (calls === 1) throw new Error("Upstream error from Ambient: Upstream error");
+        const chunks: LanguageModelV3StreamPart[] = [
+          { type: "text-start", id: "1" },
+          { type: "text-delta", id: "1", delta: ARTIFACT },
+          { type: "text-end", id: "1" },
+          { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: USAGE },
+        ];
+        return { stream: simulateReadableStream({ initialDelayInMs: 0, chunkDelayInMs: 0, chunks }) };
+      },
+    });
+    const driver = liveBoltDriver({ modelFactory: () => model });
+    expect(await collectText(driver)).toBe(ARTIFACT);
+    expect(calls).toBe(2); // failed once, retried from scratch, succeeded
+  });
+
   test("does NOT retry a non-transient failure (e.g. bad credentials) — fails fast", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({
@@ -108,6 +128,34 @@ describe("liveBoltDriver", () => {
     };
     await collectText(liveBoltDriver({ modelFactory: factory }));
     expect(calls).toEqual([CONFIG]);
+  });
+});
+
+describe("generateTextResilient — the non-streaming analog (planning stages: PRD/SRS/architecture)", () => {
+  test("retries an OpenRouter 'Upstream error from <provider>' passthrough, same as the streaming driver", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        if (calls === 1) throw new Error("Upstream error from Ambient: Upstream error");
+        return { content: [{ type: "text", text: "ok" }], finishReason: { unified: "stop", raw: "stop" }, usage: USAGE, warnings: [] };
+      },
+    });
+    const result = await generateTextResilient({ model, prompt: "x" }, { retries: 2 });
+    expect(result.text).toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  test("does NOT retry a non-transient failure — fails fast", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        throw new Error("invalid x-api-key");
+      },
+    });
+    await expect(generateTextResilient({ model, prompt: "x" }, { retries: 2 })).rejects.toThrow(/invalid x-api-key/);
+    expect(calls).toBe(1);
   });
 });
 

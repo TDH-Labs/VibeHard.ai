@@ -47,8 +47,11 @@ export async function generateTextResilient(
       lastErr = e;
       const sig = e instanceof Error ? `${e.name} ${e.message}` : String(e);
       // JSONParseError/Unexpected EOF: the PROVIDER's own response body failed to parse — same
-      // degeneration class as above, surfaced by the SDK before we ever see text.
-      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|JSON parse|JSONParseError|JSON parsing failed|Invalid JSON response|Unexpected EOF|whitespace-only|\b(429|500|502|503|504)\b/i.test(sig);
+      // degeneration class as above, surfaced by the SDK before we ever see text. "Upstream error
+      // from <provider>": OpenRouter's own passthrough for a backend node failing (found live
+      // 2026-07-22: a codegen call died on "Upstream error from Ambient: Upstream error" with zero
+      // retry, discarding 3 already-completed workstreams) — same class as a 502/503 from a proxy.
+      const transient = /timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|JSON parse|JSONParseError|JSON parsing failed|Invalid JSON response|Unexpected EOF|whitespace-only|upstream error|\b(429|500|502|503|504)\b/i.test(sig);
       if (!transient || attempt === retries) throw e;
       console.error(`[llm-retry] attempt ${attempt + 1}/${retries + 1} failed transiently (${sig.slice(0, 120)}) — retrying`);
       await new Promise((r) => setTimeout(r, 2000 * (attempt + 1))); // linear backoff
@@ -196,7 +199,11 @@ export function liveBoltDriver(opts: LiveBoltDriverOptions = {}): BoltDriver {
         } catch (e) {
           lastErr = e;
           const sig = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-          const transient = /abort|timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|idle|stream exceeded|\b(429|500|502|503|504)\b/i.test(sig);
+          // "Upstream error from <provider>": OpenRouter's own passthrough for a backend node
+          // failing (found live 2026-07-22: a codegen call died on "Upstream error from Ambient:
+          // Upstream error" with zero retry, discarding 3 already-completed workstreams) — same
+          // class as a 502/503 from a proxy, not a genuine, non-retryable failure.
+          const transient = /abort|timed out|timeout|ECONNRESET|fetch failed|network|terminated|socket|idle|stream exceeded|upstream error|\b(429|500|502|503|504)\b/i.test(sig);
           if (!transient || attempt === retries) throw e;
           await new Promise((r) => setTimeout(r, backoffMs * (attempt + 1))); // linear backoff, then retry from scratch
           continue;
