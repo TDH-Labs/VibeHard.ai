@@ -155,8 +155,20 @@ export interface AutoFixResult {
 const DEFAULT_BUDGET = 10;
 
 /** Default outer wall-clock ceiling on the whole autoFix loop (see AutoFixOptions.maxDurationMs).
- *  45 minutes is generous for a real multi-round build with heavy fix rounds, and still finite. */
-const DEFAULT_MAX_DURATION_MS = 45 * 60_000;
+ *
+ * 35 minutes, not 45. THE BUG THIS CLOSES (found live 2026-07-22): a sandboxed build's total
+ * wall-clock is front-half (spec/PRD/SRS/architecture/codegen — runs BEFORE autoFix is ever
+ * called) + this ceiling + one round's worth of overrun (the ceiling is checked once per round,
+ * so a round already in flight when it fires still completes) + checkpoint/final-push overhead —
+ * all of which has to fit under the E2B sandbox's own timeoutMs, which is HARD-CAPPED at 1 hour
+ * by E2B's API (confirmed live: asking for even 90 minutes was rejected outright, so raising the
+ * sandbox's own budget isn't an available lever). A real build measured at ~57 total minutes
+ * with the OLD 45-min ceiling — close enough to the 60-min sandbox cap that E2B's external kill
+ * won the race against autoFix's own graceful escalation, which never got to run: the sandbox
+ * was torn down mid-round with no escalation ticket ever written. 35 minutes leaves ~25 minutes
+ * of headroom under the fixed 60-min cap for front-half + overrun + push, comfortably wide given
+ * front-half was observed to need on the order of 10-15 minutes. */
+const DEFAULT_MAX_DURATION_MS = 35 * 60_000;
 
 /** The budget must SCALE with how many features the build owes: the completeness gate makes the
  *  loop build one missing feature per round, and each feature is ~1 build round + ~1 round to fix
