@@ -138,3 +138,62 @@ describe("depvuln — a no-lockfile scan is flagged incomplete, not a silent pas
     rmf(d, { recursive: true, force: true });
   });
 });
+
+import { annotateReachability } from "./depvuln.ts";
+import type { Finding } from "./types.ts";
+describe("annotateReachability — reachability-aware severity (2026-07-23)", () => {
+  const ts = "2026-06-21T00:00:00.000Z";
+  const sharpFinding = (severity: "critical" | "high" = "high"): Finding => ({
+    tool: "trivy",
+    ruleId: "CVE-2026-1234",
+    severity,
+    file: "package-lock.json",
+    message: "sharp@0.32.0: a libvips CVE (fixed in 0.33.0)",
+  });
+
+  test("THE PATTERN THIS CLOSES: a sharp CVE in a Next.js static-export project is downgraded to medium (never dropped) with the reason appended", () => {
+    const d = mkd(pj(td(), "vibehard-reachability-"));
+    wf(pj(d, "next.config.js"), "module.exports = { output: 'export', images: { unoptimized: true } };");
+    const out = annotateReachability([sharpFinding()], d);
+    expect(out).toHaveLength(1); // still visible
+    expect(out[0]!.severity).toBe("medium"); // no longer blocking
+    expect(out[0]!.message).toContain("sharp@0.32.0"); // the original finding is preserved verbatim...
+    expect(out[0]!.message).toContain("downgraded"); // ...with the reason appended
+    expect(verdictOf("depvuln", out, ts).status).toBe("pass");
+    rmf(d, { recursive: true, force: true });
+  });
+
+  test("no static export declared → the sharp finding is untouched (still blocks)", () => {
+    const d = mkd(pj(td(), "vibehard-reachability-"));
+    wf(pj(d, "next.config.js"), "module.exports = {};");
+    const out = annotateReachability([sharpFinding()], d);
+    expect(out).toEqual([sharpFinding()]);
+    expect(verdictOf("depvuln", out, ts).status).toBe("block");
+    rmf(d, { recursive: true, force: true });
+  });
+
+  test("static export declared, but a DIFFERENT package's CVE → untouched (the rule is sharp-specific, not blanket)", () => {
+    const d = mkd(pj(td(), "vibehard-reachability-"));
+    wf(pj(d, "next.config.js"), "module.exports = { output: 'export' };");
+    const nextFinding: Finding = { tool: "trivy", ruleId: "CVE-2026-9999", severity: "high", file: "package-lock.json", message: "next@15.0.0: a server-side CVE" };
+    const out = annotateReachability([nextFinding], d);
+    expect(out).toEqual([nextFinding]);
+    rmf(d, { recursive: true, force: true });
+  });
+
+  test("static export declared, sharp finding already medium/low → left alone (nothing to downgrade further)", () => {
+    const d = mkd(pj(td(), "vibehard-reachability-"));
+    wf(pj(d, "next.config.js"), "module.exports = { output: 'export' };");
+    const mediumSharp: Finding = { tool: "trivy", ruleId: "CVE-x", severity: "medium", file: "package-lock.json", message: "sharp@0.32.0: a minor issue" };
+    const out = annotateReachability([mediumSharp], d);
+    expect(out).toEqual([mediumSharp]);
+    rmf(d, { recursive: true, force: true });
+  });
+
+  test("no next.config at all → untouched (not a Next.js project, or config is elsewhere)", () => {
+    const d = mkd(pj(td(), "vibehard-reachability-"));
+    const out = annotateReachability([sharpFinding()], d);
+    expect(out).toEqual([sharpFinding()]);
+    rmf(d, { recursive: true, force: true });
+  });
+});

@@ -121,6 +121,46 @@ export function interpretTrivy(stdout: string, exitCode: number, stderr: string,
   return parseTrivy(json); // Results ?? [] → a clean no-deps scan yields no findings (PASS)
 }
 
+/** True if `projectPath`'s next.config.{js,mjs,ts,cjs} declares `output: 'export'` (a static
+ *  export — no Next.js server runtime ever runs). Pure text match, deliberately: this only
+ *  needs to catch the literal, common declaration shape, not evaluate an arbitrary config file. */
+function isNextStaticExport(projectPath: string): boolean {
+  for (const name of ["next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"]) {
+    try {
+      const src = readFileSync(join(projectPath, name), "utf8");
+      if (/output\s*:\s*['"]export['"]/.test(src)) return true;
+    } catch {
+      /* missing/unreadable → not this file */
+    }
+  }
+  return false;
+}
+
+/** Reachability-aware severity (found live 2026-07-23, an out-of-distribution audit of an
+ *  unrelated project): trivy flagged CVEs in `sharp` at reachable-looking severity in a project
+ *  that ships as a Next.js static export — Next's own docs are explicit that its built-in image
+ *  optimizer (the only thing in a typical app that invokes sharp) "is not available during
+ *  `next export`" unless a custom loader is wired in. Severity here is otherwise entirely
+ *  context-free (trivy has no idea whether a flagged package's vulnerable code path can ever
+ *  execute), so a static-export project chasing sharp CVEs as urgent is chasing a ghost.
+ *
+ *  Downgrades (NEVER drops — the finding stays visible, just non-blocking, exactly like any
+ *  other medium/low trivy finding) a `sharp` finding from critical/high to medium, with the
+ *  reason appended to the message. Deliberately narrow: this is the ONE reachability pattern
+ *  that's been verified end-to-end (not every CVE, not every framework) — see depvuln.test.ts
+ *  for the case this does NOT touch (no static export, or a non-sharp package). */
+export function annotateReachability(findings: Finding[], projectPath: string): Finding[] {
+  if (!isNextStaticExport(projectPath)) return findings;
+  return findings.map((f) => {
+    if (f.tool !== "trivy" || !/^sharp@/.test(f.message) || (f.severity !== "critical" && f.severity !== "high")) return f;
+    return {
+      ...f,
+      severity: "medium",
+      message: `${f.message} [downgraded: this project's next.config declares output:'export' (a static export) — Next's built-in image optimizer, the only typical caller of sharp, doesn't run under static export unless a custom loader is configured; verify before treating as urgent]`,
+    };
+  });
+}
+
 /** Run trivy NATIVELY (no container — see TRIVY_VERSION) against `projectPath` and return a
  *  verdict. Reads dependency manifests as data only (never executes anything), so on-host is
  *  safe — same boundary sast/secrets/verify document. */
@@ -143,10 +183,13 @@ export async function runDepVuln(
       ),
     { note: (m) => console.error(`[depvuln] ${m}`) },
   );
-  const findings = [
-    ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),
-    ...scanGapFindings(absPath), // make a no-lockfile (incomplete) scan VISIBLE, not a silent pass
-  ];
+  const findings = annotateReachability(
+    [
+      ...interpretTrivy(proc.stdout?.toString() ?? "", proc.exitCode ?? -1, proc.stderr?.toString() ?? "", absPath),
+      ...scanGapFindings(absPath), // make a no-lockfile (incomplete) scan VISIBLE, not a silent pass
+    ],
+    absPath,
+  );
   return verdictOf("depvuln", findings, ranAt);
 }
 
