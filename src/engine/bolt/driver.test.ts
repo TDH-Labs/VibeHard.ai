@@ -157,6 +157,38 @@ describe("generateTextResilient — the non-streaming analog (planning stages: P
     await expect(generateTextResilient({ model, prompt: "x" }, { retries: 2 })).rejects.toThrow(/invalid x-api-key/);
     expect(calls).toBe(1);
   });
+
+  test("retries an AI-SDK APICallError whose OWN message is the generic 'Failed to process successful response' wrapper, when the real transient signal is one level down in .cause (found live 2026-07-23: PRD stage on deepseek-v3.2 died twice in a row, zero retries, on exactly this shape)", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        if (calls === 1) {
+          const wrapped = new Error("Failed to process successful response");
+          (wrapped as { cause?: unknown }).cause = new Error("Unexpected EOF");
+          throw wrapped;
+        }
+        return { content: [{ type: "text", text: "ok" }], finishReason: { unified: "stop", raw: "stop" }, usage: USAGE, warnings: [] };
+      },
+    });
+    const result = await generateTextResilient({ model, prompt: "x" }, { retries: 2 });
+    expect(result.text).toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  test("does NOT retry a 'Failed to process successful response' wrapper whose .cause is ALSO non-transient — fails fast", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        const wrapped = new Error("Failed to process successful response");
+        (wrapped as { cause?: unknown }).cause = new Error("invalid x-api-key");
+        throw wrapped;
+      },
+    });
+    await expect(generateTextResilient({ model, prompt: "x" }, { retries: 2 })).rejects.toThrow(/Failed to process successful response/);
+    expect(calls).toBe(1);
+  });
 });
 
 describe("defaultModelFactory", () => {

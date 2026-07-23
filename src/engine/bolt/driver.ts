@@ -23,6 +23,25 @@ import { VIBEHARD_SYSTEM_PROMPT } from "./prompt.ts";
  * build — losing all prior planning. A transient LLM hiccup must never crash an autonomous run:
  * here we bound each attempt and retry transient failures (timeout/network/429/5xx) with backoff.
  */
+/** Build a classification signature spanning the error AND its `.cause` chain. The AI SDK
+ *  wraps a genuinely transient response-processing failure (JSON parse, truncated body, …) in
+ *  a generic `APICallError` whose own message is ALWAYS the fixed string "Failed to process
+ *  successful response" — the real signal (e.g. "Unexpected EOF") lives one level down in
+ *  `.cause`. Inspecting only `e.name`/`e.message` never sees it, so the wrapped failure is
+ *  misclassified as non-transient and crashes the whole build with zero retries (found live
+ *  2026-07-23: the PRD stage on deepseek-v3.2 died twice in a row, back to back, on exactly
+ *  this wrapper — same degeneration class as the whitespace-only and "Upstream error" cases
+ *  below, just one `.cause` deeper than this function used to look). Bounded depth: a cause
+ *  chain is normally 1-2 deep; this guards against a pathological cyclic/self-referential one.
+ */
+function errorSignature(e: unknown, depth = 0): string {
+  if (!(e instanceof Error)) return String(e);
+  if (depth >= 4) return `${e.name} ${e.message}`;
+  const cause = (e as { cause?: unknown }).cause;
+  const causeSig = cause !== undefined ? errorSignature(cause, depth + 1) : "";
+  return `${e.name} ${e.message} ${causeSig}`.trim();
+}
+
 export async function generateTextResilient(
   args: Parameters<typeof generateText>[0],
   opts: { retries?: number; timeoutMs?: number } = {},
@@ -45,7 +64,7 @@ export async function generateTextResilient(
       return result;
     } catch (e) {
       lastErr = e;
-      const sig = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+      const sig = errorSignature(e);
       // JSONParseError/Unexpected EOF: the PROVIDER's own response body failed to parse — same
       // degeneration class as above, surfaced by the SDK before we ever see text. "Upstream error
       // from <provider>": OpenRouter's own passthrough for a backend node failing (found live
