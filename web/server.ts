@@ -25,6 +25,7 @@ import { PgBuildLogStore } from "../src/build-substrate/build-log-store.ts";
 import { E2BBuildWorker, readPlatformBuildSha, realE2BSandboxFactory, type BuildMode } from "../src/build-substrate/build-worker.ts";
 import { TigrisWorkspaceStore } from "../src/build-substrate/workspace-store.ts";
 import { localSpawnPipeline, e2bPipeline, type RunPipeline } from "../src/build-substrate/build-dispatcher.ts";
+import { GATE_BLOCK_EXIT_CODE } from "../src/build-substrate/stop-signal.ts";
 import { operatorLLMKey, type BuildEnvParts } from "../src/build-substrate/build-env.ts";
 import { checkOpenRouterBudget } from "../src/platform/provider-budget.ts";
 import { migrateLegacyUsersFile, PgUserStore, type UserRecord } from "../src/platform/user-store.ts";
@@ -1705,7 +1706,15 @@ async function buildStream(tenantId: string, prompt: string, resumeApp?: string,
           await finish("paused");
           return send("done", "paused");
         }
-        const status = shipCode === 0 ? "live" : "deploy-failed";
+        // THE BUG THIS CLOSES (found live 2026-07-23): "the pre-deploy gate re-check blocked"
+        // and "the gates passed but the deploy itself broke" used to be the SAME status here
+        // ("deploy-failed", with the message "Gates passed, but the deploy itself failed" —
+        // factually wrong for the gate-block case) — and unlike every other held build, a
+        // ship-time gate block got no escalation ticket at all. `ship` (cli.ts) now exits with
+        // GATE_BLOCK_EXIT_CODE specifically for that case (and opens a real ticket itself,
+        // captured below via the SAME ::held marker every other held build already uses) — route
+        // it to "blocked" so the existing ticket/notify/orchestrator-"held" path actually fires.
+        const status = shipCode === 0 ? "live" : shipCode === GATE_BLOCK_EXIT_CODE ? "blocked" : "deploy-failed";
         await finish(status);
         send("done", status);
       } catch (e) {

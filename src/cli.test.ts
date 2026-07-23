@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs, deterministicBackendInstructions, resolveEscalationSink } from "./cli.ts";
-import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
+import { VERSION, teeToLogFile, checkpointHook, missingWorkstreamFiles, scaffoldConfigs, deterministicBackendInstructions, resolveEscalationSink, main } from "./cli.ts";
+import { STOP_EXIT_CODE, GATE_BLOCK_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 // Skeleton smoke test — keeps `bun test` green from commit one.
 // M1 replaces/expands this with real gate tests (PROJECT_BRIEF.md §8–9).
@@ -303,4 +303,38 @@ describe("resolveEscalationSink — an E2B sandbox's held-ticket write must reac
     for (const k of DISPATCH_VARS) delete process.env[k];
     expect(resolveEscalationSink().name).toBe("local");
   });
+});
+
+describe("`vibehard ship` — a pre-deploy gate block gets a real ticket, not a bare exit code (2026-07-23)", () => {
+  const tmps: string[] = [];
+  let savedQueueDir: string | undefined;
+  beforeEach(() => {
+    savedQueueDir = process.env.VIBEHARD_QUEUE_DIR;
+  });
+  afterEach(() => {
+    for (const d of tmps.splice(0)) rmSync(d, { recursive: true, force: true });
+    if (savedQueueDir === undefined) delete process.env.VIBEHARD_QUEUE_DIR;
+    else process.env.VIBEHARD_QUEUE_DIR = savedQueueDir;
+  });
+
+  test("THE BUG THIS CLOSES: a ship-time gate block returns GATE_BLOCK_EXIT_CODE (not the same 1 a genuine deploy-infra failure uses) and opens a real, readable escalation ticket", async () => {
+    // An empty workspace fails deployGate deterministically and fast (sast/secrets/verify all
+    // block on "nothing readable here" — no network, no Docker, no LLM; confirmed ~300ms) —
+    // exactly what's needed to exercise the new branch without a real app to build.
+    const dir = mkdtempSync(join(tmpdir(), "vibehard-ship-empty-"));
+    tmps.push(dir);
+    const queueDir = mkdtempSync(join(tmpdir(), "vibehard-ship-queue-"));
+    tmps.push(queueDir);
+    process.env.VIBEHARD_QUEUE_DIR = queueDir;
+
+    const code = await main(["ship", dir]);
+    expect(code).toBe(GATE_BLOCK_EXIT_CODE);
+    expect(code).not.toBe(1); // the genuine post-gate deploy-infra-failure code — must stay distinct
+
+    const files = existsSync(queueDir) ? readdirSync(queueDir) : [];
+    expect(files.length).toBeGreaterThan(0); // a ticket was actually written, not just printed
+    const ticket = JSON.parse(readFileSync(join(queueDir, files[0]!), "utf8"));
+    expect(ticket.state).toBe("needs-human");
+    expect(ticket.packet.blocking).toBeGreaterThan(0);
+  }, 20_000);
 });

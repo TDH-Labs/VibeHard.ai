@@ -66,7 +66,7 @@ import { refine } from "./refine/refine.ts";
 import { runTiers } from "./util/pool.ts";
 import { requiredCredentialsForApp } from "./credentials/index.ts";
 import { isBlocking, type Finding, type Severity } from "./types.ts";
-import { STOP_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
+import { STOP_EXIT_CODE, GATE_BLOCK_EXIT_CODE, BuildStoppedError } from "./build-substrate/stop-signal.ts";
 
 export const VERSION = "0.0.0";
 
@@ -1657,8 +1657,25 @@ export async function main(argv: string[]): Promise<number> {
     const gate = await deployGate(dir);
     for (const v of gate.verdicts) console.log(`   ${v.status === "pass" ? "✅" : v.status === "n/a" ? "➖" : "🛑"} ${v.gate}`);
     if (!gate.passed) {
-      console.log("\n🛑 BLOCK — not deploying. Fix or escalate first (vibehard escalate <dir>).");
-      return 1;
+      // THE BUG THIS CLOSES (found live 2026-07-23): this used to just print and `return 1` —
+      // the SAME exit code a genuine post-gate deploy-infrastructure failure uses further down,
+      // so web/server.ts's buildStream() could never tell "the gates blocked" apart from "the
+      // gates passed but the deploy itself broke" and reported both as "Gates passed, but the
+      // deploy itself failed" (wrong for this case). Worse, unlike every other held build, this
+      // one got NO escalation ticket at all — `deployGate`'s verdicts (with the actual blocking
+      // findings) were only ever printed as bare ✅/🛑 glyphs, never turned into a reviewable
+      // packet. Give it the SAME escalation path runAutoFixAndReport already uses, and a distinct
+      // exit code so the platform can route it to "blocked" (with a ticket), not "deploy-failed".
+      console.log("\n🛑 BLOCK — not deploying.");
+      const packet = await buildEscalationPacket(gate.verdicts, dir, { reason: "ship-time gate re-verification blocked — the full gate chain found blocking findings just before deploy" });
+      const ticket = await resolveEscalationSink().open(packet);
+      await notifier().notifyOpened(ticket); // best-effort reviewer ping
+      console.log(`  ::held ${ticket.id}`); // machine-parseable: links this build to its review ticket
+      console.log(`   → held for human review (needs-human): ticket ${ticket.id}`);
+      console.log(`   queued at ${queuePath()} — list with: vibehard queue`);
+      console.log("\n   residual blocking findings:");
+      for (const v of gate.verdicts) for (const f of v.findings) explainFinding(f);
+      return GATE_BLOCK_EXIT_CODE;
     }
     // A downloadable-tool has no hosted deploy target — there's nothing for deployApp to
     // provision or a URL to reach. The gate above already stamped the sentinel (deployGate's
