@@ -18,8 +18,8 @@
  * read any app secret we set. At-rest custody stays in the platform SecretsStore;
  * KMS-grade delivery upgrades with EPIC #35. Documented, not hidden.
  *
- * Pack delivery: the persona pack (KBs of text) travels as a base64 tarball in machine
- * env (PACK_TGZ_B64), unpacked by the image entrypoint. A size guard fails closed at
+ * Pack delivery: the persona pack (KBs of text) travels as base64 JSON (path→content) in machine
+ * env (PACK_FILES_B64), written to disk by the image entrypoint. A size guard fails closed at
  * 24KB encoded — past that we move to object storage, not to a bigger env var.
  */
 import type { AccountConfig, AgentLaunchPlan } from "./types.ts";
@@ -86,10 +86,10 @@ export function machineConfig(
   opts: { image: string; perAgentMemoryMb: number },
   agents: AgentLaunchPlan[],
   agentKeys: Record<string, string>,
-  packTgzB64: string,
+  packFilesB64: string,
 ): Record<string, unknown> {
-  if (packTgzB64.length > MAX_PACK_ENV_BYTES) {
-    throw new Error(`persona pack tarball is ${packTgzB64.length}B encoded — over the ${MAX_PACK_ENV_BYTES}B env budget; move pack delivery to object storage before growing packs this large`);
+  if (packFilesB64.length > MAX_PACK_ENV_BYTES) {
+    throw new Error(`persona pack payload is ${packFilesB64.length}B encoded — over the ${MAX_PACK_ENV_BYTES}B env budget; move pack delivery to object storage before growing packs this large`);
   }
   const specs: SupervisorAgentSpec[] = agents.map((p) => ({ name: p.agentName, keyEnvVar: keyEnvVarFor(p.agentName), args: p.args, env: p.env }));
   const keyEnv: Record<string, string> = {};
@@ -102,7 +102,7 @@ export function machineConfig(
     image: opts.image,
     env: {
       AGENTS_JSON: JSON.stringify(specs),
-      PACK_TGZ_B64: packTgzB64,
+      PACK_FILES_B64: packFilesB64,
       ...keyEnv,
     },
     guest: { cpu_kind: "shared", cpus: 1, memory_mb: Math.max(512, opts.perAgentMemoryMb * agents.length) },
@@ -136,14 +136,14 @@ export class AgentMachineManager {
 
   /** Provision (or re-provision) the account's fleet. Returns created machine ids by
    *  group name. Shared placement → one "fleet" Machine; isolated → one per agent. */
-  async provision(cfg: AccountConfig, plans: AgentLaunchPlan[], agentKeys: Record<string, string>, packTgzB64: string): Promise<Record<string, string>> {
+  async provision(cfg: AccountConfig, plans: AgentLaunchPlan[], agentKeys: Record<string, string>, packFilesB64: string): Promise<Record<string, string>> {
     const app = appNameFor(cfg.accountSlug);
     await this.ensureApp(app);
     const groups: Array<{ name: string; agents: AgentLaunchPlan[] }> =
       cfg.placement === "shared" ? [{ name: "fleet", agents: plans }] : plans.map((p) => ({ name: p.agentName, agents: [p] }));
     const ids: Record<string, string> = {};
     for (const g of groups) {
-      const config = machineConfig({ image: this.image, perAgentMemoryMb: this.perAgentMemoryMb }, g.agents, agentKeys, packTgzB64);
+      const config = machineConfig({ image: this.image, perAgentMemoryMb: this.perAgentMemoryMb }, g.agents, agentKeys, packFilesB64);
       const r = await this.http("POST", `/apps/${app}/machines`, { name: g.name, region: this.region, config });
       const machine = r.json as { id?: string } | null;
       if (r.status < 200 || r.status >= 300 || !machine?.id) {

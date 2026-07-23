@@ -1,7 +1,7 @@
 # The hosted-agent runtime image (AHP-4): buzz-acp + buzz-cli + goose on one small
 # Debian base, driven by entrypoint.sh (which unpacks the persona pack from env and
 # supervises one buzz-acp process per agent identity — see src/agent-hosting/machines.ts
-# for the env contract: AGENTS_JSON, PACK_TGZ_B64, AGENT_KEY_*).
+# for the env contract: AGENTS_JSON, PACK_FILES_B64, AGENT_KEY_*).
 #
 # Pinning: BUZZ_REF pins the exact block/buzz commit the binaries are built from —
 # bump deliberately, never `main` (same discipline as the platform's own pinned gate

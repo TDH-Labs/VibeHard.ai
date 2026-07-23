@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Agent-runtime entrypoint/supervisor (AHP-4). Contract with machines.ts:
-#   PACK_TGZ_B64  — base64 tar.gz of the account's persona pack
+#   PACK_FILES_B64 — base64 JSON map {relative-path: content} of the persona pack
 #   AGENTS_JSON   — [{name, keyEnvVar, args[], env{}}] one entry per buzz-acp process
 #   AGENT_KEY_*   — per-agent Nostr secret keys, mapped to BUZZ_PRIVATE_KEY per child
 #
@@ -18,10 +18,21 @@ if [ -z "${AGENTS_JSON:-}" ]; then
   exit 64
 fi
 
-# 1) Unpack the persona pack (small by contract — machines.ts guards the size).
+# 1) Write the persona pack files (small by contract — machines.ts guards the size).
+#    Path traversal is refused: a pack path may not be absolute or contain "..".
 mkdir -p "$PACK_DIR" "$WORK_ROOT"
-if [ -n "${PACK_TGZ_B64:-}" ]; then
-  echo "$PACK_TGZ_B64" | base64 -d | tar -xz -C "$PACK_DIR"
+if [ -n "${PACK_FILES_B64:-}" ]; then
+  printf '%s' "$PACK_FILES_B64" | base64 -d | PACK_DIR="$PACK_DIR" node -e '
+    const fs = require("fs"), path = require("path");
+    let d = ""; process.stdin.on("data", (c) => (d += c)).on("end", () => {
+      const files = JSON.parse(d);
+      for (const [rel, content] of Object.entries(files)) {
+        if (path.isAbsolute(rel) || rel.split("/").includes("..")) { console.error(`refusing pack path: ${rel}`); process.exit(65); }
+        const abs = path.join(process.env.PACK_DIR, rel);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, content);
+      }
+    });'
 fi
 
 # 2) Spawn one buzz-acp per agent entry. Each child gets:

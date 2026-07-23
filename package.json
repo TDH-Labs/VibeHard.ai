@@ -22,6 +22,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.85",
     "@ai-sdk/openai-compatible": "^2.0.51",
+    "@noble/secp256k1": "^3",
     "ai": "^6.0.208"
   }
 }
