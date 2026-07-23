@@ -208,7 +208,18 @@ async function sweepStaleRunning(): Promise<void> {
 // longer implies anything about a live worker). Runs periodically, not just at boot. ONLY applies
 // to builds that actually set workerHeartbeatAt (i.e. dispatched via BuildWorker) — a locally-
 // spawned build (today's default path) never sets it and is correctly exempted, unaffected.
-const ORPHAN_HEARTBEAT_STALE_MS = 10 * 60_000; // no ping in 10min ⇒ the worker is presumed dead
+// 20 min, not 10 (found live 2026-07-23): the heartbeat only refreshes once per COMPLETED
+// autofix round (checkpointHook, called from onRoundComplete) — it is NOT pinged mid-round. A
+// single round's fixer call is bounded by the streaming driver's own overall cap (15 min per
+// attempt, VIBEHARD_STREAM_OVERALL_MS) and can retry once whole (applyFixWithRetry), so a
+// legitimately slow — but very much alive — round can easily exceed 10 minutes between pings.
+// Confirmed live: a build was marked "error" by this sweep while its E2B sandbox was still
+// genuinely running (verified directly via `e2b sandbox logs` — the fix process was still
+// executing, well inside its 1h lifetime) and pinged again minutes later, moving the build
+// forward past the point this sweep had already killed it. 20 min comfortably clears the
+// driver's own 15-min single-attempt bound while still catching an ACTUALLY dead worker
+// promptly relative to autoFix's own 35-min outer ceiling.
+const ORPHAN_HEARTBEAT_STALE_MS = 20 * 60_000; // no ping in 20min ⇒ the worker is presumed dead
 async function sweepOrphanedWorkers(): Promise<void> {
   for (const id of await buildStore.listTenantIds()) {
     try {

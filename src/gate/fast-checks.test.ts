@@ -88,11 +88,36 @@ describe("typecheckOnly — the largest class of build failure, caught in second
     expect(r).toEqual({ passed: true, findings: [] });
   }, 30_000);
 
-  test("a malformed/unsafe typescript version in package.json falls back to the known-good default rather than reaching bunx unsanitized", async () => {
+  test("an app importing external packages (react, next) does NOT false-positive with 'Cannot find module' (2026-07-23, real live escalation: EVERY generated app imports react/next — with no install at all, every single import failed, not just JSX)", async () => {
+    const ws = workspace();
+    write(ws, "package.json", JSON.stringify({ dependencies: { react: "19.0.0", "react-dom": "19.0.0", next: "15.5.20" }, devDependencies: { typescript: "5.7.3", "@types/node": "22.10.5", "@types/react": "19.0.6" } }));
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", jsx: "preserve" }, include: ["**/*.ts", "**/*.tsx"] }));
+    write(ws, "app/page.tsx", "import { useState } from 'react';\nimport Link from 'next/link';\nexport default function Page() {\n  const [n] = useState(0);\n  return <div><Link href=\"/x\">{n}</Link></div>;\n}\n");
+    const r = await typecheckOnly(ws);
+    expect(r).toEqual({ passed: true, findings: [] });
+  }, 60_000);
+
+  test("a malformed/unresolvable typescript version in package.json is reported as an install failure (2026-07-23: ensureDepsForTypecheck now runs a REAL npm install first, so npm itself refuses this before typecheck ever runs)", async () => {
     const ws = workspace();
     write(ws, "package.json", JSON.stringify({ devDependencies: { typescript: "git+https://evil.example/x.git" } }));
     write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", baseUrl: ".", paths: { "@/*": ["./*"] } } }));
     write(ws, "index.ts", "export const x: number = 1;\n");
+    const r = await typecheckOnly(ws);
+    expect(r.passed).toBe(false);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]?.file).toBe("package.json");
+    expect(r.findings[0]?.message).toContain("npm install");
+  }, 30_000);
+
+  test("the bunx typescript-version pin still sanitizes an unsafe value when node_modules is already satisfied (install skipped, so the bad value never reaches a real npm call)", async () => {
+    const ws = workspace();
+    write(ws, "package.json", JSON.stringify({ devDependencies: { typescript: "git+https://evil.example/x.git" } }));
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", baseUrl: ".", paths: { "@/*": ["./*"] } } }));
+    write(ws, "index.ts", "export const x: number = 1;\n");
+    // Fake an already-satisfied install so ensureDepsForTypecheck's installStale() sees nothing to
+    // do — installStale() checks each declared dep exists + a stamp file newer than package.json.
+    mkdirSync(join(ws, "node_modules/typescript"), { recursive: true });
+    writeFileSync(join(ws, "node_modules/.package-lock.json"), "{}");
     const r = await typecheckOnly(ws);
     expect(r).toEqual({ passed: true, findings: [] }); // fell back to the safe pin, baseUrl still resolves fine
   }, 30_000);
