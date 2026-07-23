@@ -21,7 +21,7 @@
  * conventions: async-API misuse, wrong client exports, arity mismatches — all TS errors) without
  * the ~10 minutes a from-scratch `npm ci` + `next build` costs.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 import { parseMigrations } from "../substrate/deploy-app.ts";
@@ -110,6 +110,13 @@ function declaredTypescriptVersion(workspacePath: string): string {
   }
 }
 
+/** A loose ambient JSX namespace, injected only for this bare pre-install typecheck (see below) —
+ *  named to be unmistakably ours and never collide with anything a template or the LLM would
+ *  plausibly generate. Not a dotfile: the templates' tsconfig `include` globs (`**\/*.ts`) don't
+ *  match dotfiles, so this must be visible to a plain `*` glob to actually get picked up by tsc. */
+const JSX_STUB_NAME = "vibehard-fastcheck-jsx-stub.d.ts";
+const JSX_STUB_CONTENT = "declare namespace JSX {\n  interface IntrinsicElements {\n    [elemName: string]: any;\n  }\n}\n";
+
 /** Run `tsc --noEmit` directly against the workspace — the single largest class of generated-app
  *  build failure, caught in seconds instead of the ~10 minutes a from-scratch npm ci + next build
  *  costs. Skipped (passed: true, no findings) when there's no tsconfig.json — not every generated
@@ -122,11 +129,28 @@ function declaredTypescriptVersion(workspacePath: string): string {
  *  or will be built with. Found live 2026-07-22: npm's "latest" typescript had moved to a new
  *  major that REMOVED the `baseUrl` compiler option (TS5102) — the golden template's tsconfig.json
  *  is fine against the app's real, pinned 5.7.3, but a floating "latest" tsc failed it outright,
- *  a false positive the auto-fix loop burned 6 attempts on before correctly giving up and escalating. */
+ *  a false positive the auto-fix loop burned 6 attempts on before correctly giving up and escalating.
+ *
+ *  The SAME "no node_modules yet" gap has a second consequence, found on the very next live build:
+ *  with no `@types/react` resolvable, ANY .tsx file using JSX fails outright — "no interface
+ *  'JSX.IntrinsicElements' exists" (TS7026) — regardless of whether the app's actual code is
+ *  correct, which is every generated Next.js app. A loose ambient stub (verified: merges cleanly
+ *  with the real @types/react declarations when node_modules DOES already exist from an earlier
+ *  round, and a real, unrelated type error in the same file still surfaces normally) closes this
+ *  false-positive class without weakening the check for anything else. Written only for this one
+ *  invocation and always removed after — it must never leak into the generated app's own tree. */
 export async function typecheckOnly(workspacePath: string): Promise<{ passed: boolean; findings: FastFinding[] }> {
   if (!(await Bun.file(join(workspacePath, "tsconfig.json")).exists())) return { passed: true, findings: [] };
   const tsVersion = declaredTypescriptVersion(workspacePath);
-  const proc = Bun.spawnSync(["bunx", "--package", `typescript@${tsVersion}`, "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe" });
+  const stubPath = join(workspacePath, JSX_STUB_NAME);
+  const hadStub = existsSync(stubPath); // never true in practice, but never clobber/delete a real file
+  if (!hadStub) writeFileSync(stubPath, JSX_STUB_CONTENT);
+  let proc: ReturnType<typeof Bun.spawnSync>;
+  try {
+    proc = Bun.spawnSync(["bunx", "--package", `typescript@${tsVersion}`, "tsc", "--noEmit"], { cwd: workspacePath, stdout: "pipe", stderr: "pipe" });
+  } finally {
+    if (!hadStub) rmSync(stubPath, { force: true });
+  }
   if ((proc.exitCode ?? 1) === 0) return { passed: true, findings: [] };
   const out = `${proc.stdout?.toString() ?? ""}${proc.stderr?.toString() ?? ""}`.trim();
   // tsc prints one diagnostic per line ("file.ts(12,3): error TS2345: ..."); surface each as its

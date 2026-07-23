@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkMigrations, fastPreCheck, scanForStrayMarkers, typecheckOnly } from "./fast-checks.ts";
@@ -95,6 +95,33 @@ describe("typecheckOnly — the largest class of build failure, caught in second
     write(ws, "index.ts", "export const x: number = 1;\n");
     const r = await typecheckOnly(ws);
     expect(r).toEqual({ passed: true, findings: [] }); // fell back to the safe pin, baseUrl still resolves fine
+  }, 30_000);
+
+  test("a .tsx file using JSX does NOT false-positive with 'no interface JSX.IntrinsicElements exists' (2026-07-22, real live escalation: every generated Next.js app is a .tsx file, and there's no @types/react to resolve — this runs before any install)", async () => {
+    const ws = workspace();
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", jsx: "preserve" }, include: ["**/*.ts", "**/*.tsx"] }));
+    write(ws, "app/dashboard/page.tsx", "export default function Page() {\n  return <div><h1>hi</h1></div>;\n}\n");
+    const r = await typecheckOnly(ws);
+    expect(r).toEqual({ passed: true, findings: [] });
+  }, 30_000);
+
+  test("a REAL type error in a .tsx file still surfaces — the JSX stub doesn't swallow unrelated bugs", async () => {
+    const ws = workspace();
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", jsx: "preserve" }, include: ["**/*.ts", "**/*.tsx"] }));
+    write(ws, "app/dashboard/page.tsx", 'export const x: number = "not a number";\nexport default function Page() {\n  return <div><h1>hi</h1></div>;\n}\n');
+    const r = await typecheckOnly(ws);
+    expect(r.passed).toBe(false);
+    expect(r.findings.some((f) => f.check === "typecheck" && /TS2322/.test(f.message))).toBe(true);
+    expect(r.findings.some((f) => /IntrinsicElements/.test(f.message))).toBe(false);
+  }, 30_000);
+
+  test("the JSX stub file never leaks into the workspace after the check runs", async () => {
+    const ws = workspace();
+    write(ws, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true, noEmit: true, module: "esnext", moduleResolution: "bundler", target: "es2022", jsx: "preserve" }, include: ["**/*.ts", "**/*.tsx"] }));
+    write(ws, "app/dashboard/page.tsx", "export default function Page() {\n  return <div>hi</div>;\n}\n");
+    await typecheckOnly(ws);
+    const leaked = readdirSync(ws).some((n) => n.includes("jsx-stub"));
+    expect(leaked).toBe(false);
   }, 30_000);
 });
 
