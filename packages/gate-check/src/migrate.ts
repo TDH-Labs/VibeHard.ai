@@ -17,7 +17,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding, GateVerdict } from "./types.ts";
-import { verdictOf } from "./types.ts";
+import { notApplicable, verdictOf } from "./types.ts";
 
 /** Minimal Supabase environment so a real Supabase migration can execute off-platform. Exported so the
  *  RLS-enforcement harness (rls-enforce.ts) applies migrations in the IDENTICAL environment. */
@@ -117,13 +117,18 @@ export function extensionsIn(files: Array<{ file: string; sql: string }>): strin
 export async function runMigrate(projectPath: string, opts: MigrateOptions = {}): Promise<GateVerdict> {
   const ranAt = opts.ranAt ?? new Date().toISOString();
   const dir = join(projectPath, "supabase", "migrations");
-  if (!existsSync(dir)) return verdictOf("migrate", [], ranAt); // no migrations → N/A
+  // No migrations at all → genuinely nothing for this gate to execute — n/a, not a vacuous pass
+  // (found live 2026-07-23, an out-of-distribution `vibehard gate` run against a non-VibeHard
+  // project with no database: this comment already said "N/A" but the code returned `verdictOf`
+  // with empty findings, which computes "pass" — the exact vacuous-pass audit H4 already warns
+  // against, one layer down. rls-enforce.ts gets this right in three places; this didn't).
+  if (!existsSync(dir)) return notApplicable("migrate", ranAt);
 
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort()
     .map((f) => ({ file: join("supabase/migrations", f), sql: readFileSync(join(dir, f), "utf8") }));
-  if (!files.length) return verdictOf("migrate", [], ranAt);
+  if (!files.length) return notApplicable("migrate", ranAt);
 
   // Surface (don't silently neutralize) extensions the in-memory check shims — a medium advisory so
   // the author confirms the extension is enabled on their real Supabase project (audit2 D).

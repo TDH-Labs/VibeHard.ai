@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import type { Finding, GateVerdict } from "./types.ts";
-import { verdictOf } from "./types.ts";
+import { notApplicable, verdictOf } from "./types.ts";
 import { DERIVED_DIRS } from "./scan-scope.ts";
 
 /** One migration file's text, tagged with its (relative) path for finding attribution. */
@@ -375,6 +375,11 @@ export async function runRls(
   const sources = await readMigrations(projectPath);
   const appSources = await readAppSources(projectPath);
   const usage = detectSupabaseUsage(appSources, pkgUsesSupabase(projectPath));
+  // No migrations AND no detected Supabase usage anywhere (npm dep, CDN script, env var) → this
+  // project has no database/RLS footprint at all — n/a, not a vacuous pass (found live 2026-07-23,
+  // an out-of-distribution `vibehard gate` run against a non-VibeHard project with no database;
+  // rls.ts never imported notApplicable at all, unlike rls-enforce.ts's correct three uses of it).
+  if (!sources.length && !usage.usesSupabase) return notApplicable("rls", ranAt);
   const findings = [
     ...parseRls(sources, { multiTenant: isMultiTenantProject(projectPath) }),
     ...parseRlsCoverage(usage, rlsEnabledTables(sources), createdTables(sources)),

@@ -298,12 +298,12 @@ describe("runRls end-to-end (§11 fail-closed for rls)", () => {
     expect(v.status).toBe("pass");
   });
 
-  test("a non-Supabase app with no DB still passes (no false positive)", async () => {
+  test("a non-Supabase app with no DB → N/A, not a vacuous pass (2026-07-23: an out-of-distribution `vibehard gate` run against a non-VibeHard project with no database found this gate never imported notApplicable at all, unlike rls-enforce.ts's correct three uses of it)", async () => {
     const dir = await scratch({
       "package.json": JSON.stringify({ dependencies: { react: "^18.0.0" } }),
       "src/App.tsx": "export default function App() { return null; }",
     });
-    expect((await runRls(dir, ts)).status).toBe("pass");
+    expect((await runRls(dir, ts)).status).toBe("n/a");
   });
 
   test("CDN/client-side Supabase (no npm dep) + NO migration → BLOCK (blind spot closed)", async () => {

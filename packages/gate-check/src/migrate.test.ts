@@ -75,8 +75,14 @@ CREATE POLICY "own" ON "Staff" FOR ALL USING ("authUserId" = auth.uid());`,
     expect(v.status).toBe("pass");
   });
 
-  test("no supabase/migrations dir → N/A (no block)", async () => {
-    expect((await runMigrate(ws())).status).toBe("pass");
+  test("no supabase/migrations dir → N/A, not a vacuous pass (2026-07-23: the test's own name already said N/A, but the code returned 'pass' — an out-of-distribution `vibehard gate` run against a non-VibeHard project with no database caught the mismatch)", async () => {
+    expect((await runMigrate(ws())).status).toBe("n/a");
+  });
+
+  test("supabase/migrations dir exists but is empty → also N/A", async () => {
+    const dir = ws();
+    mkdirSync(join(dir, "supabase", "migrations"), { recursive: true });
+    expect((await runMigrate(dir)).status).toBe("n/a");
   });
 
   test("injected applier failure surfaces as a localized blocking finding (no pglite needed)", async () => {
