@@ -244,3 +244,7 @@ fix: add sensitive-signals module missing from 65b8c38 (new files need explicit 
 
 ## 2026-07-02T04:18:53Z — DONE
 build: harness refuses untracked src/web/scripts files (the 65b8c38 incomplete-commit class, now structurally impossible); track e1-setup.ts it flushed out
+
+## 2026-07-24T07:10:42Z — DONE
+feat: dev-loop adversarial second-pass review before commit (steal flyte-agent-loop's verifier gate)
+VERIFIED: review unavailable, proceeding: reviewer returned an unparseable verdict: {"verified": true, "notes": "The diff adds exactly

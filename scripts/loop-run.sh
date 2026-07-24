@@ -88,12 +88,26 @@ case "${1:-}" in
       echo "NOOP: nothing staged to commit."; log "NOOP — $msg"; revert_all; release_lock; exit 0
     fi
     if verify; then
-      printf '\n## %s — DONE\n%s\n' "$(ts)" "$msg" >> "$NOTES"
-      git add "$NOTES"
-      if git commit -m "$msg"; then          # pre-commit hook re-verifies (defense in depth)
-        echo "COMMITTED $(git rev-parse --short HEAD)"; log "DONE — $msg @ $(git rev-parse --short HEAD)"
+      # ---- second-pass adversary: green ≠ right. An independent model reads the actual
+      # staged diff against the actual commit message — catches a plausible-looking wrong
+      # fix, scope creep, or a quietly-loosened assertion that `verify` can't see (it only
+      # knows red/green, not whether green means what the message claims). Fails OPEN on a
+      # call failure (src/dev-loop/verify-diff.ts) — only a considered rejection reverts.
+      echo "[loop] adversarial second-pass review…"
+      review_output="$(bun src/dev-loop/verify-diff.ts "$msg" 2>&1)"; review_exit=$?
+      echo "$review_output"
+      if [ "$review_exit" -eq 0 ]; then
+        printf '\n## %s — DONE\n%s\n%s\n' "$(ts)" "$msg" "$review_output" >> "$NOTES"
+        git add "$NOTES"
+        if git commit -m "$msg"; then          # pre-commit hook re-verifies (defense in depth)
+          echo "COMMITTED $(git rev-parse --short HEAD)"; log "DONE — $msg @ $(git rev-parse --short HEAD) — $review_output"
+        else
+          echo "COMMIT BLOCKED by hook — reverting."; revert_all; log "BLOCKED-BY-HOOK — $msg"
+        fi
       else
-        echo "COMMIT BLOCKED by hook — reverting."; revert_all; log "BLOCKED-BY-HOOK — $msg"
+        revert_all
+        echo "REVERTED: adversarial review rejected this diff — $review_output"
+        log "REVERTED (review-rejected) — $msg — $review_output"
       fi
     else
       revert_all
