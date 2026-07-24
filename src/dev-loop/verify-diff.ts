@@ -61,7 +61,12 @@ export function liveDiffAdversary(opts: { modelFactory?: ModelFactory } = {}): D
       model: modelFactory(config),
       system: SYSTEM,
       prompt: `Commit message (what this diff claims to do):\n${commitMessage}\n\nStaged diff:\n${diff.slice(0, 60_000)}`,
-      maxOutputTokens: 500,
+      // THE BUG THIS CLOSES (found live testing this very file): 500 was nowhere near enough —
+      // "review" maps to the strongest REASONING tier (config/models.ts), and reasoning tokens
+      // eat into this same budget before any output text is emitted, so the JSON verdict got
+      // truncated mid-string and silently failed open on every call. Same class of bug as the
+      // drydock reasoning-model lesson: too-small maxOutputTokens → silent empty/truncated text.
+      maxOutputTokens: 4000,
     });
     const parsed = tryExtractJsonObject(text) as { verified?: unknown; notes?: unknown } | null;
     if (!parsed || typeof parsed.verified !== "boolean") {
