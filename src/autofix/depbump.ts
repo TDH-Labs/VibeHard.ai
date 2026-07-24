@@ -74,6 +74,11 @@ export interface DepBumpResult {
   /** packages with no usable fix at all (rare) — nothing to bump to. */
   unfixable: string[];
   installExit: number | null;
+  /** stderr from the install, when it failed non-zero — empty on success/no-install. A failed
+   *  install leaves the lockfile un-updated, so trivy re-reports the SAME finding next round;
+   *  this is the only way the caller (and the human reviewing a held escalation) can tell "the
+   *  bump was applied but never actually took" apart from "nothing needed to change." */
+  installStderr: string;
 }
 
 type PkgManifest = { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; overrides?: Record<string, string> };
@@ -85,7 +90,7 @@ type PkgManifest = { dependencies?: Record<string, string>; devDependencies?: Re
  * forced via an npm `overrides` entry — the only way to patch a CVE deep in the tree without
  * waiting on the parent to update. No I/O → unit-testable. The version comes from the gate finding.
  */
-export function planDepBumps(pkg: PkgManifest, depFindings: Finding[]): Omit<DepBumpResult, "installExit"> {
+export function planDepBumps(pkg: PkgManifest, depFindings: Finding[]): Omit<DepBumpResult, "installExit" | "installStderr"> {
   // Group findings by package → union of all its fixed versions.
   const byPkg = new Map<string, { installed: string; fixed: Set<string> }>();
   for (const f of depFindings) {
@@ -135,7 +140,7 @@ export function planDepBumps(pkg: PkgManifest, depFindings: Finding[]): Omit<Dep
  * the gate re-verifies. The only I/O is the package.json write + npm install.
  */
 export async function applyDepBumps(workspacePath: string, depFindings: Finding[]): Promise<DepBumpResult> {
-  const empty: DepBumpResult = { bumped: [], majorBumped: [], overridden: [], unfixable: [], installExit: null };
+  const empty: DepBumpResult = { bumped: [], majorBumped: [], overridden: [], unfixable: [], installExit: null, installStderr: "" };
   const pkgPath = join(workspacePath, "package.json");
   if (!existsSync(pkgPath)) return empty;
 
@@ -147,7 +152,7 @@ export async function applyDepBumps(workspacePath: string, depFindings: Finding[
   }
 
   const plan = planDepBumps(pkg, depFindings);
-  if (!plan.bumped.length && !plan.majorBumped.length && !plan.overridden.length) return { ...plan, installExit: null };
+  if (!plan.bumped.length && !plan.majorBumped.length && !plan.overridden.length) return { ...plan, installExit: null, installStderr: "" };
 
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   // EPIC #32: shares the host lock with every other heavy subprocess on this machine.
@@ -160,11 +165,22 @@ export async function applyDepBumps(workspacePath: string, depFindings: Finding[
         // the workspace install, and the host's NODE_ENV=production makes npm omit devDependencies
         // (the starved-node_modules class the benchmark caught live).
         env: safeToolEnv(workspacePath),
+        // THE BUG THIS CLOSES (found live 2026-07-23): stdout/stderr were discarded and the exit
+        // code was never checked by any caller — a FAILED install (lockfile never actually
+        // updated, so the bump never took) looked identical to a successful one. trivy re-scans
+        // the lockfile next round, sees the same unpatched version, and the loop re-declares the
+        // identical bump forever — "the same finding recurred... a fix changed nothing" (exactly
+        // what a live build hit: 9 attempts, 0 progress, on a plain postcss override). Piping
+        // stderr and returning it lets the caller tell "nothing needed fixing" apart from "the fix
+        // was applied but the install that would make it real silently failed."
         stdout: "ignore",
-        stderr: "ignore",
+        stderr: "pipe",
         timeout: SUBPROCESS_TIMEOUT_MS,
       }),
     { note: (m) => console.error(`[depbump] ${m}`) },
   );
-  return { ...plan, installExit: install.exitCode ?? 1 };
+  const exitCode = install.exitCode ?? 1;
+  const installStderr = exitCode !== 0 ? (install.stderr?.toString() ?? "").trim().slice(0, 2000) : "";
+  if (installStderr) console.error(`[depbump] npm install failed (exit ${exitCode}) after bumping ${[...plan.bumped, ...plan.majorBumped, ...plan.overridden].map((b) => b.pkg).join(", ")}: ${installStderr}`);
+  return { ...plan, installExit: exitCode, installStderr };
 }

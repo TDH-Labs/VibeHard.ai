@@ -24,7 +24,7 @@ import { applyDepBumps, type DepBumpResult } from "./depbump.ts";
 import { applyMissingDeps, parseMissingModules } from "./missingdeps.ts";
 import { detectUndeclaredImports } from "../diagnose/diagnose.ts";
 import { parseBuildErrors } from "../gate/build-errors.ts";
-import { readJournal } from "../journal/journal.ts";
+import { readJournal, recordNote } from "../journal/journal.ts";
 import { withHostLock } from "../util/host-lock.ts";
 import { SUBPROCESS_TIMEOUT_MS } from "../util/timeouts.ts";
 
@@ -208,6 +208,14 @@ export function defaultFixer(opts: DefaultFixerOptions = {}): Fixer {
     const depFindings = blocking.filter((f) => f.tool === "trivy" && f.ruleId !== "scan-failed");
     const depResult = depFindings.length ? await applyDepBumps(workspacePath, depFindings) : null;
     const majorBumped = depResult?.majorBumped ?? [];
+    // A bump that was PLANNED (package.json edited) but whose install failed never actually took —
+    // the lockfile trivy re-scans still has the old version, so the same finding recurs next round
+    // looking identical to "nothing was tried." Put the real reason in the journal so a held ticket
+    // (and the next round's fixer prompt, via readJournal) shows install failure, not a mystery loop.
+    if (depResult?.installStderr) {
+      const touched = [...depResult.bumped, ...depResult.majorBumped, ...depResult.overridden].map((b) => `${b.pkg}→${b.to}`).join(", ");
+      recordNote(workspacePath, `dependency bump install FAILED (exit ${depResult.installExit}) for ${touched}: ${depResult.installStderr}`);
+    }
 
     // 2) Imported-but-UNDECLARED packages → deterministic `npm install` (version from the
     //    registry, §11; also re-syncs the lockfile). The build only names ONE missing module
