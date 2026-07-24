@@ -104,6 +104,19 @@ describe("defaultFixer — no-op generation guard", () => {
     expect(sent).toMatch(/as any/i);
   });
 
+  test("every fix prompt tells the model to WRITE a missing local file, not suppress the import (2026-07-23)", async () => {
+    // Found live 2026-07-23: a typecheck finding said `Cannot find module '@/hooks/useSessionTracker'`
+    // — the app's own code importing a file that was never generated. The fixer's response both
+    // times was a suppression directive on the import (rejected by anti-tamper, but a wasted round
+    // each time) instead of writing the missing file. Same discipline as the two tests above: assert
+    // the steering actually reaches the model, not just that it exists somewhere in source.
+    const model = mockModel('<boltArtifact id="f" title="f"><boltAction type="file" filePath="app/page.tsx">x</boltAction></boltArtifact>');
+    await defaultFixer({ modelFactory: () => model })(workspace(), [blockingVerdict()]);
+    const sent = JSON.stringify(model.doStreamCalls[0]!.prompt);
+    expect(sent).toMatch(/cannot find module/i);
+    expect(sent).toMatch(/write that file/i);
+  });
+
   test("every fix prompt declares property tests read-only (EPIC #53)", async () => {
     // The prompt-side half of the property-test moat; the enforcement half is the anti-tamper
     // hash check. Same rationale as the other guardrail tests: assert the text reaches the model.

@@ -158,6 +158,13 @@ export function buildFixPrompt(workspacePath: string, findings: Finding[], major
     // as strict either way.
     "NEVER satisfy a finding by making the flagged thing disappear instead of fixing what's wrong with it. This covers every form: deleting or dropping a table, column, migration, or security file; commenting out or gutting a flagged file; removing the query/data-access that touches a flagged table; deleting a gate's input file; disabling row-level security or removing/weakening an RLS policy (including a policy rewritten to `using (true)`); or adding a suppression directive (@ts-ignore, @ts-expect-error, eslint-disable, biome-ignore, nosemgrep, `as any`, `as unknown as`) on the flagged line. All of these are tampering, not a fix — automatically detected and rejected, wasting the round. If a finding seems to require removing or silencing something, that's a signal you have the wrong approach: add the missing policy/scoping/control/type-correctness instead of making the flagged surface vanish.",
     "",
+    // Found live 2026-07-23: a typecheck finding said `Cannot find module '@/hooks/useSessionTracker'`
+    // — a file the app's OWN code imports but that was never written. The fixer's response both
+    // times was to add a suppression directive on the import instead of writing the file, which the
+    // anti-tamper check above already rejects — but rejecting isn't the same as steering toward the
+    // real fix, and it burned both attempts before escalating on an otherwise-simple gap.
+    "A \"Cannot find module '@/...'\" (or a relative import) error means YOUR OWN code references a project file that doesn't exist yet — it is never a reason to suppress the error or remove the import. Write that file, at the exact path the import expects, with a real working implementation that does what the importing code needs from it.",
+    "",
     "The property tests under tests/properties/ are READ-ONLY. They are generated from the PRD's acceptance criteria and assert behavior the customer was promised — if one fails, the APP is wrong, never the test. Do not edit, delete, skip, or weaken any file under tests/properties/ in any way (any change to one is detected by content hash and rejected as tampering). Fix the application code until the property holds.",
     "",
   ];
